@@ -8,6 +8,9 @@ from loguru import logger
 from config import config
 from stream_tts import tts_manager
 
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 录音参数 ===
