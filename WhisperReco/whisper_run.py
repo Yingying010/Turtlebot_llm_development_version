@@ -12,6 +12,15 @@ from typing import Final
 
 conversation_active: Final[threading.Event] = threading.Event()
 
+import wave
+
+def save_wav_standard(wav_path, audio_int16, samplerate=48000):
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit PCM
+        wf.setframerate(samplerate)
+        wf.writeframes(audio_int16.tobytes())
+
 # === 参数 ===
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
@@ -79,7 +88,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav_path = f.name
-        write(f.name, SAMPLERATE, pcm_i16)
+        save_wav_standard(wav_path, pcm_i16, SAMPLERATE)
         logger.success(f"💾 Saved recording to {wav_path}")
 
     return wav_path
