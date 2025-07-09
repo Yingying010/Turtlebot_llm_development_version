@@ -1,47 +1,48 @@
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-import queue, tempfile, threading, time, warnings, re, string, subprocess
-from typing import Final
+import queue, tempfile, threading, time, re, subprocess
 import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write
 from loguru import logger
 from config import config
 from stream_tts import tts_manager
+from typing import Final
 
 conversation_active: Final[threading.Event] = threading.Event()
 
-# === 录音参数 ===
+# === 参数 ===
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
-CHANNELS = 1
 SILENCE_THRESHOLD = 20
-SILENCE_DURATION = 1.0
-MAX_DURATION = 10
+SILENCE_DURATION  = 1.0
+MAX_DURATION      = 10
 
-# === 工具函数 ===
+# === 清理文本 ===
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
-# === 实时录音直到静音 ===
+# === 录音直到静音结束 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
                          silence_duration=SILENCE_DURATION,
-                         max_duration=MAX_DURATION) -> np.ndarray:
-    q_local = queue.Queue()
-    silence_blocks = int(silence_duration * SAMPLERATE / BLOCKSIZE)
-    max_blocks = int(max_duration * SAMPLERATE / BLOCKSIZE)
+                         max_duration=MAX_DURATION) -> str:
+    q_local         = queue.Queue()
+    silence_blocks  = int(silence_duration * SAMPLERATE / BLOCKSIZE)
+    max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
 
     def cb(indata, frames, time_info, status):
         if status:
             logger.warning(f"⚠️ Audio status: {status}")
         q_local.put(indata.copy())
 
-    logger.info("🎙️ Waiting for speech...")
-    audio_blocks, silence_counter = [], 0
-    is_recording = False
+    logger.info("🎙️ Waiting for speech to start...")
+    audio_blocks    = []
+    silence_counter = 0
+    is_recording    = False
 
-    with sd.InputStream(samplerate=SAMPLERATE, channels=1, blocksize=BLOCKSIZE, callback=cb):
+    with sd.InputStream(samplerate=SAMPLERATE, channels=1,
+                        blocksize=BLOCKSIZE, callback=cb):
         while True:
             try:
                 block = q_local.get(timeout=1)
@@ -51,44 +52,49 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
             volume = np.abs(block).mean() * 1000
             logger.debug(f"📊 Vol: {volume:.1f}")
 
-            if not is_recording and volume > threshold:
-                logger.info("🔴 Voice detected. Start recording...")
-                is_recording = True
-                audio_blocks.append(block)
-                continue
-            elif not is_recording:
+            if not is_recording:
+                if volume > threshold:
+                    logger.info("🔴 Voice detected. Start recording...")
+                    is_recording = True
+                    audio_blocks.append(block)
                 continue
 
             audio_blocks.append(block)
-            silence_counter = silence_counter + 1 if volume < threshold else 0
 
-            if silence_counter >= silence_blocks:
-                logger.info("🔇 Silence detected. Stopping.")
-                break
+            if volume < threshold:
+                silence_counter += 1
+                if silence_counter >= silence_blocks:
+                    logger.info("🔇 Silence detected. Stopping recording.")
+                    break
+            else:
+                silence_counter = 0
+
             if len(audio_blocks) >= max_blocks:
-                logger.info("⏰ Max length reached.")
+                logger.info("⏰ Max recording length reached. Forcing stop.")
                 break
 
+    # === 保存为 .wav 文件 ===
     pcm_f32 = np.concatenate(audio_blocks).flatten()
-    return pcm_f32
-
-# === 用 whisper-cli 转录 numpy 音频数组 ===
-def transcribe_audio_from_numpy(audio: np.ndarray, delay: float = 0.0) -> str:
-    if audio.dtype != np.int16:
-        audio = (audio * 32767).clip(-32768, 32767).astype(np.int16)
+    pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wav_path = f.name
-        write(wav_path, SAMPLERATE, audio)
+        write(f.name, SAMPLERATE, pcm_i16)
+        logger.success(f"💾 Saved recording to {wav_path}")
 
-    cli_path = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
+    return wav_path
+
+# === 调用 whisper-cli 转录 ===
+def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     model_path = os.path.expanduser("~/ggml-tiny.en.bin")
+    cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     os.unlink(wav_path)
 
-    lines = result.stdout.strip().splitlines()
+    output = result.stdout.strip()
+    lines = output.splitlines()
     text_lines = [line for line in lines if line and not line.startswith("###")]
     text = text_lines[-1] if text_lines else ""
 
@@ -97,10 +103,10 @@ def transcribe_audio_from_numpy(audio: np.ndarray, delay: float = 0.0) -> str:
         time.sleep(delay)
     return text
 
-# === 主识别函数 ===
+# === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
-    audio = record_until_silence()
-    return transcribe_audio_from_numpy(audio, delay)
+    wav_path = record_until_silence()
+    return transcribe_audio(wav_path, delay)
 
 # === 后台热词识别线程 ===
 def Whisper_run(callback_func):
