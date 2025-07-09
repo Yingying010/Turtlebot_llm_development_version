@@ -95,7 +95,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
 # === 调用 whisper-cli 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
-    model_path = os.path.expanduser("~/ggml-tiny.en.bin")
+    model_path = Whisper(model_path="/home/ubuntu/whisper.cpp/models/ggml-tiny.en.bin")
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
