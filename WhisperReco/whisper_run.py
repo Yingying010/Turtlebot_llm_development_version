@@ -1,99 +1,55 @@
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-import queue, tempfile, threading, time, warnings, re, string, subprocess
+import threading, time, subprocess, tempfile, re
 from typing import Final
-import numpy as np
-import sounddevice as sd
-from scipy.io.wavfile import write
 from loguru import logger
 from config import config
 from stream_tts import tts_manager
 
-
-
+# === 运行状态控制 ===
 conversation_active: Final[threading.Event] = threading.Event()
 
-# === 录音参数 ===
+# === 参数配置 ===
+DEVICE = "plughw:1,0"                     # 根据你的麦克风设备编号设置
 SAMPLERATE = 48000
-BLOCKSIZE = 1024
-CHANNELS = 1
-SILENCE_THRESHOLD = 20
-SILENCE_DURATION = 1.0
-MAX_DURATION = 10
+DURATION_MAX = 10                         # 最大录音时长（秒）
+SILENCE_THRESHOLD_DB = 5                 # 静音判定阈值（dB）
+SILENCE_DURATION = 1.0                   # 静音持续时长（秒）
+MODEL_PATH = os.path.expanduser("~/ggml-tiny.en.bin")
+CLI_PATH = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
 
-# === 工具函数 ===
+# === 清理文本 ===
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
-# === 录音直到静音结束 ===
-def record_until_silence(threshold=SILENCE_THRESHOLD,
-                         silence_duration=SILENCE_DURATION,
-                         max_duration=MAX_DURATION) -> np.ndarray:
-    q_local = queue.Queue()
-    silence_blocks = int(silence_duration * SAMPLERATE / BLOCKSIZE)
-    max_blocks = int(max_duration * SAMPLERATE / BLOCKSIZE)
+# === 用 arecord 录音直到静音 ===
+def record_until_silence_arecord() -> str:
+    tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+    logger.info("🎙️ Recording until silence (via arecord)...")
 
-    def cb(indata, frames, time_info, status):
-        if status:
-            logger.warning(f"⚠️ Audio status: {status}")
-        q_local.put(indata.copy())
+    cmd = [
+        "sox", "-t", "alsa", DEVICE, "-r", str(SAMPLERATE), "-c", "1", "-b", "16",
+        tmp_wav, "silence", "1", f"{int(SILENCE_DURATION)}", f"{SILENCE_THRESHOLD_DB}%",
+        "1", f"{int(SILENCE_DURATION)}", f"{SILENCE_THRESHOLD_DB}%"
+    ]
 
-    logger.info("🎙️ Waiting for speech...")
-    audio_blocks, silence_counter = [], 0
-    is_recording = False
+    try:
+        subprocess.run(cmd, check=True)
+        logger.info("🔇 Silence detected. Recording stopped.")
+    except subprocess.CalledProcessError:
+        logger.warning("⚠️ sox recording failed or was too short.")
 
-    with sd.InputStream(samplerate=SAMPLERATE, channels=1, blocksize=BLOCKSIZE, callback=cb):
-        while True:
-            try:
-                block = q_local.get(timeout=1)
-            except queue.Empty:
-                continue
+    return tmp_wav
 
-            volume = np.abs(block).mean() * 1000
-            logger.debug(f"📊 Vol: {volume:.1f}")
-
-            if not is_recording and volume > threshold:
-                logger.info("🔴 Voice detected. Start recording...")
-                is_recording = True
-                audio_blocks.append(block)
-                continue
-            elif not is_recording:
-                continue
-
-            audio_blocks.append(block)
-            silence_counter = silence_counter + 1 if volume < threshold else 0
-
-            if silence_counter >= silence_blocks:
-                logger.info("🔇 Silence detected. Stopping.")
-                break
-            if len(audio_blocks) >= max_blocks:
-                logger.info("⏰ Max length reached.")
-                break
-
-    pcm_f32 = np.concatenate(audio_blocks).flatten()
-    pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
-    return pcm_i16
-
-# === 使用 whisper.cpp 的 whisper-cli 来转录语音 ===
-def transcribe_audio(audio: np.ndarray, delay: float = 0.0) -> str:
-    if audio.dtype != np.int16:
-        audio = (audio * 32767).clip(-32768, 32767).astype(np.int16)
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        write(f.name, SAMPLERATE, audio)
-        wav_path = f.name
-
-    model_path = os.path.expanduser("~/ggml-tiny.en.bin")  # 你可修改为自己的路径
-    cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
-
-    cmd = [cli_path, "-m", model_path, "-f", wav_path, "-nt", "-l", "en"]
+# === Whisper CLI 进行转录 ===
+def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
+    cmd = [CLI_PATH, "-m", MODEL_PATH, "-f", wav_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    os.unlink(wav_path)
     output = result.stdout.strip()
+    os.unlink(wav_path)
 
-    # 提取最后转录文本（跳过多余行）
     lines = output.strip().splitlines()
     text_lines = [line for line in lines if line and not line.startswith("###")]
     text = text_lines[-1] if text_lines else ""
@@ -102,11 +58,12 @@ def transcribe_audio(audio: np.ndarray, delay: float = 0.0) -> str:
     if delay: time.sleep(delay)
     return text
 
+# === 主识别函数 ===
 def recognize(delay: float = 0.0) -> str:
-    audio = record_until_silence()
-    return transcribe_audio(audio, delay)
+    wav_path = record_until_silence_arecord()
+    return transcribe_audio(wav_path, delay)
 
-# === 热词后台线程 ===
+# === 后台线程：识别热词 ===
 def Whisper_run(callback_func):
     def loop():
         print("🟢 Whisper hotword loop started")
@@ -115,7 +72,7 @@ def Whisper_run(callback_func):
                 time.sleep(0.2)
                 continue
 
-            raw_text   = recognize(delay=3)
+            raw_text = recognize(delay=2)
             clean_text = _clean(raw_text)
             if not clean_text:
                 continue
@@ -141,7 +98,7 @@ def Whisper_run(callback_func):
 
     threading.Thread(target=loop, daemon=True).start()
 
-# === 单独运行测试 ===
+# === 测试运行 ===
 if __name__ == "__main__":
     logger.info("🎤 Start single recognition test...")
     result = recognize()
