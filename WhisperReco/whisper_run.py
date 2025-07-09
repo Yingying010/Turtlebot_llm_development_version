@@ -95,19 +95,22 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
 # === 调用 whisper-cli 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
-    model_path = Whisper(model_path="/home/ubuntu/whisper.cpp/models/ggml-tiny.en.bin")
+    # 模型路径是文件，而不是 Whisper 类
+    model_path = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    # os.unlink(wav_path)
 
     output = result.stdout.strip()
     lines = output.splitlines()
-    text_lines = [line for line in lines if line and not line.startswith("###")]
+    
+    # 提取转录结果（忽略非转录内容）
+    text_lines = [line for line in lines if line and not line.startswith("###") and "-->" not in line]
     text = text_lines[-1] if text_lines else ""
 
     logger.success(f"📝 Transcribed Text: {text or '<EMPTY>'}")
+    
     if delay:
         time.sleep(delay)
     return text
