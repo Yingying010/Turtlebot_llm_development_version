@@ -8,20 +8,17 @@ from stream_tts import tts_manager
 import threading
 from loguru import logger
 from config import config
+import torch
 
- 
-# ========== 加载模型和 Tokenizer ==========
-model_path = "./lora-tinyllama-turtlebot"  # 你的模型保存路径
+# ✅ 路径仅指向本地
+model_path = "./lora-tinyllama-turtlebot"
 device = "cuda" if torch.cuda.is_available() else "cpu"
- 
-from peft import PeftModel
 
-BASE_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-LORA_DIR   = "./lora-tinyllama-turtlebot"
+# ✅ tokenizer 也从本地路径加载（你训练时保存过）
+tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32).to(device)
-model = PeftModel.from_pretrained(model, LORA_DIR)
+# ✅ 模型不走 PEFT，直接加载微调后的模型（合并好了）
+model = AutoModelForCausalLM.from_pretrained(model_path).to(device)
 model.eval()
  
 # ========== 构造 Prompt ==========
