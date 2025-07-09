@@ -91,7 +91,7 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    os.unlink(wav_path)
+    # os.unlink(wav_path)
 
     output = result.stdout.strip()
     lines = output.splitlines()
