@@ -106,12 +106,16 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
         line.split("]", 1)[-1].strip(" -\t") for line in lines
         if "-->" in line and "]" in line
     ]
-    text = " ".join(text_lines).strip()
+    raw_text = " ".join(text_lines).strip()
 
-    logger.success(f"📝 Transcribed Text: {text or '<EMPTY>'}")
+    # === 删除标点符号（小写、去空格）===
+    clean_text = _clean(raw_text)
+
+    logger.success(f"📝 Transcribed Text: {clean_text or '<EMPTY>'}")
     if delay:
         time.sleep(delay)
-    return text
+    return clean_text
+
 
 # === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
