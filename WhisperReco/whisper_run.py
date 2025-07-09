@@ -1,6 +1,8 @@
-import os, queue, tempfile, threading, time, warnings, re, string, subprocess
-from typing import Final
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+import queue, tempfile, threading, time, warnings, re, string, subprocess
+from typing import Final
 import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write
@@ -8,8 +10,7 @@ from loguru import logger
 from config import config
 from stream_tts import tts_manager
 
-import sys, os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 
 conversation_active: Final[threading.Event] = threading.Event()
 
