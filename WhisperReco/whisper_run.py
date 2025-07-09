@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-import queue, tempfile, threading, time, re, subprocess
+import queue, threading, time, re, subprocess
 import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write
@@ -9,17 +9,9 @@ from loguru import logger
 from config import config
 from stream_tts import tts_manager
 from typing import Final
-
-conversation_active: Final[threading.Event] = threading.Event()
-
 import wave
 
-def save_wav_standard(wav_path, audio_int16, samplerate=48000):
-    with wave.open(wav_path, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)  # 16-bit PCM
-        wf.setframerate(samplerate)
-        wf.writeframes(audio_int16.tobytes())
+conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数 ===
 SAMPLERATE = 48000
@@ -27,10 +19,19 @@ BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 20
 SILENCE_DURATION  = 1.0
 MAX_DURATION      = 10
+FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
 # === 清理文本 ===
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
+
+# === 标准写入 wav 文件 ===
+def save_wav_standard(wav_path, audio_int16, samplerate=48000):
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit PCM
+        wf.setframerate(samplerate)
+        wf.writeframes(audio_int16.tobytes())
 
 # === 录音直到静音结束 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
@@ -82,25 +83,21 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 logger.info("⏰ Max recording length reached. Forcing stop.")
                 break
 
-    # === 保存为 .wav 文件 ===
+    # === 保存为固定路径 wav 文件 ===
     pcm_f32 = np.concatenate(audio_blocks).flatten()
     pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        wav_path = f.name
-        save_wav_standard(wav_path, pcm_i16, SAMPLERATE)
-        logger.success(f"💾 Saved recording to {wav_path}")
-
-    return wav_path
+    save_wav_standard(FIXED_WAV_PATH, pcm_i16, SAMPLERATE)
+    logger.success(f"💾 Saved recording to {FIXED_WAV_PATH}")
+    return FIXED_WAV_PATH
 
 # === 调用 whisper-cli 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     model_path = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
-    cli_path = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
+    cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-
     output = result.stdout.strip()
 
     # 提取识别文本行：形如 "[00:00:00.000 --> 00:00:00.840]   - Hello, hello."
