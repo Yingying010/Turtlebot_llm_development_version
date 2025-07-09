@@ -14,8 +14,15 @@ from config import config
 model_path = "./lora-tinyllama-turtlebot"  # 你的模型保存路径
 device = "cuda" if torch.cuda.is_available() else "cpu"
  
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path).to(device)
+from peft import PeftModel
+
+BASE_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+LORA_DIR   = "./lora-tinyllama-turtlebot"
+
+tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32).to(device)
+model = PeftModel.from_pretrained(model, LORA_DIR)
+model.eval()
  
 # ========== 构造 Prompt ==========
 SYSTEM_PROMPT = dedent("""
