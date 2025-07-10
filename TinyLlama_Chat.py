@@ -3,6 +3,7 @@ import torch
 import re
 import ast
 import json
+import time
 from textwrap import dedent
 from stream_tts import tts_manager
 import threading
@@ -11,8 +12,13 @@ from config import config
 
  
 # ========== 加载模型和 Tokenizer ==========
+print("⏳ Loading tokenizer and model...")
+load_start = time.time()
 model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+load_end = time.time()
+print(f"✅ Model loaded in {load_end - load_start:.2f} seconds")
+
 
 # ====== Prompt 构造函数 ======
 def build_prompt(user_text: str) -> str:
@@ -26,6 +32,8 @@ def build_prompt(user_text: str) -> str:
 # ========== 生成函数 ==========
 def generate_response(user_input, max_new_tokens=256):
     prompt = build_prompt(user_input)
+    print("\n🌀 Generating response...")
+    gen_start = time.time()
     inputs = tokenizer(prompt, return_tensors="pt")  # ✅ 用 prompt，而不是 user_input
 
     with torch.no_grad():
@@ -37,6 +45,8 @@ def generate_response(user_input, max_new_tokens=256):
             top_p=0.9,
             pad_token_id=tokenizer.eos_token_id
         )
+    gen_end = time.time()
+    print(f"✅ Generation completed in {gen_end - gen_start:.2f} seconds")
 
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
     return decoded[len(prompt):].strip()
@@ -46,12 +56,12 @@ def run(user_input):
     logger.info(f"💡 Current Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     logger.info(f"🧠 LLM Input: {user_input}")
     output = generate_response(user_input)
-    print("\n🧠 原始模型输出:\n", output)
+    # print("\n🧠 原始模型输出:\n", output)
     if "Human says:" in output:
         response = output.split("Human says:")[0].strip().strip('"')
     else:
         response = output.strip()
-    print("\n🎉 最终输出:\n", response)
+    print("\n🎉 Response:\n", response)
 
     return response
 
@@ -64,7 +74,7 @@ def execute_commands(result):
  
 # ========== 主程序 ==========
 if __name__ == "__main__":
-    user_input = "I love you"
+    user_input = "What is 1 plus 1?"
     response = run(user_input)
 
 

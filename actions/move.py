@@ -5,6 +5,7 @@ from geometry_msgs.msg import Twist
 import time
 
 def move_linear(robot_id, direction, value, unit):
+    print(f"🚗 {robot_id} moving {direction} for {value} {unit}")
     node = rclpy.create_node(f'{robot_id}_mover')
     publisher = node.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
 
