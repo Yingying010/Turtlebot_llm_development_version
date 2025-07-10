@@ -11,6 +11,8 @@ imitation_threads = {}
 imitation_flags = {}
 
 def imitate_robot(robot_id, target_robot_id):
+    print(f"🎭 {robot_id} imitating {target_robot_id}")
+
     """
     启动 imitation 线程，让 robot_id 模仿 target_robot_id 的速度指令
     """

@@ -4,6 +4,7 @@ from textwrap import dedent
 from stream_tts import tts_manager
 from loguru import logger
 from config import config
+import control_turtlebot
 
 # ===== 模型路径与设备 =====
 model_path = "./lora-tinyllama-turtlebot"
@@ -129,7 +130,7 @@ def run(user_input):
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     logger.info(f"🧠 LLM Input: {user_input}")
     response = generate_response(user_input)
-    print("\n🧠 Raw LLM Output:\n", response)
+    # print("\n🧠 Raw LLM Output:\n", response)
     commands = extract_json(response)
     if commands:
         print("\n✅ Parsed JSON:\n", commands)
@@ -140,4 +141,8 @@ def run(user_input):
 # ===== 测试入口 =====
 if __name__ == "__main__":
     user_input = "let turtlebot1 forward 2 meters and turn left 45 degrees"
-    run(user_input)
+    command = run(user_input)
+    if command:
+        control_turtlebot.run(command)
+        tts_manager.say("Command executed.")
+        logger.info("✅ Command(s) executed successfully.")
