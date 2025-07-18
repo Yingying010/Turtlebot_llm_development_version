@@ -13,6 +13,7 @@ from loguru import logger
 import if_exit, if_time
 from loguru import logger
 from WhisperReco.whisper_run import conversation_active
+import play
 
 
 '''
@@ -153,7 +154,6 @@ def run_conversation():
 
 # ✅ 启动欢迎语
 def startchat():
-    os.system("afplay beep.wav")  # 或者播放提示语音
     logger.info("📢 Starting chat system")
     tts_manager.say("Welcome! You can start speaking after the beep.")
 
@@ -162,7 +162,7 @@ def startchat():
 # ✅ 启动入口
 if __name__ == "__main__":
     startchat()
-    time.sleep(4)  # ✅ 给用户准备说话时间，避免误触
-    # Vosk_run(hwcallback)    # 热词检测循环（另起线程）
+    time.sleep(4)  # ✅ 给用户准备说话时间，避免误触程）
+    play.play_beep_aplay("soundRepo/beep.wav")
     Whisper_run(hwcallback)
     dialog_manager()        # 主对话处理循环
