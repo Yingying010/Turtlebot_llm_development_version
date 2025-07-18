@@ -14,10 +14,10 @@ import wave
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数 ===
-SAMPLERATE = 16000            # ✅ 推荐采样率
-BLOCKSIZE = 512
+SAMPLERATE = 48000
+BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 10.0
-SILENCE_DURATION  = 1.0
+SILENCE_DURATION  = 2.0
 MAX_DURATION      = 10
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
@@ -26,7 +26,7 @@ def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
 # === 标准写入 wav 文件 ===
-def save_wav_standard(wav_path, audio_int16, samplerate=SAMPLERATE):
+def save_wav_standard(wav_path, audio_int16, samplerate=48000):
     with wave.open(wav_path, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)  # 16-bit PCM
@@ -52,8 +52,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     is_recording    = False
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
-                        blocksize=BLOCKSIZE, callback=cb,
-                        device=1):   # ✅ 明确使用 USB 麦克风（plughw:1,0）
+                        blocksize=BLOCKSIZE, callback=cb):
         while True:
             try:
                 block = q_local.get(timeout=1)
@@ -96,12 +95,12 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     model_path = os.path.expanduser("~/whisper.cpp/models/ggml-base.en.bin")
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
-    cmd = [cli_path, "-m", model_path, "-f", wav_path, "-l", "en", "--print-special"]
+    cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stdout.strip()
 
-    # 提取识别文本行
+    # 提取识别文本行：形如 "[00:00:00.000 --> 00:00:00.840]   - Hello, hello."
     lines = output.splitlines()
     text_lines = [
         line.split("]", 1)[-1].strip(" -\t") for line in lines
@@ -109,11 +108,14 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     ]
     raw_text = " ".join(text_lines).strip()
 
+    # === 删除标点符号（小写、去空格）===
     clean_text = _clean(raw_text)
+
     logger.success(f"📝 Transcribed Text: {clean_text or '<EMPTY>'}")
     if delay:
         time.sleep(delay)
     return clean_text
+
 
 # === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
@@ -146,10 +148,7 @@ def Whisper_run(callback_func):
                 logger.info("💬 Switched to CHAT mode.")
                 tts_manager.say("Sure, I'm now in chat mode.")
                 conversation_active.set()
-                try:
-                    callback_func()
-                except Exception as e:
-                    logger.error(f"❌ Callback execution error: {e}")
+                callback_func()
 
             elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye"}:
                 tts_manager.say("Goodbye!")
