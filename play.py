@@ -33,3 +33,6 @@ def play(filename, volume=config.get("general_volume"), samplerate=16000):
     except Exception as e:
         logger.warning(f"Error occurred while playing {filename}: {e}")
     flag=0
+
+if __name__ == "__main__":
+    play("soundRepo/beep.wav", volume=1.0, samplerate=48000)
