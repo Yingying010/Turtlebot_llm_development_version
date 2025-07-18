@@ -13,7 +13,7 @@ from loguru import logger
 import if_exit, if_time
 from loguru import logger
 from WhisperReco.whisper_run import conversation_active
-import play
+from play import play_beep_aplay
 
 
 '''
@@ -163,6 +163,6 @@ def startchat():
 if __name__ == "__main__":
     startchat()
     time.sleep(4)  # ✅ 给用户准备说话时间，避免误触程）
-    play.play_beep_aplay("soundRepo/beep.wav")
+    play_beep_aplay("soundRepo/beep.wav")
     Whisper_run(hwcallback)
     dialog_manager()        # 主对话处理循环
