@@ -140,8 +140,8 @@ def run_conversation():
     else:                               # Control 模式
         if response:
             control_turtlebot.run(response)
-            tts_manager.say("Command executed.")
             logger.info("✅ Command(s) executed successfully.")
+            tts_manager.say("Command executed.")
         else:
             logger.warning("⚠️ No commands received from LLM.")
             tts_manager.say("Sorry, I couldn't understand the instruction.")
