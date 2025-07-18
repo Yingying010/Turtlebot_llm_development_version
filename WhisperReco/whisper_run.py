@@ -36,10 +36,16 @@ def save_wav_standard(wav_path, audio_int16, samplerate=48000):
 # === 录音直到静音结束 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
                          silence_duration=SILENCE_DURATION,
-                         max_duration=MAX_DURATION) -> str | None:
+                         max_duration=MAX_DURATION) -> str:
     q_local         = queue.Queue()
     silence_blocks  = int(silence_duration * SAMPLERATE / BLOCKSIZE)
     max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
+
+    pre_speech_buffer = []  # 保存最近的几个块
+    pre_speech_maxlen = 3   # ← 前两个block（可以调整成更多）
+    audio_blocks      = []
+    silence_counter   = 0
+    is_recording      = False
 
     def cb(indata, frames, time_info, status):
         if status:
@@ -47,12 +53,6 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
         q_local.put(indata.copy())
 
     logger.info("🎙️ Waiting for speech to start...")
-
-    audio_blocks    = []
-    volume_list     = []
-    silence_counter = 0
-    is_recording    = False
-    has_valid_speech = False  # ✅ 是否出现过 >10 的有效说话声
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
                         blocksize=BLOCKSIZE, callback=cb):
@@ -65,20 +65,20 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
             volume = np.abs(block).mean() * 1000
             logger.debug(f"📊 Vol: {volume:.1f}")
 
+            # 始终维护前2个block的缓存
+            pre_speech_buffer.append(block)
+            if len(pre_speech_buffer) > pre_speech_maxlen:
+                pre_speech_buffer.pop(0)
+
             if not is_recording:
-                if volume > 6.5:  # 低阈值开始录音
+                if volume > threshold:
                     logger.info("🔴 Voice detected. Start recording...")
                     is_recording = True
+                    audio_blocks.extend(pre_speech_buffer)  # 加上前面的缓存
                     audio_blocks.append(block)
-                    volume_list.append(volume)
-                    if volume > 10.0:
-                        has_valid_speech = True
                 continue
 
             audio_blocks.append(block)
-            volume_list.append(volume)
-            if volume > 10.0:
-                has_valid_speech = True  # ✅ 记录说话声出现
 
             if volume < threshold:
                 silence_counter += 1
@@ -92,23 +92,12 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 logger.info("⏰ Max recording length reached. Forcing stop.")
                 break
 
-    if not has_valid_speech:
-        logger.warning("⚠️ No valid speech (vol > 10.0) detected. Ignoring recording.")
-        return None  # ❌ 不保存
-
-    # === 从第一个 vol > 10 的位置切割 ===
-    start_idx = next((i for i, v in enumerate(volume_list) if v > 10.0), 0)
-    trimmed_blocks = audio_blocks[start_idx:]
-    if not trimmed_blocks:
-        logger.warning("⚠️ No audio above 10.0 dB, using full recording.")
-        trimmed_blocks = audio_blocks
-
-    # 保存为 WAV 文件
-    pcm_f32 = np.concatenate(trimmed_blocks).flatten()
+    # === 保存为固定路径 wav 文件 ===
+    pcm_f32 = np.concatenate(audio_blocks).flatten()
     pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
 
     save_wav_standard(FIXED_WAV_PATH, pcm_i16, SAMPLERATE)
-    logger.success(f"💾 Saved trimmed recording to {FIXED_WAV_PATH}")
+    logger.success(f"💾 Saved recording to {FIXED_WAV_PATH}")
     return FIXED_WAV_PATH
 
 # === 调用 whisper-cli 转录 ===
@@ -140,10 +129,7 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
 # === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
     wav_path = record_until_silence()
-    if wav_path is None:
-        return ""  # 或者 return "<blank>"
     return transcribe_audio(wav_path, delay)
-
 
 # === 后台热词识别线程 ===
 def Whisper_run(callback_func):
