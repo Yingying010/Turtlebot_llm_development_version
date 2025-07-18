@@ -14,10 +14,10 @@ import wave
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数 ===
-SAMPLERATE = 48000
-BLOCKSIZE = 1024
-SILENCE_THRESHOLD = 11.0
-SILENCE_DURATION  = 2.0
+SAMPLERATE = 16000
+BLOCKSIZE = 512
+SILENCE_THRESHOLD = 10.0
+SILENCE_DURATION  = 1.0
 MAX_DURATION      = 10
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
@@ -93,7 +93,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
 # === 调用 whisper-cli 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
-    model_path = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
+    model_path = os.path.expanduser("~/whisper.cpp/models/ggml-base.en.bin")
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
