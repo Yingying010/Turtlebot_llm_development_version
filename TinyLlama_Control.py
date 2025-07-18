@@ -5,125 +5,78 @@ from stream_tts import tts_manager
 from loguru import logger
 from config import config
 import control_turtlebot
+from llama_cpp import Llama
 
-# ===== 模型路径与设备 =====
-model_path = "./lora-tinyllama-turtlebot"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# ===== 加载模型与 Tokenizer =====
 print("⏳ Loading tokenizer and model...")
-load_start = time.time()
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path).to(device)
-model.eval()
-load_end = time.time()
-print(f"✅ Model loaded in {load_end - load_start:.2f} seconds")
+start = time.time()
+model_path = "models/Qwen3_single_move_turn_q4_k_m.gguf"  # 你量化后的模型路径
+llm = Llama(
+    model_path=model_path,
+    n_ctx=2048,
+    n_threads=4,  # 根据你 CPU 调整
+    verbose=True,
+)
+print(f"✅ Model loaded in {time.time() - start:.2f} seconds")
 
 # ===== Prompt 构建模板 =====
-SYSTEM_PROMPT = dedent("""
-    You are **TurtleBotCommandParser**, an expert JSON generator for multi-robot control.
-    ■ Output **only** a JSON object that conforms to <SCHEMA>.
-    ■ Before generating JSON, map any alias in <ALIASES> to its canonical robot_id.
-    ■ Do NOT output any text other than the JSON.
-    <ALIASES>
-      "robot1"  ->  "turtlebot1"
-      "robot2"  ->  "turtlebot2"
-      "turtlebot one" -> "turtlebot1"
-      "turtlebot two" -> "turtlebot2"
-    </ALIASES>
-    <SCHEMA>
-    {
-      "$root": {
-        "<robot_id>": [
-          {
-            "action"   : "move | turn | navigation_to",
-            "direction": "forward | backward | left | right",
-            "value"    : <number>,
-            "unit"     : "meters | seconds | degrees",
-            "target"   : "self" | {"x": <number>, "y": <number>}
-          }
-        ]
-      }
-    }
-    </SCHEMA>
-    Think step-by-step *silently*, then output the JSON only.
-""").strip()
+system_prompt = dedent('''
+You are a robot command parser. Given a natural language instruction, output ONLY a valid JSON object that follows the format below.
 
-EXAMPLES = [
+JSON Format:
+{
+  "<robot_name>": [
     {
-        "instruction": "let turtlebot1 forward 2 meters and turn left 45 degrees, and let turtlebot2 backward 10 meters and turn right 10 degrees.",
-        "response": {
-            "turtlebot1": [
-                {"action": "move", "direction": "forward", "value": 2, "unit": "meters"},
-                {"action": "turn", "direction": "left", "value": 45, "unit": "degrees", "target": "self"}
-            ],
-            "turtlebot2": [
-                {"action": "move", "direction": "backward", "value": 10, "unit": "meters"},
-                {"action": "turn", "direction": "right", "value": 10, "unit": "degrees", "target": "self"}
-            ]
-        }
-    },
-    {
-        "instruction": "robot1, go find robot2",
-        "response": {
-            "turtlebot1": [
-                {"action": "navigate_to", "target": "turtlebot2"}
-            ]
-        }
+      "action": "move" | "turn",
+      "direction": "left" | "right" | "forward" | "backward",
+      "value": <number>,
+      "unit": "seconds" | "meters" | "degrees"
     }
-]
+  ]
+}
+
+Rules:
+ - Do NOT output any explanation or reasoning.
+ - You MUST include the robot name as the top-level key.
+ - Only output a valid object followed by the format.
+''').strip()
 
 def build_prompt(instruction: str) -> str:
-    example_blocks = "\n\n".join([
-        f"<EXAMPLE>\n### Instruction:\n{ex['instruction']}\n### Response:\n{json.dumps(ex['response'], indent=2, ensure_ascii=False)}\n</EXAMPLE>"
-        for ex in EXAMPLES
-    ])
-    user_block = f"<TASK>\n### Instruction:\n{instruction}\n### Response:"
-    return f"{SYSTEM_PROMPT}\n\n{example_blocks}\n\n{user_block}"
+    return """<|system|>\n{system_prompt}\n<|user|>\n{instruction}\n<|assistant|>\n"""
 
 # ===== 生成 JSON =====
 def generate_response(user_input, max_new_tokens=256):
-    prompt = build_prompt(user_input)
-    print("\n🌀 Generating response...")
-    gen_start = time.time()
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    print("🌀 Generating response...")
+    start = time.time()
+    output = llm(prompt, max_tokens=256, stop=["<|user|>", "<|system|>"])
+    end = time.time()
 
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,  # ⚠️ 改为 deterministic，避免慢
-            pad_token_id=tokenizer.eos_token_id
-        )
-    gen_end = time.time()
-    print(f"✅ Generation completed in {gen_end - gen_start:.2f} seconds")
+    response = output["choices"][0]["text"].strip()
+    print("=== Raw Response ===\n", response)
 
-    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return decoded[len(prompt):].strip()
+    result = extract_json(response)
+    print("\n=================== JSON Result ===================")
+    print(result)
+    print(f"✅ Generation completed in {end - start:.2f} seconds")
+    return result
 
-# ===== 提取 JSON =====
+# === JSON 提取 ===
 def extract_json(text: str):
-    match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except Exception:
-            pass
     start = text.find('{')
     while start != -1:
         stack = 0
-        for idx in range(start, len(text)):
-            if text[idx] == '{':
+        for i in range(start, len(text)):
+            if text[i] == '{':
                 stack += 1
-            elif text[idx] == '}':
+            elif text[i] == '}':
                 stack -= 1
-                if stack == 0:
-                    try:
-                        return json.loads(text[start:idx+1])
-                    except Exception:
-                        break
+            if stack == 0:
+                try:
+                    return json.loads(text[start:i+1])
+                except:
+                    break
         start = text.find('{', start + 1)
     return None
+
 
 # ===== 主执行函数 =====
 def run(user_input):
