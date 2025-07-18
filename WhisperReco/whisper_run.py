@@ -17,7 +17,7 @@ conversation_active: Final[threading.Event] = threading.Event()
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 10.0
-SILENCE_DURATION  = 2.0
+SILENCE_DURATION  = 1.0
 MAX_DURATION      = 10
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
