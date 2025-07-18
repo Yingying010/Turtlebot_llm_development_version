@@ -89,6 +89,7 @@ def run(user_input: str):
         print("\n✅ Parsed JSON:\n", commands)
         control_turtlebot.run(commands)
         tts_manager.say("Command executed.")
+        time.sleep(2)
         logger.info("✅ Command(s) executed successfully.")
     else:
         print("\n❌ Failed to extract valid JSON.")
