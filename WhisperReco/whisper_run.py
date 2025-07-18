@@ -14,8 +14,8 @@ import wave
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数 ===
-SAMPLERATE = 16000
-BLOCKSIZE = 512
+SAMPLERATE = 48000
+BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 10.0
 SILENCE_DURATION  = 1.0
 MAX_DURATION      = 10
@@ -97,11 +97,10 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path, "-l", "en", "--print-special"]
 
-
     result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stdout.strip()
 
-    # 提取识别文本行：形如 "[00:00:00.000 --> 00:00:00.840]   - Hello, hello."
+    # 提取识别文本行
     lines = output.splitlines()
     text_lines = [
         line.split("]", 1)[-1].strip(" -\t") for line in lines
@@ -109,14 +108,11 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     ]
     raw_text = " ".join(text_lines).strip()
 
-    # === 删除标点符号（小写、去空格）===
     clean_text = _clean(raw_text)
-
     logger.success(f"📝 Transcribed Text: {clean_text or '<EMPTY>'}")
     if delay:
         time.sleep(delay)
     return clean_text
-
 
 # === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
