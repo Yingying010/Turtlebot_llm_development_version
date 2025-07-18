@@ -14,8 +14,8 @@ import wave
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数 ===
-SAMPLERATE = 48000
-BLOCKSIZE = 1024
+SAMPLERATE = 16000            # ✅ 推荐采样率
+BLOCKSIZE = 512
 SILENCE_THRESHOLD = 10.0
 SILENCE_DURATION  = 1.0
 MAX_DURATION      = 10
@@ -52,7 +52,8 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     is_recording    = False
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
-                        blocksize=BLOCKSIZE, callback=cb):
+                        blocksize=BLOCKSIZE, callback=cb,
+                        device=1):   # ✅ 明确使用 USB 麦克风（plughw:1,0）
         while True:
             try:
                 block = q_local.get(timeout=1)
