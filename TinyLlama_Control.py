@@ -47,7 +47,7 @@ def build_prompt(instruction: str) -> str:
 def generate_response(user_input, max_new_tokens=256):
     print("🌀 Generating response...")
     start = time.time()
-    output = llm(prompt, max_tokens=256, stop=["<|user|>", "<|system|>"])
+    output = llm(system_prompt, max_tokens=256, stop=["<|user|>", "<|system|>"])
     end = time.time()
 
     response = output["choices"][0]["text"].strip()
