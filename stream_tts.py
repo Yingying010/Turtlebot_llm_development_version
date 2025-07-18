@@ -27,9 +27,14 @@ class TTSManager:
         def _speak():
             try:
                 logger.info(f"🔊 Speaking: {text}")
-                cmd = self._build_command(text)
                 with self._lock:
-                    self._current_process = subprocess.Popen(cmd)
+                    wav_path = "/tmp/tts_output.wav"
+                    subprocess.run([
+                        "espeak-ng", "-v", self.voice,
+                        "-s", str(self.speed), "-p", str(self.pitch),
+                        text, "-w", wav_path
+                    ])
+                    self._current_process = subprocess.Popen(["aplay", "-D", "plughw:2,0", wav_path])
                     self._current_process.wait()
             except Exception as e:
                 logger.error(f"TTS error: {e}")
@@ -45,3 +50,4 @@ class TTSManager:
 
 # ✅ 创建全局单例
 tts_manager = TTSManager()
+
