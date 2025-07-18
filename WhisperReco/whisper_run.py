@@ -42,7 +42,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
 
     pre_speech_buffer = []  # 保存最近的几个块
-    pre_speech_maxlen = 3   # ← 前两个block（可以调整成更多）
+    pre_speech_maxlen = 24  # ← 前两个block（可以调整成更多）
     audio_blocks      = []
     silence_counter   = 0
     is_recording      = False
