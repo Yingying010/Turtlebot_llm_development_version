@@ -26,7 +26,7 @@ def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
 # === 标准写入 wav 文件 ===
-def save_wav_standard(wav_path, audio_int16, samplerate=48000):
+def save_wav_standard(wav_path, audio_int16, samplerate=SAMPLERATE):
     with wave.open(wav_path, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)  # 16-bit PCM
@@ -95,7 +95,8 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     model_path = os.path.expanduser("~/whisper.cpp/models/ggml-base.en.bin")
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
-    cmd = [cli_path, "-m", model_path, "-f", wav_path]
+    cmd = [cli_path, "-m", model_path, "-f", wav_path, "-l", "en", "--print-special"]
+
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stdout.strip()
@@ -148,7 +149,10 @@ def Whisper_run(callback_func):
                 logger.info("💬 Switched to CHAT mode.")
                 tts_manager.say("Sure, I'm now in chat mode.")
                 conversation_active.set()
-                callback_func()
+                try:
+                    callback_func()
+                except Exception as e:
+                    logger.error(f"❌ Callback execution error: {e}")
 
             elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye"}:
                 tts_manager.say("Goodbye!")
