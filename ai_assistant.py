@@ -164,5 +164,6 @@ if __name__ == "__main__":
     startchat()
     time.sleep(4)  # ✅ 给用户准备说话时间，避免误触程）
     play_beep_aplay("soundRepo/beep.wav")
+    time.sleep(1.5)
     Whisper_run(hwcallback)
     dialog_manager()        # 主对话处理循环
