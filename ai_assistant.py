@@ -79,7 +79,7 @@ def run_conversation():
     """
     logger.info("🎤 Recording...")
     tts_manager.say("I'm listening.")
-    time.sleep(3)
+    tts_manager.wait_until_done()
 
     # -------- 录音 + 识别 --------------------------------------------------
     try:
@@ -156,13 +156,13 @@ def run_conversation():
 def startchat():
     logger.info("📢 Starting chat system")
     tts_manager.say("Welcome! You can start speaking after the beep.")
+    tts_manager.wait_until_done()
 
 
 
 # ✅ 启动入口
 if __name__ == "__main__":
     startchat()
-    time.sleep(4)  # ✅ 给用户准备说话时间，避免误触程）
     play_beep_aplay("soundRepo/beep.wav")
     time.sleep(1.5)
     Whisper_run(hwcallback)
