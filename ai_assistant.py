@@ -10,7 +10,7 @@ import control_turtlebot
 import time
 from stream_tts import tts_manager
 from loguru import logger
-import if_exit, if_time
+# import if_exit, if_time
 from loguru import logger
 from WhisperReco.whisper_run import conversation_active
 from play import play_beep_aplay
@@ -97,22 +97,22 @@ def run_conversation():
 
     logger.info(f"🧑 User said: {user_text}")
 
-    # -------- 本地退出 / 定时等指令 ---------------------------------------
-    if if_exit.ifend(user_text):
-        tts_manager.say("Okay, ending the conversation.")
-        conversation_active.clear()
-        return
+    # # -------- 本地退出 / 定时等指令 ---------------------------------------
+    # if if_exit.ifend(user_text):
+    #     tts_manager.say("Okay, ending the conversation.")
+    #     conversation_active.clear()
+    #     return
 
-    if if_exit.ifexit(user_text):
-        tts_manager.say("Goodbye.")
-        logger.info("🔚 Exit triggered by user.")
-        conversation_active.clear()
-        exit(0)
+    # if if_exit.ifexit(user_text):
+    #     tts_manager.say("Goodbye.")
+    #     logger.info("🔚 Exit triggered by user.")
+    #     conversation_active.clear()
+    #     exit(0)
 
-    if if_time.timedetect(user_text):
-        tts_manager.say("Timer has been set.")
-        conversation_active.clear()
-        return
+    # if if_time.timedetect(user_text):
+    #     tts_manager.say("Timer has been set.")
+    #     conversation_active.clear()
+    #     return
 
     # -------- 调用 LLM (Chat / Control) ----------------------------------
     is_chat = config.get("chat_or_instruct")
