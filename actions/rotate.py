@@ -6,7 +6,6 @@ from geometry_msgs.msg import Twist
 import math
 
 def rotate(robot_id, direction, value, unit, target="self"):
-    print(f"🔁 {robot_id} turning {direction} {value}{unit} around {target}")
     node = Node(f"{robot_id}_rotator")
     pub = node.create_publisher(Twist, f"/{robot_id}/cmd_vel", 10)
 

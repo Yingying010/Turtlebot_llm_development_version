@@ -101,7 +101,9 @@ if __name__ == "__main__":
         control_turtlebot.run(response)
         logger.info("✅ Command(s) executed successfully.")
         tts_manager.say("Command executed.")
+        tts_manager.wait_until_done()
     else:
         logger.warning("⚠️ No commands received from LLM.")
         tts_manager.say("Sorry, I couldn't understand the instruction.")
+        tts_manager.wait_until_done()
 
