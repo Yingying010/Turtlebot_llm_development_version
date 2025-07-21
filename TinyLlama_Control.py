@@ -48,7 +48,7 @@ def extract_json(text: str):
 
 
 #============== 加载模型 =================
-local_path = Path("/Users/heartfillialucy/UCL/IOT Project/ai-assistant_macos/models/Qwen3_base_instruction")
+local_path = Path("/models/Qwen3_base_instructions")
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 print("✅ [1] 开始加载 tokenizer")
