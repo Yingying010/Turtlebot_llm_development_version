@@ -48,7 +48,7 @@ def extract_json(text: str):
 
 
 #============== 加载模型 =================
-local_path = Path("/models/Qwen3_base_instructions")
+local_path = Path("/models/Qwen3_base_instruction_q8")
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 print("✅ [1] 开始加载 tokenizer")
