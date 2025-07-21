@@ -54,7 +54,7 @@ local_path = Path("/models/Qwen3_base_instruction_q8")
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 
-model_path = "models/Qwen3_base_instruction_q8/Qwen3_base_instruction_q8.gguf"  # 你量化后的模型路径
+model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_base_instruction_q8"  # 你量化后的模型路径
 llm = Llama(
     model_path=model_path,
     n_ctx=2048,
