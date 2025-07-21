@@ -108,6 +108,6 @@ def execute_robot_commands(robot_id: str, commands: List[Dict]):
 if __name__ == "__main__":
     # 你的 JSON 中的某个 response
     # example1 = {"turtlebot1": [{"action": "move", "direction": "forward", "value": 2, "unit": "meters"}, {"action": "turn", "direction": "left", "target": "self", "value": 45, "unit": "degrees"}], "turtlebot2": [{"action": "move", "direction": "backward", "value": 1, "unit": "meters"}, {"action": "turn", "direction": "right", "target": "self", "value": 90, "unit": "degrees"}]}
-    example2 =  {'turtlebot1': [{'action': 'move', 'direction': 'forward', 'value': 3, 'unit': 'seconds'}]}
+    example2 =  {'robot1': [{'action': 'move', 'direction': 'forward', 'value': 3, 'unit': 'seconds'}]}
     # example3 =  {'turtlebot1':[{"action": "imitate","target": "turtlebot2"}]}
     run(example2)
