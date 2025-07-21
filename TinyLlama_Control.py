@@ -14,6 +14,8 @@ from stream_tts import tts_manager
 from loguru import logger
 from config import config
 import control_turtlebot
+from llama_cpp import Llama
+
 
 #============== 工具函数 =================
 def extract_json(text: str):
@@ -51,19 +53,16 @@ def extract_json(text: str):
 local_path = Path("/models/Qwen3_base_instruction_q8")
 print("⏳ Loading tokenizer and model...")
 start = time.time()
-print("✅ [1] 开始加载 tokenizer")
-tokenizer = AutoTokenizer.from_pretrained(str(local_path), trust_remote_code=True, local_files_only=True)
-print("✅ [2] tokenizer 加载完成")
 
-print("✅ [3] 开始加载模型结构")
-model = AutoModelForCausalLM.from_pretrained(str(local_path), trust_remote_code=True, local_files_only=True)
-print("✅ [4] 模型结构加载完成")
+model_path = "models/Qwen3_base_instruction_q8/Qwen3_base_instruction_q8.gguf"  # 你量化后的模型路径
+llm = Llama(
+    model_path=model_path,
+    n_ctx=2048,
+    n_threads=4,  # 根据你 CPU 调整
+    verbose=True,
+)
 
-print("✅ [5] 开始加载到设备")
-device = "cpu"
-model = model.to(device).eval()
-print(f"🎉 [6] 所有加载完成 Model loaded in {time.time() - start:.2f} seconds")
-
+print(f"✅ Model loaded in {time.time() - start:.2f} seconds")
 
 # ===== Prompt 模板 =====
 def inference(user_input):
@@ -87,12 +86,7 @@ def inference(user_input):
 
     ''').strip()
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_input}
-    ]
-
-    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt = f"""<|system|>\n{system_prompt}\n<|user|>\n{user_input}\n<|assistant|>\n"""
 
 
     #============== 推理流程 =================
@@ -100,13 +94,18 @@ def inference(user_input):
     print("\n🌀 Generating response...")
     gen_start = time.time()
 
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    outputs = model.generate(**inputs, max_new_tokens=256)
-    raw_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    output = llm.create_chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ],
+        temperature=0.2,
+        max_tokens=256
+    )
+    raw_response = output["choices"][0]["message"]["content"].strip()
+    print("===================JSON raw)response====================\n",raw_response)
 
-    print("===================Raw Result====================\n",raw_response)
-
-    result = extract_json(raw_response)
+    result = extract_json(response)
     print("===================JSON Result====================\n",result)
 
     gen_end = time.time()
