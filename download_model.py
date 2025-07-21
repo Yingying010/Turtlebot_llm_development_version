@@ -1,9 +1,9 @@
-from huggingface_hub import hf_hub_download
+from huggingface_hub import snapshot_download
 
-gguf_path = hf_hub_download(
+local_dir = snapshot_download(
     repo_id="YingyingWang/Qwen3_base_instruction_q8",
-    filename="qwen3_base_instruction_q8.gguf",
-    local_dir="./models/qwen3_base_instruction_q8",
+    local_dir="models/Qwen3_base_instruction_q8",
     local_dir_use_symlinks=False
 )
-print("✅ 下载成功，文件保存路径：", gguf_path)
+
+print("✅ 仓库下载完成，保存目录：", local_dir)
