@@ -104,5 +104,4 @@ if __name__ == "__main__":
     else:
         logger.warning("⚠️ No commands received from LLM.")
         tts_manager.say("Sorry, I couldn't understand the instruction.")
-    run(user_input)
 
