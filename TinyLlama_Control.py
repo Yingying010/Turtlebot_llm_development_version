@@ -45,20 +45,33 @@ def build_prompt(instruction: str) -> str:
 
 # ===== JSON 提取函数 =====
 def extract_json(text: str):
-    start = text.find('{')
+  # 找到 "Assistant:" 的位置
+    assistant_idx = text.lower().find("assistant:")
+    if assistant_idx == -1:
+        print("❌ Cant find 'Assistant:' label")
+        return None
+
+    # 从 assistant 部分开始
+    content = text[assistant_idx:]
+
+    # 寻找第一个合法 JSON 字符串（使用大括号配对）
+    start = content.find('{')
     while start != -1:
         stack = 0
-        for i in range(start, len(text)):
-            if text[i] == '{':
+        for i in range(start, len(content)):
+            if content[i] == '{':
                 stack += 1
-            elif text[i] == '}':
+            elif content[i] == '}':
                 stack -= 1
-            if stack == 0:
-                try:
-                    return json.loads(text[start:i+1])
-                except json.JSONDecodeError:
-                    break
-        start = text.find('{', start + 1)
+                if stack == 0:
+                    json_str = content[start:i+1]
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        break  # 当前括号内容非法，换下一个 {
+        start = content.find('{', start + 1)
+
+    print("❌ Cant find json block")
     return None
 
 # ===== LLM响应生成 =====
