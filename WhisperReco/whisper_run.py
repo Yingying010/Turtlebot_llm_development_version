@@ -145,7 +145,7 @@ def Whisper_run(callback_func):
             if not clean_text:
                 continue
 
-            if "hi controller" in clean_text:
+            if "open robot system" in clean_text:
                 config.set(chat_or_instruct=False)
                 logger.info("🎮 Switched to CONTROL mode.")
                 tts_manager.say("Okay, I'm now in control mode.")
