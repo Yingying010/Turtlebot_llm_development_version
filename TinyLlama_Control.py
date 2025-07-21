@@ -95,7 +95,7 @@ def run(user_input: str):
 
 # ===== 测试入口 =====
 if __name__ == "__main__":
-    user_input = "let robot 1 turn left 5 seconds"
+    user_input = "let robot 1 turn right 45 degrees"
     response = run(user_input)
     if response:
         control_turtlebot.run(response)
