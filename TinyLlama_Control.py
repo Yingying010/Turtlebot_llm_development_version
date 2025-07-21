@@ -84,7 +84,7 @@ def inference(user_input):
             {"role": "user", "content": user_input}
         ],
         temperature=0.2,
-        max_tokens=256
+        max_tokens=128888888888
     )
     raw_response = output["choices"][0]["message"]["content"].strip()
     print("=================== JSON Raw Response ===================\n", raw_response)
@@ -113,7 +113,7 @@ def run(user_input: str):
 
 # ============== 主测试入口 =================
 if __name__ == "__main__":
-    user_input = "let robot 1 turn right 45 degrees"
+    user_input = "let robot 1 turn left 90 degrees"
     commands = run(user_input)
 
     if commands:
