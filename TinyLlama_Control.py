@@ -87,9 +87,11 @@ def run(user_input: str):
     commands = generate_response(user_input)
     if commands:
         logger.info("\n✅ Parsed JSON:\n", commands)
+        return commands
     else:
         print("\n❌ Failed to extract valid JSON.")
         logger.warning("⚠️ No command was executed due to invalid JSON.")
+        return None 
 
 # ===== 测试入口 =====
 if __name__ == "__main__":
