@@ -103,7 +103,7 @@ def inference(user_input):
         max_tokens=256
     )
     raw_response = output["choices"][0]["message"]["content"].strip()
-    print("===================JSON raw)response====================\n",raw_response)
+    print("===================JSON raw response====================\n",raw_response)
 
     result = extract_json(response)
     print("===================JSON Result====================\n",result)
