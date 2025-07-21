@@ -11,7 +11,7 @@ def rotate(robot_id, direction, value, unit, target="self"):
     pub = node.create_publisher(Twist, f"/{robot_id}/cmd_vel", 10)
 
     twist = Twist()
-    angular_speed = math.radians(30)  # 角速度，单位 rad/s（默认设置为30°/s）
+    angular_speed = math.radians(30)  # 默认角速度：30°/s → 0.5236 rad/s
 
     if direction == "left":
         twist.angular.z = angular_speed
@@ -22,17 +22,22 @@ def rotate(robot_id, direction, value, unit, target="self"):
         node.destroy_node()
         return
 
-    # 角度转为时间（单位统一为 degrees → radians → 秒）
+    # 🔄 支持单位：degrees 或 seconds
     if unit == "degrees":
         angle_rad = math.radians(value)
         duration = angle_rad / abs(angular_speed)
+        print(f"🔁 {robot_id} turning {direction} for {value}° ({duration:.2f}s) around {target}")
+
+    elif unit == "seconds":
+        duration = value
+        print(f"⏱️ {robot_id} turning {direction} for {duration:.2f}s around {target}")
+
     else:
         print(f"⚠️ Unsupported unit: {unit}")
         node.destroy_node()
         return
 
-    print(f"🔁 {robot_id} turning {direction} for {value}° ({duration:.2f}s) around {target}")
-
+    # 执行旋转
     start_time = time.time()
     while time.time() - start_time < duration:
         pub.publish(twist)
