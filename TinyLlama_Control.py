@@ -43,7 +43,7 @@ def extract_json(text: str):
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 
-model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_base_instruction_q8.gguf"  # ⚠️ 请确认是 .gguf 文件！
+model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_base_instruction_q8/Qwen3_base_instruction_q8.gguf"  # ⚠️ 请确认是 .gguf 文件！
 llm = Llama(
     model_path=model_path,
     n_ctx=2048,
