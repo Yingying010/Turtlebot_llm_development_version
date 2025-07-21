@@ -10,7 +10,7 @@ from llama_cpp import Llama
 # ===== 模型加载 =====
 print("⏳ Loading tokenizer and model...")
 start = time.time()
-model_path = "models/Qwen3_single_move_turn_q4_k_m.gguf"  # 你量化后的模型路径
+model_path = "models/Qwen3_base_instruction_q4_k_m.gguf"  # 你量化后的模型路径
 llm = Llama(
     model_path=model_path,
     n_ctx=2048,
@@ -21,24 +21,23 @@ print(f"✅ Model loaded in {time.time() - start:.2f} seconds")
 
 # ===== Prompt 模板 =====
 system_prompt = dedent('''
-You are a robot command parser. Given a natural language instruction, output ONLY a valid JSON object that follows the format below.
+    You are a robot command parser. Given a natural language instruction, output ONLY a valid JSON object that maps each robot to a list of its actions.
 
-JSON Format:
-{
-  "<robot_name>": [
-    {
-      "action": "move" | "turn",
-      "direction": "left" | "right" | "forward" | "backward",
-      "value": <number>,
-      "unit": "seconds" | "meters" | "degrees"
-    }
-  ]
-}
+    Each action must include:
+    - "action": e.g. "move", "turn", "navigate", etc.
+    - "direction": e.g. "left", "right", "forward", or null
+    - "value": a number (e.g. 2.5) or null
+    - "unit": e.g. "seconds", "meters", "degrees", or null
+    - "target": either an object like {"x": ..., "y": ...}, or a name string like "user", or null
 
-Rules:
- - Do NOT output any explanation or reasoning.
- - You MUST include the robot name as the top-level key.
- - Only output a valid object followed by the format.
+    Rules:
+    - Output must be a valid JSON object.
+    - Top-level keys must be robot identifiers in the form of <type><number>.
+    - Each robot maps to a list of actions (1 or more).
+    ❗ Output MUST start with '{' and end with '}'.
+    ❗ Output MUST be a valid JSON object. No other text is allowed.
+    ❌ Do NOT include plan, explanation, reasoning, thought, or any prefix like "Assistant:", "Plan:", "Structure:", "Here is".
+
 ''').strip()
 
 def build_prompt(instruction: str) -> str:
