@@ -1,81 +1,127 @@
-import requests
+from pathlib import Path
 import json
 import time
 from textwrap import dedent
-from stream_tts import tts_manager
 from loguru import logger
 from config import config
-import threading
+from stream_tts import tts_manager
+import control_turtlebot
+from llama_cpp import Llama
 
-# ========== Prompt 构造函数 ==========
-# def build_prompt(user_text: str) -> str:
-#     return dedent(f"""
-#     You are Lumi, a thoughtful and emotionally aware AI assistant who enjoys chatting casually with a human.
-#     You don’t have access to real-time data, but can simulate reasoning and give friendly replies.
-#     Avoid repeating phrases, listing too much, or writing multiple turns of conversation. Just give a natural 2–4 sentence reply.
 
-#     Human says: "{user_text}"
-#     Lumi replies:
-#     """)
+# ============== 工具函数 =================
+def extract_json(text: str):
+    # 找到 "Assistant:" 的位置（可选）
+    assistant_idx = text.lower().find("assistant:")
+    if assistant_idx != -1:
+        text = text[assistant_idx:]
 
-# ========== 生成函数（使用 Ollama） ==========
-def generate_response(user_input: str, max_new_tokens=256) -> str:
-    prompt = user_input
+    # 寻找第一个合法 JSON 字符串（大括号匹配）
+    start = text.find('{')
+    while start != -1:
+        stack = 0
+        for i in range(start, len(text)):
+            if text[i] == '{':
+                stack += 1
+            elif text[i] == '}':
+                stack -= 1
+                if stack == 0:
+                    json_str = text[start:i+1]
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        print("❌ JSON 解析失败:", e)
+                        print("🚨 错误文本片段:", json_str)
+                        break
+        start = text.find('{', start + 1)
+
+    print("❌ 没找到合法 JSON 块")
+    return None
+
+
+# ============== 加载模型 =================
+print("⏳ Loading tokenizer and model...")
+start = time.time()
+
+model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_base_instruction_q4_k_m/Qwen3_base_instruction_q4_k_m.gguf"  # ⚠️ 请确认是 .gguf 文件！
+llm = Llama(
+    model_path=model_path,
+    n_ctx=2048,
+    n_threads=4,
+    verbose=True,
+)
+
+print(f"✅ Model loaded in {time.time() - start:.2f} seconds")
+
+
+# ============== 推理函数 =================
+def inference(user_input):
+    system_prompt = dedent('''
+        You are a robot command parser. Given a natural language instruction, output ONLY a valid JSON object that maps each robot to a list of its actions.
+
+        Each action must include:
+        - "action": e.g. "move", "turn", "navigate", etc.
+        - "direction": e.g. "left", "right", "forward", or null
+        - "value": a number (e.g. 2.5) or null
+        - "unit": e.g. "seconds", "meters", "degrees", or null
+        - "target": either an object like {"x": ..., "y": ...}, or a name string like "user", or null
+
+        Rules:
+        - Output must be a valid JSON object.
+        - Top-level keys must be robot identifiers in the form of <type><number>.
+        - Each robot maps to a list of actions (1 or more).
+        ❗ Output MUST start with '{' and end with '}'.
+        ❗ Output MUST be a valid JSON object. No other text is allowed.
+        ❌ Do NOT include plan, explanation, reasoning, thought, or any prefix like "Assistant:", "Plan:", "Structure:", "Here is".
+    ''').strip()
+
     print("\n🌀 Generating response...")
     gen_start = time.time()
 
-    try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "tinyllama",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "num_predict": max_new_tokens,
-                    "temperature": 0.7,
-                    "top_p": 0.9
-                }
-            }
-        )
-        response.raise_for_status()
-        result_text = response.json()['response']
-        gen_end = time.time()
-        print(f"✅ Generation completed in {gen_end - gen_start:.2f} seconds")
-        return result_text.strip()
-    except Exception as e:
-        print(f"❌ Error during generation: {e}")
-        return "Sorry, I couldn't generate a response."
+    output = llm.create_chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input}
+        ],
+        temperature=0.2,
+        max_tokens=128888888888
+    )
+    raw_response = output["choices"][0]["message"]["content"].strip()
+    print("=================== JSON Raw Response ===================\n", raw_response)
 
-# ========== 主执行函数 ==========
-def run(user_input: str) -> str:
-    logger.info(f"💡 Current Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
+    result = extract_json(raw_response)
+    print("=================== JSON Result ===================\n", result)
+
+    print(f"✅ Generation completed in {time.time() - gen_start:.2f} seconds")
+    return raw_response, result
+
+
+# ============== 主控制函数 =================
+def run(user_input: str):
+    logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     logger.info(f"🧠 LLM Input: {user_input}")
-    output = generate_response(user_input)
 
-    # 清洗模型回复
-    if "Human says:" in output:
-        response = output.split("Human says:")[0].strip().strip('"')
+    raw, commands = inference(user_input)
+
+    if commands:
+        logger.info("✅ Parsed JSON:\n{}", commands)
+        return commands
     else:
-        response = output.strip()
+        logger.warning("⚠️ Failed to parse JSON.")
+        return None
 
-    print("\n🎉 Response:\n", response)
-    return response
 
-# ========== 命令执行（可选） ==========
-def execute_commands(result):
-    tts_manager.say("Executing command")
-    return ""
-
-# ========== 主程序 ==========
+# ============== 主测试入口 =================
 if __name__ == "__main__":
-    user_input = "What is 1 plus 1?"
-    response = run(user_input)
+    user_input = "let robot 1 turn left 90 degrees"
+    commands = run(user_input)
 
-    # ✅ 用线程包装 say，并等待它播放完
-    tts_thread = threading.Thread(target=tts_manager.say, args=(response,))
-    tts_thread.start()
-    tts_thread.join()
-
-    print("🎉 Program ended after TTS finished.")
-
+    if commands:
+        control_turtlebot.run(commands)
+        logger.info("✅ Command(s) executed successfully.")
+        tts_manager.say("Command executed.")
+        tts_manager.wait_until_done()
+    else:
+        logger.warning("⚠️ No commands received from LLM.")
+        tts_manager.say("Sorry, I couldn't understand the instruction.")
+        tts_manager.wait_until_done()
