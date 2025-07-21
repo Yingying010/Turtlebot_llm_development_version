@@ -95,5 +95,5 @@ def run(user_input: str):
 
 # ===== 测试入口 =====
 if __name__ == "__main__":
-    user_input = "let turtlebot1 forward 2 meters."
+    user_input = "let robot one turn left 5 seconds"
     run(user_input)
