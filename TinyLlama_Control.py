@@ -96,4 +96,13 @@ def run(user_input: str):
 # ===== 测试入口 =====
 if __name__ == "__main__":
     user_input = "let robot one turn left 5 seconds"
+    response = run(user_input)
+    if response:
+        control_turtlebot.run(response)
+        logger.info("✅ Command(s) executed successfully.")
+        tts_manager.say("Command executed.")
+    else:
+        logger.warning("⚠️ No commands received from LLM.")
+        tts_manager.say("Sorry, I couldn't understand the instruction.")
     run(user_input)
+
