@@ -94,7 +94,7 @@ def run(user_input: str):
 
 # ============== 主测试入口 =================
 if __name__ == "__main__":
-    user_input = "let robot 1 move forward 3 seconds"
+    user_input = "let robot one turn right 90 degrees"
     commands = run(user_input)
 
     if commands:

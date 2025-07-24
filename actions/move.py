@@ -31,8 +31,6 @@ def move_linear(robot_id, direction, value, unit):
         rclpy.shutdown()
         return
 
-    print(f"🚗 {robot_id} moving {direction} for {duration:.2f} seconds...")
-
     start = time.time()
     while time.time() - start < duration:
         publisher.publish(twist)
