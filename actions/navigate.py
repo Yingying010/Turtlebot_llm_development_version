@@ -62,7 +62,7 @@ def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], robot_p
     time.sleep(0.2)
 
     
-def move_forward_until_reached(robot_name, publisher, target, tolerance=20, max_acceptable_angle_error=25):
+def move_forward_until_reached(robot_name, publisher, target, robot_position_cache, tolerance=20, max_acceptable_angle_error=25):
     x_target, y_target = target["x"], target["y"]
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
