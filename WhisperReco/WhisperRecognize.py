@@ -16,9 +16,9 @@ model = whisper.load_model("base.en")
 conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数优化 ===
-SAMPLERATE = 16000
+# SAMPLERATE = 16000
 BLOCKSIZE = 2048
-SILENCE_THRESHOLD = 15.0
+SILENCE_THRESHOLD = 10.0
 SILENCE_DURATION = 1.5
 MIN_ACTIVATION_DURATION = 0.3
 TEMP_WAV_PATH = "/tmp/current_audio.wav"
@@ -27,6 +27,8 @@ class WhisperRecognizer:
     def __init__(self):
         # 用于存放音频片段
         self.audio_buffer: list[np.ndarray] = []
+        # 先设置一个占位，实际采样率在 start() 里覆盖
+        self.samplerate: float = None  
         # 用于对外返回转录结果
         self.result_queue: queue.Queue[str] = queue.Queue()
         self.stream: Optional[sd.InputStream] = None
@@ -65,8 +67,13 @@ class WhisperRecognizer:
 
     def start(self):
         """启动音频流"""
+       # 动态探测默认输入设备的采样率
+        device_info = sd.query_devices(kind='input')
+        self.samplerate = int(device_info['default_samplerate'])
+        logger.info(f"🛠 侦测到输入设备默认采样率: {self.samplerate} Hz")
+
         self.stream = sd.InputStream(
-            samplerate=SAMPLERATE,
+            samplerate=self.samplerate,
             channels=1,
             blocksize=BLOCKSIZE,
             dtype='float32',
@@ -79,7 +86,8 @@ class WhisperRecognizer:
         if not self.audio_buffer:
             return False
         audio = np.concatenate(self.audio_buffer, axis=0)
-        sf.write(TEMP_WAV_PATH, audio, SAMPLERATE, format='WAV', subtype='PCM_16')
+        # 保存时使用实际的采样率，保证一致
+        sf.write(TEMP_WAV_PATH, audio, self.samplerate, format='WAV', subtype='PCM_16')
         self.audio_buffer = []
         return True
 
