@@ -9,41 +9,11 @@ import control_turtlebot
 from llama_cpp import Llama
 
 
-# ============== 工具函数 =================
-def extract_json(text: str):
-    # 找到 "Assistant:" 的位置（可选）
-    assistant_idx = text.lower().find("assistant:")
-    if assistant_idx != -1:
-        text = text[assistant_idx:]
-
-    # 寻找第一个合法 JSON 字符串（大括号匹配）
-    start = text.find('{')
-    while start != -1:
-        stack = 0
-        for i in range(start, len(text)):
-            if text[i] == '{':
-                stack += 1
-            elif text[i] == '}':
-                stack -= 1
-                if stack == 0:
-                    json_str = text[start:i+1]
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError as e:
-                        print("❌ JSON 解析失败:", e)
-                        print("🚨 错误文本片段:", json_str)
-                        break
-        start = text.find('{', start + 1)
-
-    print("❌ 没找到合法 JSON 块")
-    return None
-
-
 # ============== 加载模型 =================
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 
-model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_base_instruction_q8/Qwen3_base_instruction_q8.gguf"  # ⚠️ 请确认是 .gguf 文件！
+model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_instructions_BaseCommands_q4_k_m/Qwen3_instructions_BaseCommands_q4_k_m.gguf"
 llm = Llama(
     model_path=model_path,
     n_ctx=2048,
@@ -54,46 +24,57 @@ llm = Llama(
 print(f"✅ Model loaded in {time.time() - start:.2f} seconds")
 
 
-# ============== 推理函数 =================
+#============== 推理过程 =================
+
 def inference(user_input):
-    system_prompt = dedent('''
-        You are a robot command parser. Given a natural language instruction, output ONLY a valid JSON object that maps each robot to a list of its actions.
+    print("🌀 Generating response...")
+    start = time.time()
 
-        Each action must include:
-        - "action": e.g. "move", "turn", "navigate", etc.
-        - "direction": e.g. "left", "right", "forward", or null
-        - "value": a number (e.g. 2.5) or null
-        - "unit": e.g. "seconds", "meters", "degrees", or null
-        - "target": either an object like {"x": ..., "y": ...}, or a name string like "user", or null
+    sys_prompt = "You are a professional robot control assistant. Parse the user's natural language instructions and convert them into structured JSON commands for robot control."
+    user_instruction = "Parse the following robot control instruction and convert it to structured JSON format."
 
-        Rules:
-        - Output must be a valid JSON object.
-        - Top-level keys must be robot identifiers in the form of <type><number>.
-        - Each robot maps to a list of actions (1 or more).
-        ❗ Output MUST start with '{' and end with '}'.
-        ❗ Output MUST be a valid JSON object. No other text is allowed.
-        ❌ Do NOT include plan, explanation, reasoning, thought, or any prefix like "Assistant:", "Plan:", "Structure:", "Here is".
-    ''').strip()
-
-    print("\n🌀 Generating response...")
-    gen_start = time.time()
-
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": f"{user_instruction}\nInput: {user_input}"}
+    ]
     output = llm.create_chat_completion(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_input}
-        ],
-        temperature=0.2,
-        max_tokens=128888888888
+        messages,
+        temperature=0.3,
+        max_tokens= 256
     )
+
+    end = time.time()
+
     raw_response = output["choices"][0]["message"]["content"].strip()
-    print("=================== JSON Raw Response ===================\n", raw_response)
+    print("=== Raw Response ===\n", raw_response)
 
-    result = extract_json(raw_response)
-    print("=================== JSON Result ===================\n", result)
+    json_result = extract_last_json(raw_response)
 
-    print(f"✅ Generation completed in {time.time() - gen_start:.2f} seconds")
-    return raw_response, result
+    print("\n=================== JSON Result ===================")
+    print(json_result)
+    print(f"✅ Generation completed in {end - start:.2f} seconds")
+
+    return raw_response, json_result
+
+
+
+def extract_last_json(text: str):
+    end = text.rfind('}')
+    while end != -1:
+        stack = 0
+        for i in range(end, -1, -1):  # 从end向前找起始的{
+            if text[i] == '}':
+                stack += 1
+            elif text[i] == '{':
+                stack -= 1
+            if stack == 0:
+                try:
+                    return json.loads(text[i:end+1])
+                except:
+                    break
+        end = text.rfind('}', 0, end)
+    return None
+
 
 
 # ============== 主控制函数 =================
