@@ -10,10 +10,10 @@ import control_turtlebot
 import time
 from stream_tts import tts_manager
 from loguru import logger
-# import if_exit, if_time
+import if_exit, if_time
 from loguru import logger
+from WhisperReco.whisper_run import Whisper_run, recognize
 from WhisperReco.whisper_run import conversation_active
-from play import play_beep_aplay
 
 
 '''
@@ -79,7 +79,7 @@ def run_conversation():
     """
     logger.info("🎤 Recording...")
     tts_manager.say("I'm listening.")
-    tts_manager.wait_until_done()
+    time.sleep(3)
 
     # -------- 录音 + 识别 --------------------------------------------------
     try:
@@ -97,22 +97,22 @@ def run_conversation():
 
     logger.info(f"🧑 User said: {user_text}")
 
-    # # -------- 本地退出 / 定时等指令 ---------------------------------------
-    # if if_exit.ifend(user_text):
-    #     tts_manager.say("Okay, ending the conversation.")
-    #     conversation_active.clear()
-    #     return
+    # -------- 本地退出 / 定时等指令 ---------------------------------------
+    if if_exit.ifend(user_text):
+        tts_manager.say("Okay, ending the conversation.")
+        conversation_active.clear()
+        return
 
-    # if if_exit.ifexit(user_text):
-    #     tts_manager.say("Goodbye.")
-    #     logger.info("🔚 Exit triggered by user.")
-    #     conversation_active.clear()
-    #     exit(0)
+    if if_exit.ifexit(user_text):
+        tts_manager.say("Goodbye.")
+        logger.info("🔚 Exit triggered by user.")
+        conversation_active.clear()
+        exit(0)
 
-    # if if_time.timedetect(user_text):
-    #     tts_manager.say("Timer has been set.")
-    #     conversation_active.clear()
-    #     return
+    if if_time.timedetect(user_text):
+        tts_manager.say("Timer has been set.")
+        conversation_active.clear()
+        return
 
     # -------- 调用 LLM (Chat / Control) ----------------------------------
     is_chat = config.get("chat_or_instruct")
@@ -139,9 +139,9 @@ def run_conversation():
 
     else:                               # Control 模式
         if response:
-            control_turtlebot.controller(response)
-            logger.info("✅ Command(s) executed successfully.")
+            control_turtlebot.run(response)
             tts_manager.say("Command executed.")
+            logger.info("✅ Command(s) executed successfully.")
         else:
             logger.warning("⚠️ No commands received from LLM.")
             tts_manager.say("Sorry, I couldn't understand the instruction.")
@@ -154,15 +154,16 @@ def run_conversation():
 
 # ✅ 启动欢迎语
 def startchat():
+    os.system("afplay beep.wav")  # 或者播放提示语音
     logger.info("📢 Starting chat system")
     tts_manager.say("Welcome! You can start speaking after the beep.")
-    tts_manager.wait_until_done()
 
 
 
 # ✅ 启动入口
 if __name__ == "__main__":
     startchat()
-    play_beep_aplay("soundRepo/beep.wav")
+    time.sleep(4)  # ✅ 给用户准备说话时间，避免误触
+    # Vosk_run(hwcallback)    # 热词检测循环（另起线程）
     Whisper_run(hwcallback)
     dialog_manager()        # 主对话处理循环
