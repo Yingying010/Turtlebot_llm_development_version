@@ -98,7 +98,7 @@ if __name__ == "__main__":
     commands = run(user_input)
 
     if commands:
-        control_turtlebot.run(commands)
+        control_turtlebot.controller(commands)
         logger.info("✅ Command(s) executed successfully.")
         tts_manager.say("Command executed.")
         tts_manager.wait_until_done()
