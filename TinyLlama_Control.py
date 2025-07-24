@@ -13,7 +13,7 @@ from llama_cpp import Llama
 print("⏳ Loading tokenizer and model...")
 start = time.time()
 
-model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_instructions_BaseCommands_q4_k_m/Qwen3_instructions_BaseCommands_q4_k_m.gguf"
+model_path = "/home/ubuntu/Turtlebot_llm_development_version/models/Qwen3_instructions_BaseCommands_q4_k_m/Qwen3_instructions_BaseCommands-q4_k_m.gguf"
 llm = Llama(
     model_path=model_path,
     n_ctx=2048,
