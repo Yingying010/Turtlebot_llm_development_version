@@ -1,0 +1,11 @@
+{
+  "package_name": "phasespace_msgs",
+  "non_idl_tuples": [
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Camera.msg",
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Cameras.msg",
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Marker.msg",
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Markers.msg",
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Rigid.msg",
+    "/home/ubuntu2204/ros2_ws/src/phasespace_msgs:msg/Rigids.msg"
+  ]
+}

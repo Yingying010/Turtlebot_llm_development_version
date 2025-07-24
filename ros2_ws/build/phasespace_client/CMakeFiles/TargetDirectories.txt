@@ -1,0 +1,11 @@
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/uninstall.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/phasespace_client_uninstall.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/psnode.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/listener.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/test.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/edit_cache.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/rebuild_cache.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/list_install_components.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/install.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/install/local.dir
+/home/ubuntu2204/ros2_ws/build/phasespace_client/CMakeFiles/install/strip.dir

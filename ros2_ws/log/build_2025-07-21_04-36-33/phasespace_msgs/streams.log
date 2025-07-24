@@ -1,0 +1,371 @@
+[0.005s] Invoking command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake /home/ubuntu2204/ros2_ws/src/phasespace_msgs -DCMAKE_INSTALL_PREFIX=/home/ubuntu2204/ros2_ws/install/phasespace_msgs
+[0.053s] -- The C compiler identification is GNU 11.4.0
+[0.094s] -- The CXX compiler identification is GNU 11.4.0
+[0.099s] -- Detecting C compiler ABI info
+[0.186s] -- Detecting C compiler ABI info - done
+[0.193s] -- Check for working C compiler: /usr/bin/cc - skipped
+[0.194s] -- Detecting C compile features
+[0.194s] -- Detecting C compile features - done
+[0.197s] -- Detecting CXX compiler ABI info
+[0.288s] -- Detecting CXX compiler ABI info - done
+[0.291s] -- Check for working CXX compiler: /usr/bin/c++ - skipped
+[0.292s] -- Detecting CXX compile features
+[0.292s] -- Detecting CXX compile features - done
+[0.293s] -- Found ament_cmake: 1.3.11 (/opt/ros/humble/share/ament_cmake/cmake)
+[0.395s] -- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+[0.442s] -- Found rosidl_default_generators: 1.2.0 (/opt/ros/humble/share/rosidl_default_generators/cmake)
+[0.444s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.448s] -- Found rosidl_adapter: 3.1.6 (/opt/ros/humble/share/rosidl_adapter/cmake)
+[0.467s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.482s] -- Found std_msgs: 4.9.0 (/opt/ros/humble/share/std_msgs/cmake)
+[0.494s] -- Found geometry_msgs: 4.9.0 (/opt/ros/humble/share/geometry_msgs/cmake)
+[0.680s] -- Found ament_cmake_ros: 0.10.0 (/opt/ros/humble/share/ament_cmake_ros/cmake)
+[0.840s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[1.045s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[1.068s] -- Found PythonInterp: /usr/bin/python3 (found suitable version "3.10.12", minimum required is "3.6") 
+[1.069s] -- Found python_cmake_module: 0.10.0 (/opt/ros/humble/share/python_cmake_module/cmake)
+[1.090s] -- Found PythonLibs: /usr/lib/x86_64-linux-gnu/libpython3.10.so (found suitable version "3.10.12", minimum required is "3.5") 
+[1.090s] -- Using PYTHON_EXECUTABLE: /usr/bin/python3
+[1.090s] -- Using PYTHON_INCLUDE_DIRS: /usr/include/python3.10
+[1.090s] -- Using PYTHON_LIBRARIES: /usr/lib/x86_64-linux-gnu/libpython3.10.so
+[1.108s] -- Found PythonExtra: .so  
+[1.147s] -- Configuring done
+[1.166s] -- Generating done
+[1.172s] -- Build files have been written to: /home/ubuntu2204/ros2_ws/build/phasespace_msgs
+[1.176s] Invoked command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake /home/ubuntu2204/ros2_ws/src/phasespace_msgs -DCMAKE_INSTALL_PREFIX=/home/ubuntu2204/ros2_ws/install/phasespace_msgs
+[1.176s] Invoking command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/ubuntu2204/ros2_ws/build/phasespace_msgs -- -j20 -l20
+[1.212s] [  1%] [34m[1mGenerating C code for ROS interfaces[0m
+[1.221s] [  2%] [34m[1mGenerating C++ code for ROS interfaces[0m
+[1.229s] [  2%] Built target ament_cmake_python_copy_phasespace_msgs
+[1.338s] running egg_info
+[1.339s] creating phasespace_msgs.egg-info
+[1.339s] writing phasespace_msgs.egg-info/PKG-INFO
+[1.339s] writing dependency_links to phasespace_msgs.egg-info/dependency_links.txt
+[1.339s] writing top-level names to phasespace_msgs.egg-info/top_level.txt
+[1.339s] writing manifest file 'phasespace_msgs.egg-info/SOURCES.txt'
+[1.340s] reading manifest file 'phasespace_msgs.egg-info/SOURCES.txt'
+[1.340s] writing manifest file 'phasespace_msgs.egg-info/SOURCES.txt'
+[1.355s] [  2%] Built target ament_cmake_python_build_phasespace_msgs_egg
+[1.467s] [  2%] Built target phasespace_msgs__cpp
+[1.473s] [  7%] [34m[1mGenerating C++ introspection for ROS interfaces[0m
+[1.473s] [  7%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/cameras__functions.c.o[0m
+[1.473s] [  7%] [34m[1mGenerating C++ type support for eProsima Fast-RTPS[0m
+[1.473s] [  8%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/marker__functions.c.o[0m
+[1.474s] [  9%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/markers__functions.c.o[0m
+[1.474s] [ 11%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/rigid__functions.c.o[0m
+[1.474s] [ 12%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/rigids__functions.c.o[0m
+[1.474s] [ 14%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_c.dir/rosidl_generator_c/phasespace_msgs/msg/detail/camera__functions.c.o[0m
+[1.474s] [ 15%] [34m[1mGenerating C++ type support dispatch for ROS interfaces[0m
+[1.508s] [ 16%] [32m[1mLinking C shared library libphasespace_msgs__rosidl_generator_c.so[0m
+[1.532s] [ 16%] Built target phasespace_msgs__rosidl_generator_c
+[1.537s] [ 18%] [34m[1mGenerating C type support dispatch for ROS interfaces[0m
+[1.540s] [ 21%] [34m[1mGenerating C type support for eProsima Fast-RTPS[0m
+[1.540s] [ 21%] [34m[1mGenerating C introspection for ROS interfaces[0m
+[1.646s] [ 25%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/rigid__type_support.cpp.o[0m
+[1.646s] [ 25%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/markers__type_support.cpp.o[0m
+[1.646s] [ 25%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/rigids__type_support.cpp.o[0m
+[1.647s] [ 28%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/cameras__type_support.cpp.o[0m
+[1.647s] [ 28%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/camera__type_support.cpp.o[0m
+[1.647s] [ 29%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/phasespace_msgs/msg/marker__type_support.cpp.o[0m
+[1.681s] [ 36%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/markers__type_support.cpp.o[0m
+[1.681s] [ 36%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/cameras__type_support.cpp.o[0m
+[1.681s] [ 36%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/marker__type_support.cpp.o[0m
+[1.681s] [ 36%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/rigids__type_support.cpp.o[0m
+[1.681s] [ 38%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/rigid__type_support.cpp.o[0m
+[1.681s] [ 38%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/phasespace_msgs/msg/detail/camera__type_support.cpp.o[0m
+[1.718s] [ 43%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/camera__type_support.cpp.o[0m
+[1.718s] [ 43%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/marker__type_support.cpp.o[0m
+[1.718s] [ 43%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/cameras__type_support.cpp.o[0m
+[1.719s] [ 43%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/markers__type_support.cpp.o[0m
+[1.719s] [ 45%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/rigid__type_support.cpp.o[0m
+[1.727s] [ 46%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/camera__type_support.cpp.o[0m
+[1.761s] [ 47%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/cameras__type_support.cpp.o[0m
+[1.784s] [ 49%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/marker__type_support.cpp.o[0m
+[1.817s] [ 50%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/markers__type_support.cpp.o[0m
+[1.846s] [ 52%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/rigid__type_support.cpp.o[0m
+[1.850s] [ 53%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/phasespace_msgs/msg/detail/dds_fastrtps/rigids__type_support.cpp.o[0m
+[1.860s] [ 54%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/phasespace_msgs/msg/rigids__type_support.cpp.o[0m
+[1.877s] [ 60%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/markers__type_support.c.o[0m
+[1.877s] [ 60%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/camera__type_support.c.o[0m
+[1.878s] [ 60%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/cameras__type_support.c.o[0m
+[1.878s] [ 60%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/marker__type_support.c.o[0m
+[1.884s] [ 61%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/camera__type_support_c.cpp.o[0m
+[1.887s] [ 63%] [32m[1mLinking CXX shared library libphasespace_msgs__rosidl_typesupport_c.so[0m
+[1.908s] [ 64%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/rigid__type_support.c.o[0m
+[1.908s] [ 67%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/marker__type_support_c.cpp.o[0m
+[1.909s] [ 67%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/cameras__type_support_c.cpp.o[0m
+[1.909s] [ 69%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/phasespace_msgs/msg/detail/rigids__type_support.c.o[0m
+[1.914s] [ 70%] [32m[1mLinking CXX shared library libphasespace_msgs__rosidl_typesupport_cpp.so[0m
+[1.915s] [ 71%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/markers__type_support_c.cpp.o[0m
+[1.932s] [ 71%] Built target phasespace_msgs__rosidl_typesupport_c
+[1.940s] [ 73%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/rigid__type_support_c.cpp.o[0m
+[1.942s] [ 74%] [32mBuilding CXX object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/phasespace_msgs/msg/detail/rigids__type_support_c.cpp.o[0m
+[1.947s] [ 76%] [32m[1mLinking C shared library libphasespace_msgs__rosidl_typesupport_introspection_c.so[0m
+[1.955s] [ 76%] Built target phasespace_msgs__rosidl_typesupport_cpp
+[1.979s] [ 76%] Built target phasespace_msgs__rosidl_typesupport_introspection_c
+[2.058s] [ 77%] [32m[1mLinking CXX shared library libphasespace_msgs__rosidl_typesupport_introspection_cpp.so[0m
+[2.115s] [ 77%] Built target phasespace_msgs__rosidl_typesupport_introspection_cpp
+[2.167s] [ 78%] [32m[1mLinking CXX shared library libphasespace_msgs__rosidl_typesupport_fastrtps_c.so[0m
+[2.168s] [ 80%] [32m[1mLinking CXX shared library libphasespace_msgs__rosidl_typesupport_fastrtps_cpp.so[0m
+[2.216s] [ 80%] Built target phasespace_msgs__rosidl_typesupport_fastrtps_c
+[2.216s] [ 80%] Built target phasespace_msgs__rosidl_typesupport_fastrtps_cpp
+[2.230s] [ 80%] Built target phasespace_msgs
+[2.244s] [ 81%] [34m[1mGenerating Python code for ROS interfaces[0m
+[2.589s] [ 81%] Built target phasespace_msgs__py
+[2.600s] [ 83%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_marker_s.c.o[0m
+[2.601s] [ 85%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_markers_s.c.o[0m
+[2.601s] [ 85%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_rigid_s.c.o[0m
+[2.601s] [ 87%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_rigids_s.c.o[0m
+[2.601s] [ 88%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_camera_s.c.o[0m
+[2.602s] [ 90%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_generator_py.dir/rosidl_generator_py/phasespace_msgs/msg/_cameras_s.c.o[0m
+[2.666s] [ 91%] [32m[1mLinking C shared library rosidl_generator_py/phasespace_msgs/libphasespace_msgs__rosidl_generator_py.so[0m
+[2.696s] [ 91%] Built target phasespace_msgs__rosidl_generator_py
+[2.712s] [ 92%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_c__pyext.dir/rosidl_generator_py/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_c.c.o[0m
+[2.717s] [ 94%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_fastrtps_c__pyext.dir/rosidl_generator_py/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_fastrtps_c.c.o[0m
+[2.718s] [ 95%] [32mBuilding C object CMakeFiles/phasespace_msgs__rosidl_typesupport_introspection_c__pyext.dir/rosidl_generator_py/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_introspection_c.c.o[0m
+[2.781s] [ 97%] [32m[1mLinking C shared library rosidl_generator_py/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so[0m
+[2.782s] [ 98%] [32m[1mLinking C shared library rosidl_generator_py/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so[0m
+[2.782s] [100%] [32m[1mLinking C shared library rosidl_generator_py/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so[0m
+[2.804s] [100%] Built target phasespace_msgs__rosidl_typesupport_introspection_c__pyext
+[2.807s] [100%] Built target phasespace_msgs__rosidl_typesupport_c__pyext
+[2.808s] [100%] Built target phasespace_msgs__rosidl_typesupport_fastrtps_c__pyext
+[2.819s] Invoked command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --build /home/ubuntu2204/ros2_ws/build/phasespace_msgs -- -j20 -l20
+[2.827s] Invoking command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/ubuntu2204/ros2_ws/build/phasespace_msgs
+[2.839s] -- Install configuration: ""
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/ament_index/resource_index/rosidl_interfaces/phasespace_msgs
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/cameras.h
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rigid.h
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rigids.h
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__functions.c
+[2.840s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__functions.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__functions.c
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__functions.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__type_support.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__functions.c
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__functions.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__functions.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__functions.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__type_support.h
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__functions.c
+[2.841s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__type_support.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__functions.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__type_support.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__type_support.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__type_support.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__functions.c
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__struct.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__functions.c
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/marker.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/markers.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rosidl_generator_c__visibility_control.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/camera.h
+[2.842s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/library_path.sh
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/library_path.dsv
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_generator_c.so
+[2.843s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_generator_c.so" to ""
+[2.843s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.843s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+[2.843s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__rosidl_typesupport_fastrtps_c.h
+[2.843s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_fastrtps_c.so
+[2.844s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_fastrtps_c.so" to ""
+[2.844s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.844s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.844s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__type_support.c
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__rosidl_typesupport_introspection_c.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rosidl_typesupport_introspection_c__visibility_control.h
+[2.844s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_introspection_c.so
+[2.845s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_introspection_c.so" to ""
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_c.so
+[2.845s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_c.so" to ""
+[2.845s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.845s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rigid.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rosidl_generator_cpp__visibility_control.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rigids.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/cameras.hpp
+[2.845s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__struct.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__struct.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__struct.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__struct.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__type_support.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__builder.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__builder.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__type_support.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__struct.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__builder.hpp
+[2.845s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__builder.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__struct.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__type_support.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__builder.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__type_support.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__type_support.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__type_support.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__builder.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__traits.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/camera.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/markers.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/marker.hpp
+[2.846s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.846s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.846s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__rosidl_typesupport_fastrtps_cpp.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__rosidl_typesupport_fastrtps_cpp.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__rosidl_typesupport_fastrtps_cpp.hpp
+[2.846s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__rosidl_typesupport_fastrtps_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/dds_fastrtps
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__rosidl_typesupport_fastrtps_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__rosidl_typesupport_fastrtps_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_fastrtps_cpp.so
+[2.847s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_fastrtps_cpp.so" to ""
+[2.847s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs
+[2.847s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg
+[2.847s] -- Up-to-date: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigids__type_support.cpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__type_support.cpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/markers__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/cameras__type_support.cpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/camera__type_support.cpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__type_support.cpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/marker__rosidl_typesupport_introspection_cpp.hpp
+[2.847s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/include/phasespace_msgs/phasespace_msgs/msg/detail/rigid__type_support.cpp
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_introspection_cpp.so
+[2.848s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_introspection_cpp.so" to ""
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_cpp.so
+[2.848s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_typesupport_cpp.so" to ""
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/pythonpath.sh
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/pythonpath.dsv
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs-0.0.0-py3.10.egg-info
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs-0.0.0-py3.10.egg-info/PKG-INFO
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs-0.0.0-py3.10.egg-info/SOURCES.txt
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs-0.0.0-py3.10.egg-info/dependency_links.txt
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs-0.0.0-py3.10.egg-info/top_level.txt
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_fastrtps_c.c
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/__init__.py
+[2.848s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_marker_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_marker.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/__init__.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_cameras_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_camera_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_cameras.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigids_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigid.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigid_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigids.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_markers_s.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_camera.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_markers.py
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_c.c
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/libphasespace_msgs__rosidl_generator_py.so
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[2.849s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/_phasespace_msgs_s.ep.rosidl_typesupport_introspection_c.c
+[2.870s] Listing '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs'...
+[2.870s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/__init__.py'...
+[2.870s] Listing '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg'...
+[2.870s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/__init__.py'...
+[2.870s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_camera.py'...
+[2.870s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_cameras.py'...
+[2.870s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_marker.py'...
+[2.871s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_markers.py'...
+[2.871s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigid.py'...
+[2.871s] Compiling '/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/msg/_rigids.py'...
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so
+[2.873s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_fastrtps_c.cpython-310-x86_64-linux-gnu.so" to ""
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so
+[2.873s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_introspection_c.cpython-310-x86_64-linux-gnu.so" to ""
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so
+[2.873s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/local/lib/python3.10/dist-packages/phasespace_msgs/phasespace_msgs_s__rosidl_typesupport_c.cpython-310-x86_64-linux-gnu.so" to ""
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_generator_py.so
+[2.873s] -- Set runtime path of "/home/ubuntu2204/ros2_ws/install/phasespace_msgs/lib/libphasespace_msgs__rosidl_generator_py.so" to ""
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Camera.idl
+[2.873s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Cameras.idl
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Marker.idl
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Markers.idl
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Rigid.idl
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Rigids.idl
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Camera.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Cameras.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Marker.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Markers.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Rigid.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/msg/Rigids.msg
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/ament_index/resource_index/package_run_dependencies/phasespace_msgs
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/ament_index/resource_index/parent_prefix_path/phasespace_msgs
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/ament_prefix_path.sh
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/ament_prefix_path.dsv
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/path.sh
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/environment/path.dsv
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/local_setup.bash
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/local_setup.sh
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/local_setup.zsh
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/local_setup.dsv
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/package.dsv
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/ament_index/resource_index/packages/phasespace_msgs
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_generator_cExport.cmake
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_generator_cExport-noconfig.cmake
+[2.874s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_typesupport_fastrtps_cExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_introspection_cExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_introspection_cExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_cExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_cExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_generator_cppExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_typesupport_fastrtps_cppExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_introspection_cppExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_cppExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgs__rosidl_typesupport_cppExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_generator_pyExport.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/export_phasespace_msgs__rosidl_generator_pyExport-noconfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/rosidl_cmake-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/ament_cmake_export_dependencies-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/ament_cmake_export_include_directories-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/ament_cmake_export_libraries-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/ament_cmake_export_targets-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgsConfig.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/cmake/phasespace_msgsConfig-version.cmake
+[2.875s] -- Installing: /home/ubuntu2204/ros2_ws/install/phasespace_msgs/share/phasespace_msgs/package.xml
+[2.877s] Invoked command in '/home/ubuntu2204/ros2_ws/build/phasespace_msgs' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/humble /usr/bin/cmake --install /home/ubuntu2204/ros2_ws/build/phasespace_msgs
