@@ -26,9 +26,9 @@ def get_current_position(robot_name, robot_position_cache):
         return 0.0, 0.0, 0.0
 
     
-def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], angle_tolerance_deg=5):
+def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], robot_position_cache, angle_tolerance_deg=5):
     x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_id)
+    x_now, y_now, _ = get_current_position(robot_id, robot_position_cache)
     dx = x_target - x_now
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
@@ -37,7 +37,7 @@ def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], angle_t
 
     prev_error = None
     while True:
-        _, _, heading_y_now = get_current_position(robot_id)
+        _, _, heading_y_now = get_current_position(robot_id, robot_position_cache)
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
@@ -67,7 +67,7 @@ def move_forward_until_reached(robot_name, publisher, target, tolerance=20, max_
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
     while True:
-        x_now, y_now, heading_y_now = get_current_position(robot_name)
+        x_now, y_now, heading_y_now = get_current_position(robot_name, robot_position_cache)
         dx = x_target - x_now
         dz = y_target - y_now
         distance = math.hypot(dx, dz)
@@ -82,7 +82,7 @@ def move_forward_until_reached(robot_name, publisher, target, tolerance=20, max_
 
         if abs(angle_error) > max_acceptable_angle_error:
             print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
-            rotate_to_face_target(robot_name, publisher, target)
+            rotate_to_face_target(robot_name, publisher, target, robot_position_cache)
             continue  # 旋转完成后重新进入循环
 
         # 可以前进
@@ -116,10 +116,10 @@ def navigate_to_position(robot_name, target: Dict[str, float], robot_position_ca
         _, pub = publisher_dict[robot_name]
 
     # ✅ Phase 1: rotate first
-    rotate_to_face_target(robot_name, pub, target)
+    rotate_to_face_target(robot_name, pub, target, robot_position_cache)
 
     # ✅ Phase 2: move straight
-    move_forward_until_reached(robot_name, pub, target)
+    move_forward_until_reached(robot_name, pub, target, robot_position_cache)
 
     print(f"✅ {robot_name} navigation complete.")
 
