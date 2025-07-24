@@ -17,7 +17,6 @@ conversation_active: Final[threading.Event] = threading.Event()
 
 # === 参数优化 ===
 # SAMPLERATE = 16000
-BLOCKSIZE = 2048
 SILENCE_THRESHOLD = 10.0
 SILENCE_DURATION = 1.5
 MIN_ACTIVATION_DURATION = 0.3
@@ -75,7 +74,7 @@ class WhisperRecognizer:
         self.stream = sd.InputStream(
             samplerate=self.samplerate,
             channels=1,
-            blocksize=BLOCKSIZE,
+            blocksize=None,
             dtype='float32',
             callback=self._audio_callback
         )
