@@ -139,7 +139,7 @@ def run_conversation():
 
     else:                               # Control 模式
         if response:
-            control_turtlebot.run(response)
+            control_turtlebot.controller(response)
             logger.info("✅ Command(s) executed successfully.")
             tts_manager.say("Command executed.")
         else:
