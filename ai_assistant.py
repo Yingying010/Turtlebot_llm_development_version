@@ -2,7 +2,7 @@ import sys
 import os
 from config import config
 # from VoskReco.Vosk_run import Vosk_run, recognize
-from WhisperReco import Whisper_run, recognize
+from WhisperReco.whisper_run import Whisper_run, recognize
 import TinyLlama_Control
 import TinyLlama_Chat
 import control_turtlebot
@@ -12,7 +12,7 @@ from stream_tts import tts_manager
 from loguru import logger
 # import if_exit, if_time
 from loguru import logger
-from WhisperReco import conversation_active
+from WhisperReco.whisper_run import conversation_active
 from play import play_beep_aplay
 
 
