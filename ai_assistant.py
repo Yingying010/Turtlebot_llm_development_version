@@ -2,7 +2,7 @@ import sys
 import os
 from config import config
 # from VoskReco.Vosk_run import Vosk_run, recognize
-from WhisperReco.WhisperRecognize import Whisper_run, recognize
+from WhisperReco.WhisperRecognize import Whisper_run, recognize, conversation_active
 import TinyLlama_Control
 import TinyLlama_Chat
 import control_turtlebot
@@ -120,7 +120,7 @@ def run_conversation():
 
     else:                               # Control 模式
         if response:
-            control_turtlebot.run(response)
+            control_turtlebot.controller(response)
             tts_manager.say("Command executed.")
             logger.info("✅ Command(s) executed successfully.")
         else:
