@@ -2,7 +2,7 @@ import sys
 import os
 from config import config
 # from VoskReco.Vosk_run import Vosk_run, recognize
-from WhisperReco.whisper_run import Whisper_run, recognize
+from WhisperReco.WhisperRecognize import Whisper_run, recognize
 import TinyLlama_Control
 import TinyLlama_Chat
 import control_turtlebot
@@ -11,8 +11,7 @@ import time
 from stream_tts import tts_manager
 from loguru import logger
 from loguru import logger
-from WhisperReco.whisper_run import Whisper_run, recognize
-from WhisperReco.whisper_run import conversation_active
+
 
 
 '''
