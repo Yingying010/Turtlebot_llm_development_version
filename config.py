@@ -2,8 +2,11 @@ import json
 from datetime import datetime
 from loguru import logger
 
+
 # 状态参数（可用于控制 TurtleBot）
 params = {
+    "robot_id":"robot1",
+    "isConversation": True,
     # 运行状态锁
     "notify_enable": False,
     "chat_enable": False,
@@ -20,6 +23,12 @@ params = {
     "Noticenotify": True, # 是否启用“通知播报”功能。
 
     "chat_or_instruct": True,  # 默认聊天模式
+}
+
+semantic_locations = {
+    "lucy": {"x": 500, "y": 500},
+    "table": {"x": 500, "y": -200},
+    "robot2": {"x": 0, "y": 0}  # 可选 heading
 }
 
 # 哪些参数需要记录变更日志
