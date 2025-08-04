@@ -5,7 +5,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 from config import config
 from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active
-import llmParserRepo.llama8_parser as llama8_Control
+import llmParserRepo.qwen3_parser as llama8_Control
 # import TinyLlama_Chat
 import robotControllerRepo.robot_scheduler as robot_scheduler
 import time
