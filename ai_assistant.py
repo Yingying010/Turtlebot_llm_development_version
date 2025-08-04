@@ -5,7 +5,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 from config import config
 from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active
-import llmParserRepo.qwen3_parser as llama8_Control
+from llmParserRepo.qwen3_parser import run_conversation_loop
 # import TinyLlama_Chat
 import robotControllerRepo.robot_scheduler as robot_scheduler
 import time
@@ -60,7 +60,7 @@ def dialog_manager():
 def run_conversation():
     logger.info("🎤 Recording...")
     tts_manager.say("I'm listening.")
-    tts_manager.wait_until_done()
+    time.sleep(0.5)
 
     # -------- Chat / Control ----------------------------------
     is_chat = config.get("chat_or_instruct")
@@ -69,7 +69,7 @@ def run_conversation():
             # response = TinyLlama_Chat.run()
             response = None
         else:
-            response = llama8_Control.run_conversation_loop()
+            response = run_conversation_loop()
 
     except Exception as e:
         logger.error(f"🧠 LLM error: {e}")
