@@ -10,6 +10,7 @@ from ttsRepo.stream_tts import tts_manager
 from loguru import logger
 from config import config
 from llama_cpp import Llama
+import robotControllerRepo.robot_scheduler as robot_scheduler
 
 
 
@@ -202,6 +203,19 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         except Exception as e:
             logger.warning(f"⚠️ Error during LLM or parsing: {e}")
             tts_manager.say("Something went wrong.")
+
+
+        # call scheduler
+        if response:
+            isSchedule = robot_scheduler.run(response)
+            if isSchedule == True:
+                logger.info("✅ Command(s) executed successfully.")
+                tts_manager.say("Command executed.")
+                time.sleep(1)
+            else:
+                logger.warning("⚠️ Failed")
+                tts_manager.say("Parsing failed so the command cannot be executed.")
+                time.sleep(1)
 
 if __name__ == "__main__":
     response = run_conversation_loop()

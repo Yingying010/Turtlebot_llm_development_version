@@ -7,7 +7,6 @@ from config import config
 from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active
 from llmParserRepo.qwen3_parser import run_conversation_loop
 # import TinyLlama_Chat
-import robotControllerRepo.robot_scheduler as robot_scheduler
 import time
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
@@ -85,24 +84,10 @@ def run_conversation():
         else:
             logger.warning("⚠️ LLM chat mode returned unexpected format.")
             tts_manager.say("Sorry, something went wrong.")
-
-    else:                               # Control 模式
-        if response:
-            isSchedule = robot_scheduler.run(response)
-            if isSchedule == True:
-                logger.info("✅ Command(s) executed successfully.")
-                tts_manager.say("Command executed.")
-                time.sleep(1)
-            else:
-                logger.warning("⚠️ Failed")
-                tts_manager.say("Parsing failed so the command cannot be executed.")
-                time.sleep(1)
-
-        else:
-            logger.warning("⚠️ No commands received from LLM.")
-            tts_manager.say("Sorry, I couldn't understand the instruction.")
+    else:
             conversation_active.clear()
             return
+
 
     # -------- 对话结束 ----------------------------------------------------
     logger.info("✅ Conversation finished.")
