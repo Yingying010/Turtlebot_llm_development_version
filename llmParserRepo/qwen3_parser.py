@@ -188,8 +188,8 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     
         # ② 判断是否叫到我
         if not called_robot(user_input):
-            tts_manager.say("You didn't call me, I'll wait.")
-            time.sleep(1)
+            tts_manager.say("You didn't call me, I am waiting for you")
+            time.sleep(2)
             continue
 
         logger.info(f"🗣️ You said: {user_input}")
