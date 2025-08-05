@@ -163,13 +163,15 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     print("🎤 Entering continuous voice control mode. Say 'exit' to stop.")
     history_messages[:] = [{"role": "system", "content": SYSTEM_PROMPT}]
     save_history(history_messages)
+    robot_id = config.get("robot_id") 
 
     while True:
         try:
             user_input = recognize(delay=3).strip()  # 重新录音
-            if config.get("robot_id") not in user_input.lower():
+            if robot_id in user_input.lower():
                 tts_manager.say("You didn't call me, I will waiting for you")
                 time.sleep(1)
+                continue
         except Exception as e:
             logger.warning(f"🎙️ Speech recognition failed: {e}")
             tts_manager.say("Sorry, could not hear you.")
