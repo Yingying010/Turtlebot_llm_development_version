@@ -153,8 +153,7 @@ def Whisper_run(callback_func):
                 tts_manager.say("Okay, I'm now in control mode.")
                 conversation_active.set()
                 callback_func()
-
-            elif "i want to chat with you" or "open chat system" in clean_text:
+            elif clean_text in {"i want to chat with you", "open chat system"}:
                 config.set(chat_or_instruct=True)
                 logger.info("💬 Switched to CHAT mode.")
                 tts_manager.say("Sure, I'm now in chat mode.")
