@@ -170,8 +170,9 @@ def navigate_to_position(node:Node, robot_name:str, target: Dict[str, float], ro
     move_forward_until_reached(robot_name, pub, target, robot_position_cache)
 
     # ✅ Phase 3: adjust to target heading if given
-    if "heading_deg" in target:
-        rotate_to_final_heading(robot_name, pub, target["heading_deg"], robot_position_cache)
+    heading = target.get("heading_deg")
+    if heading is not None:
+        rotate_to_final_heading(robot_name, pub, heading, robot_position_cache)
 
 
     print(f"✅ {robot_name} navigation complete.")
