@@ -82,11 +82,8 @@ def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], robot_p
 
         publisher.publish(twist)
         print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | target_angle: {target_angle:.1f} | angle_error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
-        prev_error = angle_error
         time.sleep(0.1)
 
-    publisher.publish(Twist())
-    time.sleep(0.2)
 
 
 
@@ -115,9 +112,9 @@ def move_forward_until_reached(robot_name, pub, target, robot_position_cache, to
 
         # 可以前进
         twist = Twist()
-        twist.linear.x = 0.2  # 小速度保证精度
+        twist.linear.x = 0.15  # 小速度保证精度
         print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, error={angle_error:.1f}°")
-        time.sleep(0.2)
+        time.sleep(0.1)
         pub.publish(twist)
         time.sleep(0.05)
  
