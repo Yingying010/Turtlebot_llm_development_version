@@ -12,6 +12,7 @@ from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow2 import follow_run
 from robotControllerRepo.actions.face import face_run
+from robotControllerRepo.actions.collect import collect_item
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
@@ -84,11 +85,21 @@ def execute_action(node, task: Dict):
         print(f"  → Waiting for {params['duration_sec']} seconds")
         time.sleep(params["duration_sec"])
     elif action == "collect":
-        print(f"  → Collecting {params['item']}")
-        time.sleep(1)
+        item = params["item"]
+        if "position" in params:
+            navigate_to_target(node, robot, item, params["position"])
+        elif "target" in params:
+            navigate_to_target(node, robot, item, params["target"])
+        else:
+            print(f"Missing 'position' or 'target' in navigate params: {params}")
     elif action == "deliver":
-        print(f"  → Delivering {params['item']}")
-        time.sleep(1)
+        item = params["item"]
+        if "position" in params:
+            navigate_to_target(node, robot, item, params["position"])
+        elif "target" in params:
+            navigate_to_target(node, robot, item, params["target"])
+        else:
+            print(f"Missing 'position' or 'target' in navigate params: {params}")
     else:
         print(f"⚠️ Unknown action: {action}")
 

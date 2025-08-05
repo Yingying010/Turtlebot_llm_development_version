@@ -204,6 +204,7 @@ def navigate_to_target(node, robot_name, target):
  
 # === 执行 deliver 行为 ===
 def deliver_item(node: Node, robot_name: str, item: str, target):
+    getRobotPositionCache(robot_name)
     # === 阶段 1：导航到目标位置 ===
     navigate_to_target(node, robot_name, target)
     print(f"🎯 Reached target location, collecting {item}...")
