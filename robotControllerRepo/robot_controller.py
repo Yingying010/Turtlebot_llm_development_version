@@ -73,14 +73,13 @@ def execute_action(node, task: Dict):
     elif action == "imitate":
         imitate_robot(node, robot, params["target"])
 
-    elif action == "face_to":
+    elif action == "face":
         if "target" in params:
             target = params["target"]
             face_run(robot, target)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
-        
-
+    
     elif action == "wait":
         print(f"  → Waiting for {params['duration_sec']} seconds")
         time.sleep(params["duration_sec"])
