@@ -191,7 +191,7 @@ def run(task_data: Dict[str, Any]):
         isSchedule = True
         return isSchedule
     except Exception as e:
-        logger.warning("⚠️ Failed to schedule tasks:", e)
+        logger.warning(f"⚠️ Failed to schedule tasks: \n{traceback.format_exc()}")
         isSchedule = False
         return isSchedule
     finally:
