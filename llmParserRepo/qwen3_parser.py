@@ -178,12 +178,12 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         except Exception as e:
             logger.warning(f"🎙️ recognition failed: {e}")
             tts_manager.say("Sorry, could not hear you.")
-            time.sleep(1)
+            time.sleep(2)
             continue
     
         if not user_input:
             tts_manager.say("Didn't catch that. Try again.")
-            time.sleep(1)
+            time.sleep(2)
             continue
     
         # ② 判断是否叫到我
