@@ -154,9 +154,16 @@ def extract_last_json(text: str):
 
 
 
-
-
 # ============== 主控制函数 =================
+# ① 根据 robot_id 生成别名集合
+base_id   = config.get("robot_id")          # "robot1"
+spaced_id = re.sub(r"(\d+)", r" \1", base_id)  # "robot 1"
+robot_aliases = {base_id, spaced_id}    # 可再手工 .add("robo-one") 等
+def called_robot(text: str) -> bool:
+    t = text.lower()
+    return any(alias in t for alias in robot_aliases)
+
+
 def run_conversation_loop() -> Optional[Dict[str, Any]]:
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
 
@@ -164,12 +171,12 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     history_messages[:] = [{"role": "system", "content": SYSTEM_PROMPT}]
     save_history(history_messages)
     robot_id = config.get("robot_id") 
-
+    
     while True:
         try:
             user_input = recognize(delay=3).strip()
         except Exception as e:
-            logger.warning(f"🎙️ Speech recognition failed: {e}")
+            logger.warning(f"🎙️ recognition failed: {e}")
             tts_manager.say("Sorry, could not hear you.")
             time.sleep(1)
             continue
@@ -179,8 +186,9 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             time.sleep(1)
             continue
     
-        if robot_id.lower() not in user_input.lower():
-            tts_manager.say("You didn't call me, I will wait for you.")
+        # ② 判断是否叫到我
+        if not called_robot(user_input):
+            tts_manager.say("You didn't call me, I'll wait.")
             time.sleep(1)
             continue
 
