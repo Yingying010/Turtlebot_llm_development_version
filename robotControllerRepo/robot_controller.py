@@ -10,6 +10,8 @@ from robotControllerRepo.actions.move import move
 from robotControllerRepo.actions.rotate import rotate
 from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
+from robotControllerRepo.actions.follow import follow_run
+from robotControllerRepo.actions.face import face_target
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
@@ -23,11 +25,11 @@ from ttsRepo.stream_tts import tts_manager
 # def navigate_to_target(robot_id, target):
 #     print(f"🧭 {robot_id} navigating to {target}")
 
-def follow_target(robot_id, target, robot_position_cache):
-    print(f"👣 {robot_id} following {target}")
+# def follow_target(robot_id, target, robot_position_cache):
+#     print(f"👣 {robot_id} following {target}")
 
-def face_to_target(robot_id, target, robot_position_cache):
-    print(f"🧍 {robot_id} facing {target}")
+# def face_to_target(robot_id, target, robot_position_cache):
+#     print(f"🧍 {robot_id} facing {target}")
 
 # def imitate_robot(robot_id, target_robot_id):
 #     print(f"🎭 {robot_id} imitating {target_robot_id}")
@@ -59,16 +61,25 @@ def execute_action(node, task: Dict):
             navigate_to_target(node, robot, params["target"])
             # print(f"  → Navigating to {params.get('target')}")
         else:
-            print(f"❌ Missing 'position' or 'target' in navigate params: {params}")
+            print(f"Missing 'position' or 'target' in navigate params: {params}")
 
     elif action == "follow":
-        follow_target(node, robot, params["target"])
+        if "target" in params:
+            target = params["target"]
+            follow_run(robot, target)
+        else:
+            logger.warning(f"Missing 'target' in follow params: {params}")
 
     elif action == "imitate":
         imitate_robot(node, robot, params["target"])
 
     elif action == "face_to":
-        face_to_target(node, robot, params["target"])
+        if "target" in params:
+            target = params["target"]
+            face_target(node, robot, target)
+        else:
+            logger.warning(f"Missing 'target' in follow params: {params}")
+        
 
     elif action == "wait":
         print(f"  → Waiting for {params['duration_sec']} seconds")
@@ -91,23 +102,6 @@ def execute_robot_commands(node:Node, robot_id: str, commands: List[Dict], robot
     for cmd in commands:
         execute_action(node, cmd, robot_position_cache)
     print(f"[🤖 Finished executing for {robot_id}]")
-
-
-
-# def flatten_response(response: dict):
-#     commands = []
-#     for robot_id, cmd_list in response.items():
-#         for cmd in cmd_list:
-#             cmd["robot_id"] = robot_id
-#             commands.append(cmd)
-#     return commands
-
-
-# def control_from_json_response(response: Dict[str, List[Dict]],robot_position_cache):
-#     for robot_id, commands in response.items():
-#         print(f"\n[🤖 Executing for {robot_id}]")
-#         for command in commands:
-#             execute_action(command, robot_position_cache)
 
 
 # 示例用法（测试）
