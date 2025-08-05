@@ -1,0 +1,233 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-33c1efe7f301085bb2bf.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				},
+				{
+					"build" : "phasespace_msgs__py",
+					"jsonFile" : "directory-phasespace_msgs__py-0a7605d192eedfa45544.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "/home/ubuntu2204/ros2_ws/build/phasespace_msgs/phasespace_msgs__py",
+					"targetIndexes" : 
+					[
+						4
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "phasespace_msgs",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_build_phasespace_msgs_egg::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_build_phasespace_msgs_egg-e939f993f866c6e39564.json",
+					"name" : "ament_cmake_python_build_phasespace_msgs_egg",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ament_cmake_python_copy_phasespace_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ament_cmake_python_copy_phasespace_msgs-3ec2f89d2c41b7b97e40.json",
+					"name" : "ament_cmake_python_copy_phasespace_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs-ba51efc371af104b697d.json",
+					"name" : "phasespace_msgs",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__cpp-8f76a445ccaf9ee8c272.json",
+					"name" : "phasespace_msgs__cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "phasespace_msgs__py::@739898cbee44c7311ab3",
+					"jsonFile" : "target-phasespace_msgs__py-927bd51a7cb23dacccd3.json",
+					"name" : "phasespace_msgs__py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_generator_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_generator_c-a00310ed4567fe8d7015.json",
+					"name" : "phasespace_msgs__rosidl_generator_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_generator_py::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_generator_py-3c366abc526ed793e9b2.json",
+					"name" : "phasespace_msgs__rosidl_generator_py",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_c-99e93bcbf5393c4fa061.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_c__pyext-e6a76715c695748c8703.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_cpp-c90aaa120ffd7610b18d.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_fastrtps_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_fastrtps_c-4855e942d506b1d867bb.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_fastrtps_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_fastrtps_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_fastrtps_c__pyext-f7c94d1e50b3690850e7.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_fastrtps_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_fastrtps_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_fastrtps_cpp-1e5defdd2e04fc8ae380.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_fastrtps_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_introspection_c::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_introspection_c-8a83733a99c2970f7c0e.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_introspection_c",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_introspection_c__pyext::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_introspection_c__pyext-7fa9d2c8df45e140cdf9.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_introspection_c__pyext",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs__rosidl_typesupport_introspection_cpp::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs__rosidl_typesupport_introspection_cpp-1b2835b1f3e68d60cce3.json",
+					"name" : "phasespace_msgs__rosidl_typesupport_introspection_cpp",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "phasespace_msgs_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-phasespace_msgs_uninstall-8b1f19560025ed70f22d.json",
+					"name" : "phasespace_msgs_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-d0ea3537b266f7a4dcd4.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/ubuntu2204/ros2_ws/build/phasespace_msgs",
+		"source" : "/home/ubuntu2204/ros2_ws/src/phasespace_msgs"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}
