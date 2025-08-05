@@ -50,6 +50,14 @@ def getRobotPositionCache(robot_id: str):
 
     return node, spin_thread
 
+def ensure_pub(node: Node, robot_name: str):
+    if robot_name not in publisher_dict:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[robot_name] = pub
+    return publisher_dict[robot_name]
+
+
+
 
 def rotate_to_face_target(robot_id, publisher, target_position, robot_position_cache, angle_tolerance_deg=5):
     x_target, y_target = target_position["x"], target_position["y"]
@@ -86,34 +94,69 @@ def rotate_to_face_target(robot_id, publisher, target_position, robot_position_c
 
 
 def face_target(node: Node, robot_name: str, target_name: str):
-    # 查目标坐标
-    if target_name not in semantic_locations:
-        print(f"❌ Target '{target_name}' not found in semantic_locations")
-        return
 
-    target_position = semantic_locations[target_name]
-    if "x" not in target_position or "y" not in target_position:
-        print(f"❌ Target '{target_name}' lacks 'x' and 'y'")
-        return
+    # -------- 尝试实时坐标 --------
 
-    # 准备 publisher
-    if robot_name not in publisher_dict:
-        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
-        publisher_dict[robot_name] = (node, pub)
+    realtime_pos = robot_position_cache.get(target_name)
+ 
+    if realtime_pos:                 # 缓存里已有（说明 tracker 正在发布）
+
+        target_position = {"x": realtime_pos["x"], "y": realtime_pos["z"]}
+
+        print(f"✅ Using real-time position for {target_name}: "
+
+              f"x={target_position['x']:.1f}, y={target_position['y']:.1f}")
+
     else:
-        _, pub = publisher_dict[robot_name]
 
-    # 执行旋转
+        # -------- 等待 2 秒看看缓存是否出现 --------
+
+        for _ in range(20):          # 20 × 0.1 s = 2 s
+
+            time.sleep(0.1)
+
+            realtime_pos = robot_position_cache.get(target_name)
+
+            if realtime_pos:
+
+                target_position = {"x": realtime_pos["x"], "y": realtime_pos["z"]}
+
+                print(f"✅ (Late) got real-time position for {target_name}")
+
+                break
+
+        else:
+
+            # -------- 回退到静态表 --------
+
+            if target_name not in semantic_locations:
+
+                print(f"❌ Target '{target_name}' not in semantic_locations "
+
+                      "and no real-time data available")
+
+                return
+
+            target_position = semantic_locations[target_name]
+
+            print(f"⚠️ Using static position for {target_name}: {target_position}")
+ 
+            if "x" not in target_position or "y" not in target_position:
+
+                print(f"❌ Target '{target_name}' lacks 'x' and 'y'")
+
+                return
+ 
+    # -------- 准备 publisher 并执行旋转 --------
+    pub = ensure_pub(node, robot_name)
     rotate_to_face_target(robot_name, pub, target_position, robot_position_cache)
+ 
 
 
-def main():
-    rclpy.init()
-    robot_name = "robot1"           # ← 换成你的机器人名称
-    target_name = "robot2"            # ← 换成你想面向的目标名称
-
+def face_run(robot_name:str, target_name:str):
     # 获取位置缓存
     getRobotPositionCache(robot_name)
+    getRobotPositionCache(target_name)
 
     # 初始化 ROS 节点
     node = rclpy.create_node(f'face_node_{robot_name}')
@@ -126,4 +169,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    rclpy.init()
+    robot_name = "robot1"           # ← 换成你的机器人名称
+    target_name = "robot2"            # ← 换成你想面向的目标名称
+    face_run()

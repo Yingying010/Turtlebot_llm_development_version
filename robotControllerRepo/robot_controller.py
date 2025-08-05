@@ -11,7 +11,7 @@ from robotControllerRepo.actions.rotate import rotate
 from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow2 import follow_run
-from robotControllerRepo.actions.face import face_target
+from robotControllerRepo.actions.face import face_run
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
@@ -76,7 +76,7 @@ def execute_action(node, task: Dict):
     elif action == "face_to":
         if "target" in params:
             target = params["target"]
-            face_target(node, robot, target)
+            face_run(robot, target)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
         
