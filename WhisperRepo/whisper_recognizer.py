@@ -154,14 +154,14 @@ def Whisper_run(callback_func):
                 conversation_active.set()
                 callback_func()
 
-            elif "hi assistant" in clean_text:
+            elif "i want to chat with you" or "open chat system" in clean_text:
                 config.set(chat_or_instruct=True)
                 logger.info("💬 Switched to CHAT mode.")
                 tts_manager.say("Sure, I'm now in chat mode.")
                 conversation_active.set()
                 callback_func()
 
-            elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye"}:
+            elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
                 tts_manager.say("Goodbye!")
                 time.sleep(1)
                 os._exit(0)

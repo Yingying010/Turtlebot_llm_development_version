@@ -118,7 +118,7 @@ def inference(user_input):
     output = llm.create_chat_completion(
         messages,
         temperature=0.3,
-        max_tokens= 512
+        max_tokens= 600
     )
 
     end = time.time()
@@ -167,6 +167,8 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     while True:
         try:
             user_input = recognize(delay=3).strip()  # 重新录音
+            if config.get("robot_id") not in user_input.lower():
+                tts_manager.say("You didn't call me, I will waiting for you")
         except Exception as e:
             logger.warning(f"🎙️ Speech recognition failed: {e}")
             tts_manager.say("Sorry, could not hear you.")
@@ -180,7 +182,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         logger.info(f"🗣️ You said: {user_input}")
 
-        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up"]
+        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "end of this mode","ok finish"]
 
         if any(kw in user_input.lower() for kw in exit_keywords):
             tts_manager.say("Exiting voice control.")
