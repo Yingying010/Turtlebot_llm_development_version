@@ -132,8 +132,8 @@ def follow_loop(ctrl_node: Node, follower: str, target: str):
     tts_manager.say(f"{follower} is now following {target}")
 
     while rclpy.ok():
-        fx, fz, _ = get_current_position(follower)
-        tx, tz, _ = get_current_position(target)
+        fx, fz, _ = get_current_position(follower, robot_position_cache)
+        tx, tz, _ = get_current_position(target, robot_position_cache)
         dx, dz = tx - fx, tz - fz
         dist = math.hypot(dx, dz)
 
