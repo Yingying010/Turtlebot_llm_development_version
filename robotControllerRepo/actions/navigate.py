@@ -18,11 +18,11 @@ publisher_dict = {}        # e.g., {'turtlebot1': (node, publisher)}
 
 
 
-def getRobotPositionCache(robot_id: str):
+def getRobotPositionCache(robot_id: str, executor):
+    from phasespace.rigid_tracker import RigidTracker
     node = RigidTracker(robot_position_cache, robot_id)
-    spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
-    spin_thread.start()
-
+    executor.add_node(node)  # ✅ 统一加入主 executor
+ 
     print(f"⏳ Waiting for position data of {robot_id}...")
     for _ in range(30):
         if robot_id in robot_position_cache:
@@ -32,9 +32,9 @@ def getRobotPositionCache(robot_id: str):
         time.sleep(0.2)
     else:
         print(f"❌ Timeout: No position data for {robot_id}")
-        return None  # or raise Exception()
-
-    return node, spin_thread  # ⬅️ 可以返回节点句柄（可选）
+        return None
+ 
+    return node
 
 
 def get_current_position(robot_name, robot_position_cache):
@@ -177,8 +177,8 @@ def navigate_to_position(node:Node, robot_name:str, target: Dict[str, float], ro
     print(f"✅ {robot_name} navigation complete.")
 
 
-def navigate_to_target(node, robot_name, target):
-    getRobotPositionCache(robot_name)
+def navigate_to_target(node, robot_name, target, executor):  # ✅ 新增 executor
+    getRobotPositionCache(robot_name, executor)
 
     # === STEP 1: 检查是否是语义位置名（字符串） ===
     if isinstance(target, str):
@@ -199,29 +199,45 @@ def navigate_to_target(node, robot_name, target):
         print(f"⚠️ Invalid resolved target: {resolved_target}")
 
 def main():
+
+    from rclpy.executors import MultiThreadedExecutor
+ 
     rclpy.init()
 
-    # ✅ 启动位置缓存获取线程
-    robot_name = "robot1"  # ← 请替换为你的实际机器人名称，如 'turtlebot1'
-    getRobotPositionCache(robot_name)
+    executor = MultiThreadedExecutor()
+ 
+    robot_name = "robot1"
 
-    # ✅ 初始化 ROS2 节点
+    target = "lucy"
+ 
+    # ✅ 1. 加入 RigidTracker 节点
+
+    getRobotPositionCache(robot_name, executor)
+ 
+    # ✅ 2. 创建 navigator 主节点
+
     node = rclpy.create_node(f'navigator_{robot_name}')
 
-    # ✅ 示例目标：含位置和朝向
-    # target = {
-    #     "x": 0.0,
-    #     "y": 0.0,
-    #     "heading_deg": 90.0
-    # }
-    target = "lucy"
+    executor.add_node(node)
+ 
+    # ✅ 3. 启动 spin（后台或主线程都可以）
+
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+
+    spin_thread.start()
+ 
+    # ✅ 4. 执行导航逻辑
 
     print(f"\n🚀 Start navigation test for {robot_name}...\n")
-    navigate_to_target(node, robot_name, target)
 
-    # ✅ 清理资源
+    navigate_to_target(node, robot_name, target, executor)
+ 
+    # ✅ 5. 清理
+
     node.destroy_node()
+
     rclpy.shutdown()
+ 
 
 if __name__ == "__main__":
     main()

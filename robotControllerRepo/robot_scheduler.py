@@ -87,7 +87,6 @@ def status_rank(s: str) -> int:
 # === 等待所有机器人 status 为某个值 ===
 def wait_for_all_status(sync_key: tuple, target_count: int, expected_status: str):
     while True:
-        rclpy.spin_once(ros_node, timeout_sec=0.1)
         current_statuses = status_cache[sync_key]
         matching = [r for r, s in current_statuses.items() if status_rank(s) >= status_rank(expected_status)]
         print(f"🔍 Waiting for {expected_status} in {sync_key}, current: {len(matching)}/{target_count}")
@@ -164,17 +163,25 @@ def shutdown_node(node: Node):
         node.destroy_node()
 
 
-def run(task_data: Dict[str,Any]):
+from rclpy.executors import MultiThreadedExecutor
+ 
+def run(task_data: Dict[str, Any]):
     global ros_node, status_pub
     isSchedule = False
     robot_id = config.get("robot_id")
-
+ 
     rclpy.init()
+    executor = MultiThreadedExecutor()
     ros_node = rclpy.create_node(f"status_node_{robot_id}")
+    executor.add_node(ros_node)
+ 
     status_pub = ros_node.create_publisher(String, "/robot_status", 10)
     ros_node.create_subscription(String, "/robot_status", status_callback, 10)
-
-
+ 
+    # ✅ 在后台启动 spin
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+ 
     try:
         print("==================task_data==============\n")
         print(task_data)
@@ -183,7 +190,7 @@ def run(task_data: Dict[str,Any]):
         isSchedule = True
         return isSchedule
     except Exception as e:
-        logger.warning("⚠️ Failed to schedule tasks:",e)
+        logger.warning("⚠️ Failed to schedule tasks:", e)
         isSchedule = False
         return isSchedule
     finally:
@@ -192,66 +199,8 @@ def run(task_data: Dict[str,Any]):
         rclpy.shutdown()
 
 
-    
-
-# === 主程序入口 ===
 if __name__ == "__main__":
-    rclpy.init()
-    robot_id = "robot1"
-
-    ros_node = rclpy.create_node(f"status_node_{robot_id}")
-    status_pub = ros_node.create_publisher(String, "/robot_status", 10)
-    ros_node.create_subscription(String, "/robot_status", status_callback, 10)
-    
-
-    # === 模拟任务数据 ===
-    # raw_response = dedent(""" 
-    # {
-    #   "robots": {
-    #     "robot1": [
-    #       {"task_id": "t0", "action": "navigate", "parameters": { "position": { "x": 50, "y": 60 } }, "sync_group": "navigate_to_candy", "sequence": 0},
-    #       {"task_id": "t1", "action": "collect", "parameters": { "item": "candy" }, "sync_group": "collect_candy", "sequence": 1},
-    #       {"task_id": "t2", "action": "navigate", "parameters": { "position": { "x": 1500, "y": -300 } }, "sync_group": "deliver_candy", "sequence": 2},
-    #       {"task_id": "t3", "action": "deliver", "parameters": { "item": "candy" }, "sync_group": "deliver_candy", "sequence": 3}
-    #     ],
-    #     "robot2": [
-    #       {"task_id": "t4", "action": "navigate", "parameters": { "position": { "x": 50, "y": 60 } }, "sync_group": "navigate_to_candy", "sequence": 0},
-    #       {"task_id": "t5", "action": "collect", "parameters": { "item": "candy" }, "sync_group": "collect_candy", "sequence": 1},
-    #       {"task_id": "t6", "action": "navigate", "parameters": { "position": { "x": 1500, "y": -300 } }, "sync_group": "deliver_candy", "sequence": 2},
-    #       {"task_id": "t7", "action": "deliver", "parameters": { "item": "candy" }, "sync_group": "deliver_candy", "sequence": 3}
-    #     ]
-    #   } 
-    # }  
-    # """)
-
-    # raw_response = dedent(""" 
-    # {
-    #   "robots": {
-    #     "robot1": [
-    #       {"task_id": "t0", "action": "move", "parameters": {"direction": "forward", "value": 10, "unit": "seconds"}, "sync_group": null, "sequence": 0},
-    #       {"task_id": "t1", "action": "turn", "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, "sync_group": "turn", "sequence": 2}
-    #     ],
-    #     "robot2": [
-    #       {"task_id": "t2", "action": "move", "parameters": {"direction": "backward", "value": 5, "unit": "seconds"}, "sync_group": null, "sequence": 1},
-    #       {"task_id": "t3", "action": "turn", "parameters": {"direction": "right", "value": 90, "unit": "degrees"}, "sync_group": "turn", "sequence": 2}
-    #     ]
-    #   } 
-    # }  
-    # """)
-
-    # raw_response = dedent(""" 
-    # {
-    #   "robots": {
-    #     "robot1": [
-    #       {"task_id": "t0", "action": "navigate", "parameters": { "position": { "x": 0, "y": 0 } }, "sync_group": null, "sequence": 0},
-    #       {"task_id": "t1", "action": "move", "parameters": {"direction": "forward", "value": 5, "unit": "seconds"}, "sync_group": null, "sequence": 1},
-    #       {"task_id": "t2", "action": "turn", "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, "sync_group": null, "sequence": 2}
-    #     ]
-    #   }
-    # }
-    # """)
-
-    raw_response = dedent(""" 
+    raw_response = dedent("""
     {
       "robots": {
         "robot1": [
@@ -261,19 +210,5 @@ if __name__ == "__main__":
       }
     }
     """)
-
-
     task_data = json.loads(raw_response)
-    print("==================task_data==============\n")
-    print(task_data)
-    sync_target_counts = count_robots_per_sync_key(task_data)
-
-    # robot_command_map = task_data["robots"]
-
-
-    try:
-        run_scheduler_for_robot(ros_node, robot_id, task_data, sync_target_counts)
-    finally:
-        print(f"🛑 Shutting down ROS node for {robot_id}")
-        shutdown_node(ros_node)
-        rclpy.shutdown()
+    run(task_data)
