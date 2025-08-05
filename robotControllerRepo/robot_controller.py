@@ -10,7 +10,7 @@ from robotControllerRepo.actions.move import move
 from robotControllerRepo.actions.rotate import rotate
 from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
-from robotControllerRepo.actions.follow import follow_run
+from robotControllerRepo.actions.follow2 import follow_run
 from robotControllerRepo.actions.face import face_target
 import time
 from typing import Dict, List
