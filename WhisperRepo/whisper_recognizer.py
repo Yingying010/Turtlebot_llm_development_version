@@ -19,7 +19,7 @@ SAMPLERATE = 48000
 BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 20.0
 SILENCE_DURATION  = 1.5
-MAX_DURATION      = 20
+MAX_DURATION      = 30
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
 # === 清理文本 ===
