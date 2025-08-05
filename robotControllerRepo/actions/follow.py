@@ -137,14 +137,14 @@ def follow_loop(ctrl_node: Node, follower: str, target: str):
         dx, dz = tx - fx, tz - fz
         dist = math.hypot(dx, dz)
 
-        target = {"x":tx, "y":tz}
+        tgt_pos = {"x":tx, "y":tz}
 
         if dist > follow_dist+ hysteresis:
-            rotate_to_face_target(follower,pub,target,robot_position_cache)
-            move_forward_until_reached(follower, pub, target, robot_position_cache, tolerance=follow_dist+hysteresis)
+            rotate_to_face_target(follower,pub,tgt_pos,robot_position_cache)
+            move_forward_until_reached(follower, pub, tgt_pos, robot_position_cache, tolerance=follow_dist+hysteresis)
         else:
             pub.publish(Twist())
-            rotate_to_face_target(follower,pub,target,robot_position_cache)
+            rotate_to_face_target(follower,pub,tgt_pos,robot_position_cache)
             time.sleep(0.2)
 
         print(f"👣 {follower}→{target}  dist={dist:.0f} mm")
