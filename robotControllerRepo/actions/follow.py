@@ -128,7 +128,7 @@ follow_dist = 200.0
 hysteresis = 50.0
 
 def follow_loop(ctrl_node: Node, follower: str, target: str):
-    publisher = ensure_pub(ctrl_node, follower)
+    pub = ensure_pub(ctrl_node, follower)
     tts_manager.say(f"{follower} is now following {target}")
 
     while rclpy.ok():
@@ -137,14 +137,14 @@ def follow_loop(ctrl_node: Node, follower: str, target: str):
         dx, dz = tx - fx, tz - fz
         dist = math.hypot(dx, dz)
 
+        target = {"x":tx, "y":tz}
+
         if dist > follow_dist+ hysteresis:
-            target = {"x":tx, "y":tz}
-            rotate_to_face_target(follower,publisher,target,robot_position_cache)
-            move_forward_until_reached(follower, publisher, target, robot_position_cache, tolerance=follow_dist+hysteresis)
+            rotate_to_face_target(follower,pub,target,robot_position_cache)
+            move_forward_until_reached(follower, pub, target, robot_position_cache, tolerance=follow_dist+hysteresis)
         else:
-            target = {"x":tx, "y":tz}
-            publisher.publish(Twist())
-            rotate_to_face_target(follower,publisher,target,robot_position_cache)
+            pub.publish(Twist())
+            rotate_to_face_target(follower,pub,target,robot_position_cache)
             time.sleep(0.2)
 
         print(f"👣 {follower}→{target}  dist={dist:.0f} mm")
