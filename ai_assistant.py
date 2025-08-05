@@ -72,7 +72,8 @@ def run_conversation():
 
     except Exception as e:
         logger.error(f"🧠 LLM error: {e}")
-        tts_manager.say("Something went wrong while thinking.")
+        tts_manager.say("Something went wrong while thinking")
+        time.sleep(0.5)
         conversation_active.clear()
         return
 
