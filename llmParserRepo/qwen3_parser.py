@@ -155,10 +155,27 @@ def extract_last_json(text: str):
 
 
 # ============== 主控制函数 =================
-# ① 根据 robot_id 生成别名集合
-base_id   = config.get("robot_id")          # "robot1"
-spaced_id = re.sub(r"(\d+)", r" \1", base_id)  # "robot 1"
-robot_aliases = {base_id, spaced_id}    # 可再手工 .add("robo-one") 等
+# 支持更多数字的转换
+number_words = {
+    "0": "zero", "1": "one", "2": "two", "3": "three",
+    "4": "four", "5": "five", "6": "six", "7": "seven",
+    "8": "eight", "9": "nine", "10": "ten"
+}
+ 
+base_id = config.get("robot_id")  # e.g., "robot1"
+ 
+# 插入空格：robot1 → robot 1
+spaced_id = re.sub(r"(\d+)", r" \1", base_id)
+ 
+# 替换成英文单词：robot1 → robot one
+text_id = re.sub(r"(\d+)", lambda m: f" {number_words.get(m.group(1), m.group(1))}", base_id)
+ 
+# 创建 alias 集合
+robot_aliases = {base_id, spaced_id, text_id}
+ 
+# 可手动添加更多别名
+# robot_aliases.add("robo-one")
+ 
 def called_robot(text: str) -> bool:
     t = text.lower()
     return any(alias in t for alias in robot_aliases)

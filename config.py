@@ -30,7 +30,8 @@ semantic_locations = {
     "amy": {"x": 100, "y": 100, "heading":180},
     "table": {"x": 500, "y": -200},
     "robot2": {"x": 0, "y": 0},  # 可选 heading
-    "corner": {"x": 0, "y": 0}
+    "corner": {"x": 0, "y": 0},
+    "shelf": {"x": -1000, "y": -1000}
 }
 
 # 哪些参数需要记录变更日志
