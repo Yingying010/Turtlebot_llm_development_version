@@ -167,19 +167,20 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
     while True:
         try:
-            user_input = recognize(delay=3).strip()  # 重新录音
-            if robot_id in user_input.lower():
-                tts_manager.say("You didn't call me, I will waiting for you")
-                time.sleep(1)
-                continue
+            user_input = recognize(delay=3).strip()
         except Exception as e:
             logger.warning(f"🎙️ Speech recognition failed: {e}")
             tts_manager.say("Sorry, could not hear you.")
             time.sleep(1)
             continue
-
+    
         if not user_input:
             tts_manager.say("Didn't catch that. Try again.")
+            time.sleep(1)
+            continue
+    
+        if robot_id.lower() not in user_input.lower():
+            tts_manager.say("You didn't call me, I will wait for you.")
             time.sleep(1)
             continue
 
