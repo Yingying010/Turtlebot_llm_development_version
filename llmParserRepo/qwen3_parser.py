@@ -206,8 +206,8 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
 
         # call scheduler
-        if response:
-            isSchedule = robot_scheduler.run(response)
+        if json_result:
+            isSchedule = robot_scheduler.run(json_result)
             if isSchedule == True:
                 logger.info("✅ Command(s) executed successfully.")
                 tts_manager.say("Command executed.")
@@ -218,4 +218,4 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 time.sleep(1)
 
 if __name__ == "__main__":
-    response = run_conversation_loop()
+    json_result = run_conversation_loop()
