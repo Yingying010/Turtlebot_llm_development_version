@@ -151,7 +151,8 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ta
         isExecute = True
         return isExecute
     except Exception as e:
-        logger.warning("⚠️ Failed to execute tasks:",e)
+        import traceback
+        logger.warning(f"⚠️ Failed to execute tasks:\n{traceback.format_exc()}")
         isExecute = False
         return isExecute
 
