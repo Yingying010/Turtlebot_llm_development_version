@@ -39,7 +39,7 @@ def ensure_pub(node: Node, name: str):
         node.create_publisher(Twist, f'/{name}/cmd_vel', 10)
     )
 
-def get_current_position(robot_name):
+def get_current_position(robot_name, robot_position_cache):
     if robot_name in robot_position_cache:
         rigid = robot_position_cache[robot_name]
         x = rigid["x"]
