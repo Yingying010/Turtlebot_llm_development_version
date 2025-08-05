@@ -13,6 +13,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow2 import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
+from robotControllerRepo.actions.deliver import deliver_item
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
@@ -87,17 +88,17 @@ def execute_action(node, task: Dict):
     elif action == "collect":
         item = params["item"]
         if "position" in params:
-            navigate_to_target(node, robot, item, params["position"])
+            collect_item(node, robot, item, params["position"])
         elif "target" in params:
-            navigate_to_target(node, robot, item, params["target"])
+            collect_item(node, robot, item, params["target"])
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
     elif action == "deliver":
         item = params["item"]
         if "position" in params:
-            navigate_to_target(node, robot, item, params["position"])
+            deliver_item(node, robot, item, params["position"])
         elif "target" in params:
-            navigate_to_target(node, robot, item, params["target"])
+            deliver_item(node, robot, item, params["target"])
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
     else:
