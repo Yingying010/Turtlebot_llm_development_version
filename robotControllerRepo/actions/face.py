@@ -22,9 +22,9 @@ from phasespace.rigid_tracker import RigidTracker
  
 # ───── 全局缓存 ─────
 
-pose_cache: Dict[str, Dict] = {}
+pose_cache = {}
 
-pub_cache:  Dict[str, 'Publisher'] = {}
+pub_cache = {}
  
 def ensure_pub(node: Node, name: str):
 
