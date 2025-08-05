@@ -40,7 +40,7 @@ from ttsRepo.stream_tts import tts_manager
 
 
 
-def execute_action(node, task: Dict):
+def execute_action(node, task: Dict, executor):
     print(node)
     robot = task["robot"]
     action = task["action"]
@@ -57,10 +57,10 @@ def execute_action(node, task: Dict):
 
     elif action == "navigate":
         if "position" in params:
-            navigate_to_target(node, robot, params["position"])
+            navigate_to_target(node, robot, params["position"], executor)
             # print(f"  → Navigating to {params.get('position')}")
         elif "target" in params:
-            navigate_to_target(node, robot, params["target"])
+            navigate_to_target(node, robot, params["target"], executor)
             # print(f"  → Navigating to {params.get('target')}")
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")

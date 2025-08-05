@@ -16,6 +16,7 @@ from phasespace.rigid_tracker import RigidTracker
 from robotControllerRepo.robot_controller import execute_action
 from config import config
 from loguru import logger
+import traceback
 
 # === 全局变量 ===
 ros_node = None
@@ -96,7 +97,7 @@ def wait_for_all_status(sync_key: tuple, target_count: int, expected_status: str
         time.sleep(0.2)
   
 # === 执行任务调度 ===
-def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], target_counts: Dict[tuple, int]):
+def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], target_counts: Dict[tuple, int], executor):
     isExecute = False
 
     print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
@@ -128,7 +129,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ta
             
 
             # Step 3: 执行动作
-            execute_action(node, task)
+            execute_action(node, task, executor)
 
             # Step 4: 发布 finished 状态
             if sync_group:
@@ -151,7 +152,6 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ta
         isExecute = True
         return isExecute
     except Exception as e:
-        import traceback
         logger.warning(f"⚠️ Failed to execute tasks:\n{traceback.format_exc()}")
         isExecute = False
         return isExecute
@@ -187,7 +187,7 @@ def run(task_data: Dict[str, Any]):
         print("==================task_data==============\n")
         print(task_data)
         sync_target_counts = count_robots_per_sync_key(task_data)
-        run_scheduler_for_robot(ros_node, robot_id, task_data, sync_target_counts)
+        run_scheduler_for_robot(ros_node, robot_id, task_data, sync_target_counts, executor)
         isSchedule = True
         return isSchedule
     except Exception as e:
