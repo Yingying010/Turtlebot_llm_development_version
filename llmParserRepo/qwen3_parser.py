@@ -183,7 +183,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     
         if not user_input:
             tts_manager.say("Didn't catch that. Try again.")
-            time.sleep(2)
+            time.sleep(3)
             continue
     
         # ② 判断是否叫到我
