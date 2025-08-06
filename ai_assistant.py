@@ -11,6 +11,7 @@ import time
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
 from loguru import logger
+import traceback
 
 running = False
 actived = 0
@@ -70,8 +71,8 @@ def run_conversation():
         else:
             response = run_conversation_loop()
 
-    except Exception as e:
-        logger.error(f"🧠 LLM error: {e}")
+    except Exception:
+        logger.error(f"🧠 LLM error: \n{traceback.format_exc()}")
         tts_manager.say("Something went wrong while thinking")
         time.sleep(0.5)
         conversation_active.clear()

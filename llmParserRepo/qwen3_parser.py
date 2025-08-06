@@ -11,6 +11,7 @@ from loguru import logger
 from config import config
 from llama_cpp import Llama
 import robotControllerRepo.robot_scheduler as robot_scheduler
+import traceback
 
 
 
@@ -231,8 +232,8 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 tts_manager.say("Could not understand the command.")
                 time.sleep(1)
 
-        except Exception as e:
-            logger.warning(f"⚠️ Error during LLM or parsing: {e}")
+        except Exception:
+            logger.warning(f"⚠️ Error during LLM or parsing: \n{traceback.format_exc()}")
             tts_manager.say("Something went wrong.")
 
 
