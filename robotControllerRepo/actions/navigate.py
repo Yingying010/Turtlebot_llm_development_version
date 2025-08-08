@@ -189,7 +189,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
 
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
     # 1) 确保位置跟踪节点已接入 executor 并数据就绪
-    rigid_node = getRobotPositionCache(node, robot_name, executor)
+    rigid_node = getRobotPositionCache(robot_name, executor)
     if rigid_node is None:
         print("❌ Abort navigation due to missing pose.")
         return
