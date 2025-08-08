@@ -204,8 +204,10 @@ def run(task_data: Dict[str, Any]):
     robot_id = config.get("robot_id")
  
     # 1) init（多次调用保护）
-    if not rclpy.is_initialized():
+    try:
         rclpy.init()
+    except RuntimeError:
+        pass
  
     # 2) node & executor
     ros_node = rclpy.create_node(f"status_node_{robot_id}")
