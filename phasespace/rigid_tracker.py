@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation as R
 class RigidTracker(Node):
     def __init__(self, position_cache, robot_name, position_lock=None):
         print(f"✅ RigidTracker initialized for {robot_name}")
-        super().__init__('rigid_tracker')
+        super().__init__(f'rigid_tracker_{robot_name}')
         self.subscription = self.create_subscription(
             Rigid,
             f'/phasespace_body_{robot_name}',
