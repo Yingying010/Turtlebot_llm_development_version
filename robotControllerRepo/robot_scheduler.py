@@ -140,7 +140,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             
 
             # Step 3: 执行动作
-            execute_action(node, task)
+            execute_action(node, executor, task)
 
             # Step 4: 发布 finished 状态
             if sync_group:
