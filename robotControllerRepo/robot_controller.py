@@ -88,17 +88,17 @@ def execute_action(node, executor, task: Dict):
     elif action == "collect":
         item = params["item"]
         if "position" in params:
-            collect_item(node, robot, item, params["position"])
+            collect_item(node, robot, item, params["position"], executor)
         elif "target" in params:
-            collect_item(node, robot, item, params["target"])
+            collect_item(node, robot, item, params["target"], executor)
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
     elif action == "deliver":
         item = params["item"]
         if "position" in params:
-            deliver_item(node, robot, item, params["position"])
+            deliver_item(node, robot, item, params["position"], executor)
         elif "target" in params:
-            deliver_item(node, robot, item, params["target"])
+            deliver_item(node, robot, item, params["target"], executor)
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
     else:
