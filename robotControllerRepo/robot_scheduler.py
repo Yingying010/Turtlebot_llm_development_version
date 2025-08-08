@@ -225,7 +225,7 @@ def run(task_data: Dict[str, Any]):
  
     try:
         target_counts = count_robots_per_sync_key(task_data)
-        run_scheduler_for_robot(ros_node, robot_id, task_data, target_counts)
+        run_scheduler_for_robot(ros_node, robot_id, task_data)
         return True
     except Exception:
         logger.exception("⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
