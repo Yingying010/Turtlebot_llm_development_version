@@ -20,20 +20,24 @@ cache_lock = threading.Lock()
 
 
 # === 将 RigidTracker 加入同一个 executor，并等待数据就绪 ===
-def getRobotPositionCache(parent_node: Node, robot_id: str, executor: MultiThreadedExecutor) -> Optional[Node]:
-    rigid_node = RigidTracker(robot_position_cache, robot_id)
-    executor.add_node(rigid_node)  # ✅ 正规加入共享执行器
-
+def getRobotPositionCache(robot_id: str, executor: MultiThreadedExecutor) -> Optional[object]:
+    # 不要在这里持锁！
+    rigid_node = RigidTracker(
+        position_cache=robot_position_cache,
+        robot_name=robot_id,
+        position_lock=cache_lock,        # ✅ 正确参数名
+    )
+    executor.add_node(rigid_node)        # ✅ 加入共享 executor
+ 
     print(f"⏳ Waiting for position data of {robot_id}...")
-    for _ in range(50):  # 最长 ~10s
+    for _ in range(50):  # ~10s
         with cache_lock:
             ok = robot_id in robot_position_cache
         if ok:
             print(f"✅ Got position data for {robot_id}.")
-            # print("📦 robot_position_cache =", robot_position_cache)
             return rigid_node
         time.sleep(0.2)
-
+ 
     print(f"❌ Timeout: No position data for {robot_id}")
     return None
 

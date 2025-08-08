@@ -1,5 +1,3 @@
-import os, sys
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 import rclpy
 from rclpy.node import Node
 from phasespace_msgs.msg import Rigid
@@ -9,7 +7,7 @@ from scipy.spatial.transform import Rotation as R
  
  
 class RigidTracker(Node):
-    def __init__(self, position_cache, robot_name):
+    def __init__(self, position_cache, robot_name, position_lock=None):
         print(f"✅ RigidTracker initialized for {robot_name}")
         super().__init__('rigid_tracker')
         self.subscription = self.create_subscription(
@@ -18,6 +16,7 @@ class RigidTracker(Node):
             self.listener_callback,
             10
         )
+        self.position_cache = position_cache
         self.position_cache = position_cache
         self.robot_name = robot_name
 
