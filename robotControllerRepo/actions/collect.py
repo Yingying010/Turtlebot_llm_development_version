@@ -245,7 +245,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
 def collect_item(node: Node, robot_name: str, item: str, target, executor):
     getRobotPositionCache(robot_name, executor)
     # === 阶段 1：导航到目标位置 ===
-    navigate_to_target(node, robot_name, target)
+    navigate_to_target(node, executor, robot_name, target)
     print(f"🎯 Reached target location, collecting {item}...")
  
     # === 阶段 2：收集 ===
