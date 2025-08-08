@@ -34,7 +34,7 @@ def getRobotPositionCache(robot_id: str, executor: MultiThreadedExecutor) -> Opt
         with cache_lock:
             ok = robot_id in robot_position_cache
         if ok:
-            print(f"✅ Got position data for {robot_id}.")
+            print(f"✅ Got position data for {robot_id}. and {robot_position_cache}")
             return rigid_node
         time.sleep(0.2)
  
