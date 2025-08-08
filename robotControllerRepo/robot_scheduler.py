@@ -108,7 +108,7 @@ def wait_for_all_status(sync_key: tuple, expected: str, timeout=15):
     ev.clear()           # 复位给下一个阶段用
   
 # === 执行任务调度 ===
-def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any]):
+def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], executor):
     isExecute = False
 
     print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
@@ -225,7 +225,7 @@ def run(task_data: Dict[str, Any]):
  
     try:
         target_counts = count_robots_per_sync_key(task_data)
-        run_scheduler_for_robot(ros_node, robot_id, task_data)
+        run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
         return True
     except Exception:
         logger.exception("⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
