@@ -180,34 +180,26 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         time.sleep(0.1)
 
 
-def navigate_to_position(node:Node, robot_name:str, target: Dict[str, float], robot_position_cache):
+def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_name, robot_position_cache)
-
+    x_now, y_now, _ = get_current_position(robot_name)
     dx = x_target - x_now
     dy = y_target - y_now
+
     distance = math.hypot(dx, dy)
-    angle = math.atan2(dy, dx)
-
+ 
     print(f"\n🧭 NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f}) | dist={distance:.2f}")
-
-    if robot_name not in publisher_dict:
-        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
-        publisher_dict[robot_name] = (node, pub)
-    else:
-        _, pub = publisher_dict[robot_name]
-
-    # ✅ Phase 1: rotate first
-    rotate_to_face_target(robot_name, pub, target, robot_position_cache)
-
-    # ✅ Phase 2: move straight
-    move_forward_until_reached(robot_name, pub, target, robot_position_cache)
-
-    # ✅ Phase 3: adjust to target heading if given
+ 
+    # Phase 1: 先对准
+    rotate_to_face_target(node, robot_name, target)
+ 
+    # Phase 2: 直行
+    move_forward_until_reached(node, robot_name, target)
+ 
+    # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:
-        rotate_to_final_heading(robot_name, pub, target["heading_deg"], robot_position_cache)
-
-
+        rotate_to_final_heading(node, robot_name, target["heading_deg"])
+ 
     print(f"✅ {robot_name} navigation complete.")
 
 
