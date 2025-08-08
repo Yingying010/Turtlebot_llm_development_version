@@ -1,7 +1,6 @@
 import rclpy
 from rclpy.node import Node
 from phasespace_msgs.msg import Rigid
-from robotControllerRepo.actions.navigate import cache_lock
 import math
 from scipy.spatial.transform import Rotation as R
  
@@ -17,7 +16,7 @@ class RigidTracker(Node):
             10
         )
         self.position_cache = position_cache
-        self.position_cache = position_cache
+        self.position_lock = position_lock
         self.robot_name = robot_name
 
     def listener_callback(self, msg):
@@ -26,18 +25,22 @@ class RigidTracker(Node):
             cond = msg.cond
             if cond > 0.8:
                 heading_y = yaw_from_quat(msg.qx, msg.qy, msg.qz, msg.qw)
-                with cache_lock:
-                    self.position_cache[self.robot_name] = {
-                        "x": msg.x,
-                        "y": msg.y,
-                        "z": msg.z,
-                        "qx": msg.qx,
-                        "qy": msg.qy,
-                        "qz": msg.qz,
-                        "qw": msg.qw,
-                        "heading_y": heading_y,
-                        "cond": cond
-                    }
+                data = {
+                    "x": msg.x,
+                    "y": msg.y,
+                    "z": msg.z,
+                    "qx": msg.qx,
+                    "qy": msg.qy,
+                    "qz": msg.qz,
+                    "qw": msg.qw,
+                    "heading_y": heading_y,
+                    "cond": cond
+                }
+                if self.position_lock:
+                    with self.position_lock:
+                        self.position_cache[self.robot_name] = data
+                else:
+                    self.position_cache[self.robot_name] = data
 
                 # self.get_logger().info(
                 #     f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
