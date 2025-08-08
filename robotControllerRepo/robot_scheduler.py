@@ -12,7 +12,6 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from textwrap import dedent
 import threading
-from phasespace.rigid_tracker import RigidTracker
 from robotControllerRepo.robot_controller import execute_action
 from config import config
 from loguru import logger
