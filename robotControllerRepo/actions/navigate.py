@@ -9,13 +9,18 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
-
+from typing import Tuple
+from rclpy.publisher import Publisher
 from phasespace.rigid_tracker import RigidTracker
 from config import semantic_locations
+from rclpy._rclpy_pybind11 import InvalidHandle
+ 
+
 
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}
-publisher_dict: Dict[str, tuple] = {}
+
+publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 cache_lock = threading.Lock()
 
 
@@ -55,14 +60,37 @@ def get_current_position(robot_name: str) -> tuple:
     return 0.0, 0.0, 0.0
 
 
-def _ensure_pub(node: Node, robot_name: str):
-    if robot_name not in publisher_dict:
+def _ensure_pub(node: Node, robot_name: str) -> Publisher:
+    key = (id(node), robot_name)
+    pub = publisher_dict.get(key)
+ 
+    # 若没有或句柄失效，创建/重建
+    if pub is None:
         pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
-        publisher_dict[robot_name] = (node, pub)
-    return publisher_dict[robot_name][1]
+        publisher_dict[key] = pub
+        return pub
+ 
+    # 轻量探测：对失效 publisher，下面 publish 会抛 InvalidHandle；我们捕获并重建
+    try:
+        # 做一次空速率 publish 探针不太优雅，所以交给调用处第一次 publish 捕获也行
+        return pub
+    except Exception:
+        # 理论上不会在这触发，这里留兜底
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+        return pub
+    
+def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
+    pub = _ensure_pub(node, robot_name)
+    try:
+        pub.publish(twist)
+    except InvalidHandle:
+        # 句柄失效 → 重建后重试一次
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[(id(node), robot_name)] = pub
+        pub.publish(twist)
 
-
-def rotate_to_face_target(robot_id: str, publisher, target: Dict[str, float],
+def rotate_to_face_target(node, robot_id: str, publisher, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
     x_target, y_target = target["x"], target["y"]
     x_now, y_now, _ = get_current_position(robot_id)
@@ -89,7 +117,7 @@ def rotate_to_face_target(robot_id: str, publisher, target: Dict[str, float],
         else:
             twist.angular.z = 0.15 * new_direction
 
-        publisher.publish(twist)
+        safe_publish_twist(node, robot_id, twist)
         print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
               f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
         time.sleep(0.1)
@@ -98,7 +126,7 @@ def rotate_to_face_target(robot_id: str, publisher, target: Dict[str, float],
     time.sleep(0.2)
 
 
-def rotate_to_final_heading(robot_name: str, publisher, heading_deg: float,
+def rotate_to_final_heading(node, robot_name: str, publisher, heading_deg: float,
                             angle_tolerance_deg: float = 5.0):
     print(f"\n🎯 ROTATE TO HEADING: {heading_deg:.1f}°")
     while True:
@@ -118,7 +146,7 @@ def rotate_to_final_heading(robot_name: str, publisher, heading_deg: float,
         else:
             twist.angular.z = 0.15 * direction
 
-        publisher.publish(twist)
+        safe_publish_twist(node, robot_name, twist)
         print(f"↪️ adjusting to heading {heading_deg:.1f}°, current={heading_y_now:.1f}°, error={angle_error:.1f}°")
         time.sleep(0.1)
 
@@ -126,7 +154,7 @@ def rotate_to_final_heading(robot_name: str, publisher, heading_deg: float,
     time.sleep(0.2)
 
 
-def move_forward_until_reached(robot_name: str, publisher, target: Dict[str, float],
+def move_forward_until_reached(node, robot_name: str, publisher, target: Dict[str, float],
                                tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0):
     x_target, y_target = target["x"], target["y"]
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
@@ -147,13 +175,13 @@ def move_forward_until_reached(robot_name: str, publisher, target: Dict[str, flo
 
         if abs(angle_error) > max_acceptable_angle_error:
             print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
-            rotate_to_face_target(robot_name, publisher, target)
+            rotate_to_face_target(node, robot_name, publisher, target)
             continue
 
         # 前进
         twist = Twist()
         twist.linear.x = 0.1  # 小速度保证精度
-        publisher.publish(twist)
+        safe_publish_twist(node, robot_name, twist)
         print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, "
               f"error={angle_error:.1f}°")
 
@@ -175,14 +203,14 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     pub = _ensure_pub(node, robot_name)
 
     # Phase 1: 先对准
-    rotate_to_face_target(robot_name, pub, target)
+    rotate_to_face_target(node, robot_name, pub, target)
 
     # Phase 2: 直行
-    move_forward_until_reached(robot_name, pub, target)
+    move_forward_until_reached(node, robot_name, pub, target)
 
     # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:
-        rotate_to_final_heading(robot_name, pub, target["heading_deg"])
+        rotate_to_final_heading(node, robot_name, pub, target["heading_deg"])
 
     print(f"✅ {robot_name} navigation complete.")
 
