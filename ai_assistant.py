@@ -7,6 +7,7 @@ from config import config
 from llmParserRepo.qwen3_parser import run_conversation_loop
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
+from WhisperRepo.whisper_recognizer import Whisper_run
 
 # === 原有全局 ===
 running = False
@@ -163,6 +164,8 @@ if __name__ == "__main__":
     node = SpeechGateway()
     spin_thread = threading.Thread(target=lambda: rclpy.spin(node), daemon=True)
     spin_thread.start()
+
+    Whisper_run(lambda: None)
 
     # 3) 主对话管理循环（阻塞）
     dialog_manager()
