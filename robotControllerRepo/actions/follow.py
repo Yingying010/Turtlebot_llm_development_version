@@ -10,7 +10,6 @@ from geometry_msgs.msg import Twist
 from typing import Dict, Tuple, Optional, List
 from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
-from config import semantic_locations
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
  
@@ -93,21 +92,25 @@ def wait_pose(robot_id: str, timeout_s: float = 10.0) -> bool:
 
 
 # --------- rotate and move
-
-def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float], stop_event = None, angle_tolerance_deg: float = 5.0):
-    while True:
-        if stop_event and stop_event.is_set():
-            break
+def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
+                          stop_event: threading.Event | None = None,
+                          angle_tolerance_deg: float = 5.0):
+    # 早退
+    if stop_event and stop_event.is_set():
+        safe_publish_twist(node, robot_id, Twist())
+        return
 
     x_target, y_target = target["x"], target["y"]
     x_now, y_now, _ = get_current_position(robot_id)
     dx = x_target - x_now
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
-
     print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
 
-    while True:
+    while rclpy.ok():
+        if stop_event and stop_event.is_set():
+            break
+
         _, _, heading_y_now = get_current_position(robot_id)
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
@@ -117,7 +120,6 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float], s
 
         new_direction = 1 if angle_error > 0 else -1
         twist = Twist()
-
         if abs(angle_error) > 25:
             twist.angular.z = 0.5 * new_direction
         elif abs(angle_error) > 10:
@@ -127,25 +129,29 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float], s
 
         safe_publish_twist(node, robot_id, twist)
         print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
-            f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
-
+              f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
         time.sleep(0.1)
 
+    # 刹停
     safe_publish_twist(node, robot_id, Twist())
-    time.sleep(0.2)
+    time.sleep(0.1)
 
+def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
+                               stop_event: threading.Event | None = None,
+                               tolerance: float = 20.0,
+                               max_acceptable_angle_error: float = 25.0):
+    # 早退
+    if stop_event and stop_event.is_set():
+        safe_publish_twist(node, robot_name, Twist())
+        return
 
-
-def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float], stop_event=None, tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0):
-    while True:
-        if stop_event and stop_event.is_set():
-            break
-        
     x_target, y_target = target["x"], target["y"]
-
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
-    while True:
+    while rclpy.ok():
+        if stop_event and stop_event.is_set():
+            break
+
         x_now, y_now, heading_y_now = get_current_position(robot_name)
         dx = x_target - x_now
         dz = y_target - y_now
@@ -155,28 +161,29 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
             print("🎉 Reached target.")
             break
 
-        # 目标方向角与误差
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) > max_acceptable_angle_error:
             print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
-            rotate_to_face_target(node, robot_name, target)
+            rotate_to_face_target(node, robot_name, target, stop_event=stop_event)
             continue
 
-        # 前进（小速度：精度更好）
         twist = Twist()
         twist.linear.x = 0.1
         safe_publish_twist(node, robot_name, twist)
-        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, "
-            f"error={angle_error:.1f}°")
-
+        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
+              f"target={target_angle:.1f}°, error={angle_error:.1f}°")
         time.sleep(0.2)
 
+        # 脉冲式前进：松一下油门，避免积累
         safe_publish_twist(node, robot_name, Twist())
-
         time.sleep(0.1)
-    
+
+    # 刹停
+    safe_publish_twist(node, robot_name, Twist())
+    time.sleep(0.05)
+  
 # ---------- 跟随线程 ----------
 FOLLOW_DIST_MM = 200.0
 HYSTERESIS_MM = 50.0

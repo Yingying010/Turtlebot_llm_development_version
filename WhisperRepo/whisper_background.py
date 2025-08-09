@@ -1,3 +1,4 @@
+# === 新增：全局单例 ROS 发布器（只发布，不 spin） ===
 import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
@@ -11,8 +12,49 @@ from config import config
 from ttsRepo.stream_tts import tts_manager
 from typing import Final
 import wave
+import threading
+from std_msgs.msg import String
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
-conversation_active: Final[threading.Event] = threading.Event()
+# === 全局单例 ROS 发布器（只发布，不 spin） ===
+import threading
+from std_msgs.msg import String
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+
+_ros_lock = threading.Lock()
+_ros_inited = False
+_ros_node: Node | None = None
+_ros_pub = None
+_ros_owned_init = False   # ← 我们是否自己调用了 rclpy.init()
+
+def _ensure_ros_publisher():
+    """只创建 publisher，不启动 spin（发布不需要 spin）。"""
+    global _ros_inited, _ros_node, _ros_pub, _ros_owned_init
+    with _ros_lock:
+        if not _ros_inited:
+            if not rclpy.is_initialized():
+                rclpy.init()
+                _ros_owned_init = True
+            _ros_node = Node("whisper_publisher")
+            qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+            _ros_pub = _ros_node.create_publisher(String, "/speech_text", qos)
+            _ros_inited = True
+
+def _publish_text(text: str):
+    """确保节点存在然后直接 publish。"""
+    if not text or not text.strip():
+        return
+    _ensure_ros_publisher()
+    msg = String()
+    msg.data = text.strip()
+    _ros_pub.publish(msg)
+
+
+#----------------
 
 # === 参数 ===
 SAMPLERATE = 48000
@@ -133,42 +175,58 @@ def recognize(delay: float = 0.0) -> str:
     wav_path = record_until_silence()
     return transcribe_audio(wav_path, delay)
 
-# === 后台热词识别线程 ===
-def Whisper_run(callback_func):
-    def loop():
-        print("🟢 Whisper hotword loop started")
-        while True:
-            if conversation_active.is_set():
-                time.sleep(0.2)
+
+# === 新增：持续监听主循环 ===
+# === 持续监听主循环（修正 transcribe_file -> transcribe_audio；加入“归属 shutdown”）===
+def run_continuous_listen(
+    keyword_passthrough: bool = True,
+    min_chars: int = 1,
+    sleep_after_publish: float = 0.05
+):
+    """
+    持续执行：录到一句 -> 转写 -> 发布到 /speech_text。
+    仅使用 publisher，不启动 spin。
+    """
+    global _ros_node, _ros_owned_init
+    _ensure_ros_publisher()
+    print("🎧 Whisper continuous listening started. Speak anytime...")
+
+    try:
+        while rclpy.ok():  # Ctrl+C 或 rclpy.shutdown() 会退出
+            # 1) 录到一段（自动起止，含静音检测）
+            wav_path = record_until_silence()
+            if not wav_path:
                 continue
 
-            raw_text   = recognize(delay=3)
-            clean_text = _clean(raw_text)
-            if not clean_text:
+            # 2) 转写（修正函数名）
+            text = transcribe_audio(wav_path)
+            if not text:
                 continue
 
-            if "open robot system" in clean_text:
-                config.set(chat_or_instruct=False)
-                logger.info("🎮 Switched to CONTROL mode.")
-                tts_manager.say("Okay, I'm now in control mode.")
-                conversation_active.set()
-                callback_func()
-            elif clean_text in {"i want to chat with you", "open chat system"}:
-                config.set(chat_or_instruct=True)
-                logger.info("💬 Switched to CHAT mode.")
-                tts_manager.say("Sure, I'm now in chat mode.")
-                conversation_active.set()
-                callback_func()
+            # 3) （可选）重复清理可省略，因为 transcribe_audio 已清理
+            # text = _clean(text)
 
-            elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
-                tts_manager.say("Goodbye!")
-                time.sleep(1)
-                os._exit(0)
+            # 4) 过滤长度
+            if len(text.strip()) < min_chars:
+                continue
 
-    threading.Thread(target=loop, daemon=True).start()
+            # 5) 发布
+            print(f"🗣️ Whisper: {text}")
+            _publish_text(text)
 
-# === 测试入口 ===
-if __name__ == "__main__":
-    logger.info("🎤 Start single recognition test...")
-    result = recognize()
-    print("🗣️ You said:", result or "<nothing>")
+            # 6) 轻微休眠，避免硬循环过快
+            if sleep_after_publish > 0:
+                import time
+                time.sleep(sleep_after_publish)
+
+    except KeyboardInterrupt:
+        print("👋 Whisper listening stopped by user.")
+    finally:
+        # 只在“本模块负责 init”的情况下关掉 ROS，避免影响同进程其他节点
+        try:
+            if _ros_node is not None:
+                _ros_node.destroy_node()
+        except Exception:
+            pass
+        if _ros_owned_init and rclpy.is_initialized():
+            rclpy.shutdown()
