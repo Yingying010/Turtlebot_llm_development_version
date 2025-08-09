@@ -156,8 +156,8 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
 
                 print(f"[{robot_name}] 🎉 All finished for {sync_key}")
 
-
-        print(f"🎯 All tasks completed for `{robot_name}`!")
+        if is_schedule == True:
+            print(f"🎯 All tasks completed for `{robot_name}`!")
 
         return is_schedule
     except Exception:

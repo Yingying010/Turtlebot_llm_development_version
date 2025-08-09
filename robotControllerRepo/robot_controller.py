@@ -107,7 +107,9 @@ def execute_action(node, executor, task: Dict):
     else:
         print(f"⚠️ Unknown action: {action}")
 
-    print(f"✅ {robot} completed task {task['task_id']}")
+    if is_successful == True:
+        print(f"✅ {robot} completed task {task['task_id']}")
+        
     return is_successful
 
 
