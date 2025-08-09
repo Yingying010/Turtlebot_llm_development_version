@@ -142,7 +142,7 @@ def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
  
  
 def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
-                               tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0):
+                               tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0, semantic_threshold = 0.0):
     x_target, y_target = target["x"], target["y"]
 
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
@@ -156,6 +156,12 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         if distance < tolerance:
             print("🎉 Reached target.")
             break
+        
+        
+        if distance < semantic_locations:
+            print("🎉 Reached target.")
+            break
+        
  
         # 目标方向角与误差
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
@@ -194,7 +200,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     rotate_to_face_target(node, robot_name, target)
  
     # Phase 2: 直行
-    move_forward_until_reached(node, robot_name, target)
+    move_forward_until_reached(node, robot_name, target,semantic_threshold=50.0)
  
     # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:

@@ -209,6 +209,13 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             else:
                 break
 
+        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "ending of this mode","ok finish", "ending this mode"]
+
+        if any(kw in user_input.lower() for kw in exit_keywords):
+            tts_manager.say("Exiting voice control.")
+            time.sleep(1)
+            break
+
     
         # ② 判断是否叫到我
         # if not called_robot(user_input):
@@ -222,12 +229,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         tts_manager.say(f"Your cammand is {user_input}. Currently parsing it for you ....")
         time.sleep(0.5)
 
-        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "ending of this mode","ok finish", "ending this mode"]
 
-        if any(kw in user_input.lower() for kw in exit_keywords):
-            tts_manager.say("Exiting voice control.")
-            time.sleep(1)
-            break
 
         # 调用 LLM 进行解析
         try:
