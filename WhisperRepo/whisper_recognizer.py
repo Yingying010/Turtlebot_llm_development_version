@@ -12,8 +12,6 @@ from ttsRepo.stream_tts import tts_manager
 from typing import Final
 import wave
 import rclpy
-from rclpy.node import Node
-from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
  
