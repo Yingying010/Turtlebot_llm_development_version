@@ -25,8 +25,11 @@ _ros = {"node": None, "speech_pub": None}
 SPEECH_TOPIC = "/speech_text"
  
 def _ensure_ros():
-    if not rclpy.is_initialized():
+    try:
         rclpy.init()
+    except RuntimeError:
+        pass
+    
     if _ros["node"] is None:
         node = rclpy.create_node("whisper_speech_publisher")
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
