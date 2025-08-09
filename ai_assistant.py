@@ -103,11 +103,12 @@ if __name__ == "__main__":
             config.set(chat_or_instruct=True)
             logger.info("💬 Switched to CHAT mode.")
             tts_manager.say("Sure, I'm now in chat mode.")
-
-        if wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
+        elif wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
             tts_manager.say("Goodbye!")
             time.sleep(1)
             os._exit(0)
+        else:
+            continue
 
         run_conversation()
 
