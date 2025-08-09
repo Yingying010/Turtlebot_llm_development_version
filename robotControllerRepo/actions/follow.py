@@ -124,16 +124,6 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         publisher_dict[key] = pub
         pub.publish(twist)
 
-def wait_pose(robot_id: str, timeout_s: float = 10.0) -> bool:
-    deadline = time.time() + timeout_s
-    while time.time() < deadline and rclpy.ok():
-        with cache_lock:
-            if robot_id in robot_position_cache:
-                return True
-        time.sleep(0.2)
-    return False
-
-
 # --------- rotate and move
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           stop_event: threading.Event | None = None,
@@ -288,26 +278,36 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
     _whisper_ref_inc()
 
     # 2) PhaseSpace 订阅节点（写入全局缓存）
-    tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
-    tracker_target   = RigidTracker(position_cache=robot_position_cache, robot_name=target)
-    executor.add_node(tracker_follower)
-    executor.add_node(tracker_target)
+    # tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
+    # tracker_target   = RigidTracker(position_cache=robot_position_cache, robot_name=target)
+    # executor.add_node(tracker_follower)
+    # executor.add_node(tracker_target)
 
-    # 3) 等待位姿就绪
-    if not wait_pose(follower) or not wait_pose(target):
-        print("❌ Abort follow: pose not available.")
-        for n in (tracker_follower, tracker_target):
-            try:
-                executor.remove_node(n)
-            except Exception:
-                pass
-            try:
-                n.destroy_node()
-            except Exception:
-                pass
-        # 本次 follow 失败，引用-1（若这是唯一的 follow，会顺带停 Whisper）
+    # 2) 通过 getRobotPositionCache 等待位姿进入缓存（各等 ~10s）
+    tracker_follower = getRobotPositionCache(follower, executor)
+    if tracker_follower is None:
+        print(f"❌ Abort follow: no pose for {follower}.")
+        tts_manager.say(f"Follow aborted. No position for {follower}.")
         _whisper_ref_dec()
         return
+ 
+    tracker_target = getRobotPositionCache(target, executor)
+    if tracker_target is None:
+        print(f"❌ Abort follow: no pose for {target}.")
+        tts_manager.say(f"Follow aborted. No position for {target}.")
+        # 清理已添加的 follower 节点
+        try:
+            executor.remove_node(tracker_follower)
+        except Exception:
+            pass
+        try:
+            tracker_follower.destroy_node()
+        except Exception:
+            pass
+        _whisper_ref_dec()
+        return
+
+ 
 
     # 4) 订阅 /speech_text，关键字触发 stop_event
     listener = SpeechStopListener(stop_event, name_suffix=follower)
