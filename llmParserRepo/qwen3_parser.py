@@ -199,7 +199,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             time.sleep(2)
             continue
     
-        if not user_input:
+        if not user_input or user_input == "blank_audio":
             tts_manager.say("Didn't catch that. Try again.")
             time.sleep(3)
             continue
