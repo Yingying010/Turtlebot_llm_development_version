@@ -201,6 +201,7 @@ def shutdown_node(node: Node) -> bool:
 def run(task_data: Dict[str, Any]):
     global ros_node, status_pub, target_counts
     robot_id = config.get("robot_id")
+    is_successul = False
  
     # 1) init（多次调用保护）
     try:
@@ -224,11 +225,11 @@ def run(task_data: Dict[str, Any]):
  
     try:
         target_counts = count_robots_per_sync_key(task_data)
-        run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
-        return True
+        is_successul = run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
+        return is_successul
     except Exception:
         logger.exception("⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
-        return False
+        return is_successul
     finally:
         print(f"🛑 Shutting down ROS node for {robot_id}")
         executor.shutdown()          # ← 先停执行器
