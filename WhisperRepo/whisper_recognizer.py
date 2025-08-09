@@ -13,6 +13,7 @@ from typing import Final
 import wave
 import rclpy
 from rclpy.node import Node
+from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
  
@@ -29,7 +30,7 @@ def _ensure_ros():
         rclpy.init()
     except RuntimeError:
         pass
-    
+
     if _ros["node"] is None:
         node = rclpy.create_node("whisper_speech_publisher")
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
