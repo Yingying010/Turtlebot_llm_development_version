@@ -243,7 +243,6 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
         if "heading_deg" in resolved_target:
             print(f"📐 Target includes heading: {resolved_target['heading_deg']}°")
         navigate_to_position(node, robot_name, resolved_target)
-
     else:
         print(f"⚠️ Invalid resolved target: {resolved_target}")
         return is_successful

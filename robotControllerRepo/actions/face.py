@@ -10,151 +10,154 @@ from geometry_msgs.msg import Twist
 from typing import Dict
 from config import semantic_locations
 from phasespace.rigid_tracker import RigidTracker
+from ttsRepo.stream_tts import tts_manager
+from typing import Dict, Optional, Tuple
+from rclpy.publisher import Publisher
+from rclpy._rclpy_pybind11 import InvalidHandle
  
-# ───── 全局缓存 ─────
-
-robot_position_cache = {} 
-
-pub_cache = {}
+# === 全局缓存 + 锁 ===
+robot_position_cache: Dict[str, Dict[str, float]] = {}
+cache_lock = threading.Lock()
+publisher_dict: Dict[Tuple[int, str], Publisher] = {}
  
-def ensure_pub(node: Node, name: str):
-    return pub_cache.setdefault(name,
-        node.create_publisher(Twist, f'/{name}/cmd_vel', 10))
  
-def get_current_position(robot_name, robot_position_cache):
-    if robot_name in robot_position_cache:
-        rigid = robot_position_cache[robot_name]
-        x = rigid["x"]
-        y = rigid["z"]
-        heading_y = rigid["heading_y"]
-        return x, y, heading_y
-    else:
-        print(f"⚠️ No position data for {robot_name}")
-        return 0.0, 0.0, 0.0
+# === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
 
-def wait_for_pose(name: str,
-                  cache: dict,
-                  timeout: float = 2.0,
-                  poll: float = 0.05):
-    """
-    等待 `timeout` 秒，直到 pose_cache 里出现 `name`。
-    返回 (x, z, heading)；超时则返回 None
-    """
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if name in cache:
-            d = cache[name]
-            return d["x"], d["z"], d["heading_y"]
-        time.sleep(poll)
+def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+    rigid_node = RigidTracker(
+        position_cache=robot_position_cache,
+        robot_name=robot_name,
+        position_lock=cache_lock,  # 传入同一把锁，避免读写冲突
+    )
+    executor.add_node(rigid_node)
+    print(f"⏳ Waiting for position data of {robot_name}...")
+    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
+    for _ in range(50):  # ~10s
+        with cache_lock:
+            ok = robot_name in robot_position_cache
+        if ok:
+            print(f"✅ Got position data for {robot_name}.")
+            tts_manager.say(f"Position data acquired for {robot_name}.")
+            return rigid_node
+        time.sleep(0.2)
+    print(f"❌ Timeout: No position data for {robot_name}")
+    # tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
-def ensure_tracker_with_wait(name: str,
-                             pose_cache: dict,
-                             executor: MultiThreadedExecutor,
-                             timeout: float = 2.0):
-    tracker = RigidTracker(pose_cache, name)
-    executor.add_node(tracker)
+def get_current_position(robot_name: str) -> tuple:
+    with cache_lock:
+        rigid = robot_position_cache.get(robot_name)
+        if rigid:
+            x = rigid["x"]
+            y = rigid["z"]
+            heading_y = rigid["heading_y"]
+            return x, y, heading_y
+    print(f"⚠️ No position data for {robot_name}")
+    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    return 0.0, 0.0, 0.0
  
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        executor.spin_once(timeout_sec=0.1)      # ★ 关键：驱动回调
-        if name in pose_cache:                   # 已收到第一帧
-            d = pose_cache[name]
-            return (d["x"], d["z"], d["heading_y"]), tracker
-    # 超时
-    return None, tracker
+ 
+def _ensure_pub(node: Node, robot_name: str) -> Publisher:
+    key = (id(node), robot_name)
+    pub = publisher_dict.get(key)
+    if pub is None:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+    return pub
+ 
+ 
+def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
+    key = (id(node), robot_name)
+    pub = _ensure_pub(node, robot_name)
+    try:
+        pub.publish(twist)
+    except InvalidHandle:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+        pub.publish(twist)
+
+
  
 # ───── 旋转函数（与你原来一致，删 sleep-0-帧即可） ─────
 
-def rotate_to_face_target(robot_id, publisher, target: Dict[str, float], robot_position_cache, angle_tolerance_deg=5):
+def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
+                          angle_tolerance_deg: float = 5.0):
     x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_id, robot_position_cache)
+    x_now, y_now, _ = get_current_position(robot_id)
     dx = x_target - x_now
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
-
+ 
     print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
-
-    prev_error = None
+ 
     while True:
-        _, _, heading_y_now = get_current_position(robot_id, robot_position_cache)
+        _, _, heading_y_now = get_current_position(robot_id)
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
             print("✅ ROTATE done.")
             break
-
+ 
         new_direction = 1 if angle_error > 0 else -1
         twist = Twist()
+
         if abs(angle_error) > 25:
             twist.angular.z = 0.5 * new_direction
         elif abs(angle_error) > 10:
             twist.angular.z = 0.3 * new_direction
         else:
             twist.angular.z = 0.15 * new_direction
+ 
+        safe_publish_twist(node, robot_id, twist)
+        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
+              f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
 
-        publisher.publish(twist)
-        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | target_angle: {target_angle:.1f} | angle_error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
-        prev_error = angle_error
         time.sleep(0.1)
-
-    publisher.publish(Twist())
+ 
+    safe_publish_twist(node, robot_id, Twist())
     time.sleep(0.2)
  
 
 # ───── 主流程 ─────
-def face_run(robot: str, target: str):
-    exec_ = MultiThreadedExecutor()
- 
-    # # ⓐ 自己的 Tracker ——无需等待
-    # _, tracker_self = ensure_tracker_with_wait(robot, cache, exec_, 0)
- 
-    # # ⓑ 目标的 Tracker ——等待 2 秒
-    # pose, tracker_target = ensure_tracker_with_wait(target, cache, exec_, 5.0)
+def face_run(node: Node, robot_name: str, target: str, executor: MultiThreadedExecutor):
+    is_successful = False
 
-    tracker_self = RigidTracker(robot_position_cache, robot)
-    tracker_tgt = RigidTracker(robot_position_cache,target)
-    exec_.add_node(tracker_self)
-    exec_.add_node(tracker_tgt)
-    
-
-    # 后台 spin
-    spin_thread = threading.Thread(target=exec_.spin, daemon=True)
-    spin_thread.start()
-
-    pose = wait_for_pose(target, robot_position_cache, 2.0)
+    # 1) 确保位置跟踪节点已接入 executor 并数据就绪
+    tracker_robot = getRobotPositionCache(robot_name, executor)
+    if tracker_robot is None:
+        print("❌ Abort navigation due to missing pose.")
+        tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+        return is_successful
  
-    # ⓒ 确定目标坐标
-    if pose is None:
-        static = semantic_locations.get(target)
-        if static and {"x", "y"} <= static.keys():
-            tx, tz = static["x"], static["y"]
-            print(f"⚠️ Using static pose for {target}")
+    # 2) 解析语义位置或直接使用坐标
+    if isinstance(target, str):
+        # firstly, try to find real position
+        tracker_target = getRobotPositionCache(target, executor)
+        if tracker_target:
+            x, y, heading = get_current_position(target)
+            resolved_target = {"x": x, "y": y, "heading": heading}
+            print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
         else:
-            raise RuntimeError(
-                f"No real-time data and no static position for '{target}'")
+            if target in semantic_locations:
+                resolved_target = semantic_locations[target]
+                print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
+            else:
+                print(f"❌ Error: target '{target}' not found in semantic_locations")
+                tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
+
     else:
-        tx, tz, _ = pose
-        print(f"✅ Using real-time pose for {target}")
- 
-    # ⓓ 执行朝向
-    node = rclpy.create_node("face_controller")
-    pub  = ensure_pub(node, robot)
-    rotate_to_face_target(robot, pub, {"x": tx, "y": tz}, robot_position_cache)
- 
-    # 清理
-    node.destroy_node()
-    exec_.shutdown()
-    tracker_self.destroy_node(); 
-    tracker_tgt.destroy_node()
-    rclpy.shutdown()
- 
+        resolved_target = target
+        
 
+    if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
+        if "heading_deg" in resolved_target:
+            print(f"📐 Target includes heading: {resolved_target['heading_deg']}°")
+        rotate_to_face_target(node, robot_name, resolved_target)
+    else:
+        print(f"⚠️ Invalid resolved target: {resolved_target}")
+        return is_successful
 
-if __name__ == "__main__":
-
-    rclpy.init()
-
-    face_run(robot="robot1", target="lucy")   # ← 改成你的机器人 / 目标
+    is_successful = True
+    return is_successful
 
  
