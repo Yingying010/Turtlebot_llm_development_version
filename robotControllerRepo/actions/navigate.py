@@ -200,7 +200,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     rotate_to_face_target(node, robot_name, target)
  
     # Phase 2: 直行
-    move_forward_until_reached(node, robot_name, target, semantic_threshold=50.0)
+    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
  
     # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:
