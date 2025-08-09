@@ -26,7 +26,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 _ros_lock = threading.Lock()
-_ros_inited = False
 _ros_node: Node | None = None
 _ros_pub = None
 _ros_owned_init = False   # ← 我们是否自己调用了 rclpy.init()
@@ -41,10 +40,28 @@ def _ensure_ros_publisher():
                 _ros_owned_init = True
             except:
                 pass
-            _ros_node = Node("whisper_publisher")
+
+            if _ros_node is None:
+                _ros_node = Node("whisper_publisher")
+
+        # 若 publisher 不存在或已被销毁，重新创建
+        if _ros_pub is None:
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
             _ros_pub = _ros_node.create_publisher(String, "/speech_text", qos)
-            _ros_inited = True
+
+        return _ros_pub  # 可选：返回句柄
+    
+def _teardown_ros_publisher():
+    """销毁节点并把句柄清空；不调用 rclpy.shutdown()，以便同进程其他节点继续工作。"""
+    global _ros_node, _ros_pub
+    with _ros_lock:
+        try:
+            if _ros_node is not None:
+                _ros_node.destroy_node()
+        except Exception:
+            pass
+        _ros_node = None
+        _ros_pub = None
 
 def _publish_text(text: str):
     if not text or not text.strip():
@@ -181,25 +198,25 @@ def recognize(delay: float = 0.0) -> str:
 # === 新增：持续监听主循环 ===
 # === 持续监听主循环（修正 transcribe_file -> transcribe_audio；加入“归属 shutdown”）===
 # 支持外部停止信号
-def run_continuous_listen(stop_event=None, sleep_after_publish: float = 0.05):
+def run_continuous_listen(stop_event: threading.Event | None = None,
+                          sleep_after_publish: float = 0.05):
     _ensure_ros_publisher()
     print("🎧 Whisper continuous listening started.")
     try:
         while rclpy.ok() and not (stop_event and stop_event.is_set()):
             wav_path = record_until_silence()
-            if not wav_path: 
+            if not wav_path:
                 continue
             text = transcribe_audio(wav_path)
             if not text:
                 continue
-            _publish_text(text)
+            _publish_text(text)  # 内部会 _ensure_ros_publisher()
             if sleep_after_publish:
-                import time; time.sleep(sleep_after_publish)
+                time.sleep(sleep_after_publish)
+    except KeyboardInterrupt:
+        pass
     finally:
-        # 不要在这里 rclpy.shutdown()，避免影响同进程其他节点
-        if _ros_node is not None:
-            try: _ros_node.destroy_node()
-            except: pass
+        _teardown_ros_publisher()
 
 if __name__ == "__main__":
     run_continuous_listen()
