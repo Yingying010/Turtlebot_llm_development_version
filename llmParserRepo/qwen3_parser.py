@@ -204,7 +204,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 continue
         
             user_input = _clean(raw_text)
-            if not user_input or not "blank_audio":
+            if not user_input or "blank_audio":
                 continue
             else:
                 break
