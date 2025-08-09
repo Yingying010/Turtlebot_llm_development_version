@@ -36,9 +36,11 @@ def _ensure_ros_publisher():
     global _ros_inited, _ros_node, _ros_pub, _ros_owned_init
     with _ros_lock:
         if not _ros_inited:
-            if not rclpy.is_initialized():
+            try:
                 rclpy.init()
                 _ros_owned_init = True
+            except:
+                pass
             _ros_node = Node("whisper_publisher")
             qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
             _ros_pub = _ros_node.create_publisher(String, "/speech_text", qos)
@@ -198,3 +200,7 @@ def run_continuous_listen(stop_event=None, sleep_after_publish: float = 0.05):
         if _ros_node is not None:
             try: _ros_node.destroy_node()
             except: pass
+
+if __name__ == "__main__":
+    run_continuous_listen()
+ 
