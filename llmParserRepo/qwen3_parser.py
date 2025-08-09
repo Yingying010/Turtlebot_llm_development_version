@@ -247,7 +247,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             else:
                 logger.warning("⚠️ Failed")
                 tts_manager.say("Command execution failed, please re-give the command.")
-                time.sleep(2)
+                time.sleep(3)
 
 if __name__ == "__main__":
     json_result = run_conversation_loop()
