@@ -1,13 +1,13 @@
 import sys
 import os
-import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 from config import config
-from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active
+from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active, recognize
 from llmParserRepo.qwen3_parser import run_conversation_loop
 # import TinyLlama_Chat
 import time
+import re
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
 from loguru import logger
@@ -16,46 +16,6 @@ import traceback
 running = False
 actived = 0
 allow_running = True
-
-def hwcallback():
-
-
-    global running, actived, allow_running
-    logger.info('🟡 HotWord triggered')
-
-    if running and not allow_running:
-        actived = 3 
-        logger.warning("❌ Repeated wakeword detected but not allowed to interrupt.")
-        return False
-
-    if running:
-        actived = 2 
-        logger.info("⚠️ Conversation interrupted by new wakeword.")
-        tts_manager.stop()  # 🛑 停止当前播放
-        tts_manager.say("Okay, I stopped. You can speak again.")
-    else:
-        actived = 1  # 正常唤醒
-        logger.info("✅ Wakeword detected. Starting new interaction.")
-
-    return True
-
-
-# ✅ 主对话管理器
-def dialog_manager():
-    global running, actived
-    while True:
-        if actived == 1:
-            running = True
-            actived = 0
-            run_conversation()
-            running = False
-        elif actived == 2:
-            tts_manager.stop()
-            running = False
-            actived = 1
-        time.sleep(0.2)
-
-
 
 def run_conversation():
     logger.info("🎤 Recording...")
@@ -102,6 +62,8 @@ def startchat():
     tts_manager.say("Welcome! You can start speaking after the beep.")
     time.sleep(0.5)
 
+def _clean(text: str) -> str:
+    return re.sub(r'[^\w\s]', '', text).lower().strip()
 
 
 # ✅ 启动入口
@@ -115,9 +77,37 @@ if __name__ == "__main__":
     print(config.get("robot_id"))
 
     startchat()
-    time.sleep(4)  # ✅ 给用户准备说话时间，避免误触
-    # Vosk_run(hwcallback)    # 热词检测循环（另起线程）
-    Whisper_run(hwcallback)
-    dialog_manager()        # 主对话处理循环
-    # 3) 主对话管理循环（阻塞）
-    dialog_manager()
+    time.sleep(4)
+
+    while True:
+        while True:
+            try:
+                raw_text = recognize(delay=3).strip()
+            except Exception as e:
+                logger.warning(f"🎙️ recognition failed: {e}")
+                tts_manager.say("Sorry, could not hear you.")
+                time.sleep(2)
+                continue
+        
+            wakeup_word = _clean(raw_text)
+            if not wakeup_word:
+                continue
+            else:
+                break
+
+        if "open robot system" in wakeup_word:
+            config.set(chat_or_instruct=False)
+            logger.info("🎮 Switched to CONTROL mode.")
+            tts_manager.say("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
+        elif wakeup_word in {"i want to chat with you", "open chat system"}:
+            config.set(chat_or_instruct=True)
+            logger.info("💬 Switched to CHAT mode.")
+            tts_manager.say("Sure, I'm now in chat mode.")
+
+        if wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
+            tts_manager.say("Goodbye!")
+            time.sleep(1)
+            os._exit(0)
+
+        run_conversation()
+

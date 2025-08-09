@@ -182,6 +182,9 @@ def extract_last_json(text: str):
 #     return any(alias in t for alias in robot_aliases)
 
 
+def _clean(text: str) -> str:
+    return re.sub(r'[^\w\s]', '', text).lower().strip()
+
 def run_conversation_loop() -> Optional[Dict[str, Any]]:
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
 
@@ -191,18 +194,21 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     robot_id = config.get("robot_id") 
     
     while True:
-        try:
-            user_input = recognize(delay=3).strip()
-        except Exception as e:
-            logger.warning(f"🎙️ recognition failed: {e}")
-            tts_manager.say("Sorry, could not hear you.")
-            time.sleep(2)
-            continue
-    
-        if not user_input or user_input == "blank_audio":
-            tts_manager.say("Didn't catch that. Try again.")
-            time.sleep(3)
-            continue
+        while True:
+            try:
+                raw_text = recognize(delay=3).strip()
+            except Exception as e:
+                logger.warning(f"🎙️ recognition failed: {e}")
+                tts_manager.say("Sorry, could not hear you.")
+                time.sleep(2)
+                continue
+        
+            user_input = _clean(raw_text)
+            if not user_input:
+                continue
+            else:
+                break
+
     
         # ② 判断是否叫到我
         # if not called_robot(user_input):

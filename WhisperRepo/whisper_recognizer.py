@@ -127,48 +127,6 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
         time.sleep(delay)
     return clean_text
 
-
-# === 识别函数 ===
 def recognize(delay: float = 0.0) -> str:
     wav_path = record_until_silence()
     return transcribe_audio(wav_path, delay)
-
-# === 后台热词识别线程 ===
-def Whisper_run(callback_func):
-    def loop():
-        print("🟢 Whisper hotword loop started")
-        while True:
-            if conversation_active.is_set():
-                time.sleep(0.2)
-                continue
-
-            raw_text   = recognize(delay=3)
-            clean_text = _clean(raw_text)
-            if not clean_text:
-                continue
-
-            if "open robot system" in clean_text:
-                config.set(chat_or_instruct=False)
-                logger.info("🎮 Switched to CONTROL mode.")
-                tts_manager.say("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
-                conversation_active.set()
-                callback_func()
-            elif clean_text in {"i want to chat with you", "open chat system"}:
-                config.set(chat_or_instruct=True)
-                logger.info("💬 Switched to CHAT mode.")
-                tts_manager.say("Sure, I'm now in chat mode.")
-                conversation_active.set()
-                callback_func()
-
-            elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
-                tts_manager.say("Goodbye!")
-                time.sleep(1)
-                os._exit(0)
-
-    threading.Thread(target=loop, daemon=True).start()
-
-# === 测试入口 ===
-if __name__ == "__main__":
-    logger.info("🎤 Start single recognition test...")
-    result = recognize()
-    print("🗣️ You said:", result or "<nothing>")
