@@ -109,10 +109,9 @@ def wait_for_all_status(sync_key: tuple, expected: str, timeout=15):
   
 # === 执行任务调度 ===
 def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], executor):
-    isExecute = False
-
     print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
 
+    is_schedule = False
     robot_tasks = task_data["robots"].get(robot_name, [])
     robot_tasks.sort(key=lambda x: x["sequence"])
 
@@ -140,7 +139,8 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             
 
             # Step 3: 执行动作
-            execute_action(node, executor, task)
+            is_successful = execute_action(node, executor, task)
+            is_schedule = is_successful
 
             # Step 4: 发布 finished 状态
             if sync_group:
@@ -159,12 +159,11 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
 
         print(f"🎯 All tasks completed for `{robot_name}`!")
 
-        isExecute = True
-        return isExecute
+        return is_schedule
     except Exception:
         logger.warning(f"⚠️ Failed to execute tasks:\n{traceback.format_exc()}")
-        isExecute = False
-        return isExecute
+        is_schedule = False
+        return is_schedule
 
 
 

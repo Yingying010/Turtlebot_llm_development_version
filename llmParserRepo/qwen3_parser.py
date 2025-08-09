@@ -226,7 +226,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
             if json_result:
                 # robot_scheduler.run(json_response)
-                tts_manager.say("Command executed.")
+                tts_manager.say("Command parsing complete.")
                 time.sleep(1)
             else:
                 tts_manager.say("Could not understand the command.")

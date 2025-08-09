@@ -273,9 +273,8 @@ class SpeechStopListener(Node):
 def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedExecutor):
     """启动跟随任务：开启/复用 Whisper 监听、订阅语音停指令、循环控制到目标距离内。"""
     stop_event = threading.Event()
+    is_successful = False
 
-    # 1) 启动或复用 Whisper 后台监听（引用计数 + 单例线程）
-    _whisper_ref_inc()
 
     # 2) PhaseSpace 订阅节点（写入全局缓存）
     # tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
@@ -287,14 +286,12 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
     tracker_follower = getRobotPositionCache(follower, executor)
     if tracker_follower is None:
         print(f"❌ Abort follow: no pose for {follower}.")
-        tts_manager.say(f"Follow aborted. No position for {follower}.")
         _whisper_ref_dec()
-        return
+        return is_successful
  
     tracker_target = getRobotPositionCache(target, executor)
     if tracker_target is None:
         print(f"❌ Abort follow: no pose for {target}.")
-        tts_manager.say(f"Follow aborted. No position for {target}.")
         # 清理已添加的 follower 节点
         try:
             executor.remove_node(tracker_follower)
@@ -305,8 +302,10 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
         except Exception:
             pass
         _whisper_ref_dec()
-        return
+        return is_successful
+    
 
+    _whisper_ref_inc()
  
 
     # 4) 订阅 /speech_text，关键字触发 stop_event
@@ -348,3 +347,7 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
 
         # 6.4 Whisper 引用-1：若为最后一个 follow，则关闭监听线程
         _whisper_ref_dec()
+
+        is_successful = True
+        
+        return is_successful

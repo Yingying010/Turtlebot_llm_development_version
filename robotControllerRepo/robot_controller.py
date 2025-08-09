@@ -68,7 +68,7 @@ def execute_action(node, executor, task: Dict):
     elif action == "follow":
         if "target" in params:
             target = params["target"]
-            follow_run(node, robot, target, executor)
+            is_successful = follow_run(node, robot, target, executor)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
 
@@ -105,6 +105,8 @@ def execute_action(node, executor, task: Dict):
         print(f"⚠️ Unknown action: {action}")
 
     print(f"✅ {robot} completed task {task['task_id']}")
+    return is_successful
+
 
 
 
@@ -113,27 +115,3 @@ def execute_robot_commands(node:Node, robot_id: str, commands: List[Dict], robot
     for cmd in commands:
         execute_action(node, cmd, robot_position_cache)
     print(f"[🤖 Finished executing for {robot_id}]")
-
-
-# 示例用法（测试）
-if __name__ == "__main__":
-    # 你的 JSON 中的某个 response
-    # example1 = {"turtlebot1": [{"action": "move", "direction": "forward", "value": 2, "unit": "meters"}, {"action": "turn", "direction": "left", "target": "self", "value": 45, "unit": "degrees"}], "turtlebot2": [{"action": "move", "direction": "backward", "value": 1, "unit": "meters"}, {"action": "turn", "direction": "right", "target": "self", "value": 90, "unit": "degrees"}]}
-    # example2 =  {"robots":{"robot1": [
-    #     {
-    #     "task_id": "t0",
-    #     "action": "navigate",
-    #     "parameters": {
-    #       "position": {
-    #         "x": 100,
-    #         "y": 200,
-    #         "heading_deg": 0
-    #       }
-    #     },
-    #     "sync_group": None,
-    #     "sequence": 0
-    #   },
-    # ]}}
-    # example3 =  {'turtlebot1':[{"action": "imitate","target": "turtlebot2"}]}
-    robot_id = "robot1"
-    commands = {'robots': {'robot1': [{'task_id': 't0', 'action': 'move', 'parameters': {'direction': 'forward', 'value': 2, 'unit': 'meter'}, 'sync_group': None, 'sequence': 1}, {'task_id': 't1', 'action': 'turn', 'parameters': {'direction': 'left', 'value': 90, 'unit': 'degree'}, 'sync_group': None, 'sequence': 2}]}}
