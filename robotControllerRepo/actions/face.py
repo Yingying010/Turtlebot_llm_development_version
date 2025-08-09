@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
 
 # face.py —— 复用 follow 逻辑，实时坐标优先
- 
 import os, sys, math, threading, time
-
-import rclpy
-
-from rclpy.node import Node
-
-from rclpy.executors import MultiThreadedExecutor
-
-from geometry_msgs.msg import Twist
-
-from typing import Dict
- 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
+import rclpy
+from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from geometry_msgs.msg import Twist
+from typing import Dict
 from config import semantic_locations
-
 from phasespace.rigid_tracker import RigidTracker
  
 # ───── 全局缓存 ─────

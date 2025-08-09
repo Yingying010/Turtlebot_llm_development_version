@@ -39,7 +39,7 @@ def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> O
             return rigid_node
         time.sleep(0.2)
     print(f"❌ Timeout: No position data for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    # tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
 def get_current_position(robot_name: str) -> tuple:
@@ -207,20 +207,27 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     is_successful = False
 
     # 1) 确保位置跟踪节点已接入 executor 并数据就绪
-    rigid_node = getRobotPositionCache(robot_name, executor)
-
-    if rigid_node is None:
+    tracker_robot = getRobotPositionCache(robot_name, executor)
+    if tracker_robot is None:
         print("❌ Abort navigation due to missing pose.")
+        tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
         return is_successful
  
     # 2) 解析语义位置或直接使用坐标
     if isinstance(target, str):
-        if target not in semantic_locations:
-            print(f"❌ Error: target '{target}' not found in semantic_locations")
-            return is_successful
+        # firstly, try to find real position
+        tracker_target = getRobotPositionCache(target, executor)
+        if tracker_target:
+            resolved_target = tracker_target
+            print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
+        else:
+            if target in semantic_locations:
+                resolved_target = semantic_locations[target]
+                print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
+            else:
+                print(f"❌ Error: target '{target}' not found in semantic_locations")
+                tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
 
-        resolved_target = semantic_locations[target]
-        print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
     else:
         resolved_target = target
  
