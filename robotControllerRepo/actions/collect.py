@@ -113,10 +113,10 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
     time.sleep(0.2)
  
 
-def rotate_to_final_heading(robot_name, publisher, heading_deg, robot_position_cache, angle_tolerance_deg=5):
+def rotate_to_final_heading(robot_name, publisher, heading_deg, angle_tolerance_deg=5):
     print(f"\n🎯 ROTATE TO HEADING: {heading_deg:.1f}°")
     while True:
-        _, _, heading_y_now = get_current_position(robot_name, robot_position_cache)
+        _, _, heading_y_now = get_current_position(robot_name)
         angle_error = (heading_deg - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
