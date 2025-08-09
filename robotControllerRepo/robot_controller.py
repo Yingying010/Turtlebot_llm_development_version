@@ -10,7 +10,7 @@ from robotControllerRepo.actions.move import move
 from robotControllerRepo.actions.rotate import rotate
 from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
-from robotControllerRepo.actions.follow2 import follow_run
+from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
 from robotControllerRepo.actions.deliver import deliver_item
@@ -68,7 +68,7 @@ def execute_action(node, executor, task: Dict):
     elif action == "follow":
         if "target" in params:
             target = params["target"]
-            follow_run(robot, target, executor)
+            follow_run(node, robot, target, executor)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
 

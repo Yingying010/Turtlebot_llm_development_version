@@ -81,7 +81,7 @@ def status_callback(msg):
         robot = data["robot"]
         status = data["status"]
 
-        while cache_lock:
+        with cache_lock:
             status_cache[key][robot] = status
  
             # 计算达到“当前阶段”要求的机器人数量

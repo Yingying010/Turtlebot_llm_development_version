@@ -7,10 +7,12 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
 from config import semantic_locations
+from std_msgs.msg import String
+from rclpy.qos import QoSProfile, ReliabilityPolicy
  
 # 工程根路径
 
@@ -23,6 +25,11 @@ from phasespace.rigid_tracker import RigidTracker    # 原版，保持不动
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
+
+
+# ------------------------------------------------------------------
+SPEECH_TOPIC = "/speech_text"
+CTRL_TOPIC   = "/follow_service"
  
 # ---------- 工具 ----------
 
@@ -74,6 +81,15 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
         publisher_dict[key] = pub
         pub.publish(twist)
+
+def wait_pose(robot_id: str, timeout_s: float = 10.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline and rclpy.ok():
+        with cache_lock:
+            if robot_id in robot_position_cache:
+                return True
+        time.sleep(0.2)
+    return False
 
 
 # --------- rotate and move
@@ -156,60 +172,103 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         time.sleep(0.1)
  
 # ---------- 跟随线程 ----------
-follow_dist = 200.0
-hysteresis = 50.0
+FOLLOW_DIST_MM = 200.0
+HYSTERESIS_MM = 50.0
 
-def follow_loop(ctrl_node: Node, follower: str, target: str):
-    pub = _ensure_pub(ctrl_node, follower)
+# === 跟随线程函数（外部） ===
+def follow_loop(ctrl_node: Node, follower: str, target: str, stop_event: threading.Event):
     tts_manager.say(f"{follower} is now following {target}")
+    try:
+        while rclpy.ok() and not stop_event.is_set():
+            fx, fz, _ = get_current_position(follower)
+            tx, tz, _ = get_current_position(target)
+            dx, dz = tx - fx, tz - fz
+            dist = math.hypot(dx, dz)
+            tgt = {"x": tx, "y": tz}
+ 
+            if dist > FOLLOW_DIST_MM + HYSTERESIS_MM:
+                rotate_to_face_target(ctrl_node, follower, tgt, stop_event=stop_event)
+                if stop_event.is_set(): break
+                move_forward_until_reached(ctrl_node, follower, tgt,
+                                           tolerance=FOLLOW_DIST_MM + HYSTERESIS_MM,
+                                           stop_event=stop_event)
+            else:
+                safe_publish_twist(ctrl_node, follower, Twist())
+                rotate_to_face_target(ctrl_node, follower, tgt, stop_event=stop_event)
+            time.sleep(0.15)
+    finally:
+        safe_publish_twist(ctrl_node, follower, Twist())
+        tts_manager.say(f"{follower} stopped following {target}")
+ 
+ 
+# ------------------------------------------------------------------
+# === 只订阅 /speech_text 的监听节点 ===
+class SpeechStopListener(Node):
+    def __init__(self, stop_event: threading.Event, name_suffix: str):
+        super().__init__(f"follow_speech_listener_{name_suffix}")
+        self.stop_event = stop_event
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        self.sub = self.create_subscription(String, SPEECH_TOPIC, self.on_text, qos)
+        self.keywords: List[str] = [
+            "stop follow", "stop following", "stop following me",
+            "结束follow", "结束跟随", "停止跟随", "停止跟踪", "结束跟踪", "停止", "stop"
+        ]
 
-    while rclpy.ok():
-        fx, fz, _ = get_current_position(follower, robot_position_cache)
-        tx, tz, _ = get_current_position(target, robot_position_cache)
-        dx, dz = tx - fx, tz - fz
-        dist = math.hypot(dx, dz)
+    def on_text(self, msg: String):
+        text = (msg.data or "").strip().lower()
+        for kw in self.keywords:
+            if kw in text:
+                self.get_logger().info(f"🛑 stop keyword detected: '{kw}' in '{text}'")
+                self.stop_event.set()
+                break
 
-        tgt_pos = {"x":tx, "y":tz}
 
-        if dist > follow_dist+ hysteresis:
-            rotate_to_face_target(follower,pub,tgt_pos,robot_position_cache)
-            move_forward_until_reached(follower, pub, tgt_pos, robot_position_cache, tolerance=follow_dist+hysteresis)
-        else:
-            pub.publish(Twist())
-            rotate_to_face_target(follower,pub,tgt_pos,robot_position_cache)
+# === 主入口 ===
+def follow_run(follower: str, target: str, executor: MultiThreadedExecutor, ctrl_node: Node):
+    stop_event = threading.Event()
+ 
+    tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
+    tracker_target   = RigidTracker(position_cache=robot_position_cache, robot_name=target)
+    executor.add_node(tracker_follower)
+    executor.add_node(tracker_target)
+ 
+    if not wait_pose(follower) or not wait_pose(target):
+        print("❌ Abort follow: pose not available.")
+        for n in [tracker_follower, tracker_target]:
+            try:
+                executor.remove_node(n); n.destroy_node()
+            except Exception:
+                pass
+        return
+ 
+    listener = SpeechStopListener(stop_event, name_suffix=follower)
+    executor.add_node(listener)
+ 
+    th = threading.Thread(target=follow_loop, args=(ctrl_node, follower, target, stop_event),
+                          daemon=True, name=f"follow-{follower}")
+    th.start()
+ 
+    try:
+        while rclpy.ok() and th.is_alive() and not stop_event.is_set():
             time.sleep(0.2)
+    finally:
+        stop_event.set()
+        th.join(timeout=2.0)
+        safe_publish_twist(ctrl_node, follower, Twist())
+        time.sleep(0.05)
+        for n in [listener, tracker_follower, tracker_target]:
+            try:
+                executor.remove_node(n)
+            except Exception:
+                pass
+            try:
+                n.destroy_node()
+            except Exception:
+                pass
 
-        print(f"👣 {follower}→{target}  dist={dist:.0f} mm")
-        time.sleep(0.2)
 
-# ------------------------------------------------------------------
-def listner_whisper():
-    Whisper_run()
- 
-# ------------------------------------------------------------------
 
-def follow_run(follower:str, target:str, executor: MultiThreadedExecutor):
-    # ➊ 生成两个 RigidTracker 节点（保持原版本）
-    tracker_follower_node = getRobotPositionCache(follower, executor)
-    tracker_target_node = getRobotPositionCache(target, executor)
- 
 
-    if tracker_follower_node is None:
-        print("❌ Abort navigation of follower")
-        return
-    elif tracker_target_node is None:
-        print("❌ Abort navigation of target")
-        return
-    
-    follow_thread = threading.thread(follow_loop)
-    listner_thread = threading.thread(listner)
-    
- 
-# ------------------------------------------------------------------
 
-if __name__ == "__main__":
-    rclpy.init()
-    follower, target = "robot2", "robot3"
-    follow_run()
 
  

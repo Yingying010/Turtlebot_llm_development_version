@@ -11,8 +11,29 @@ from config import config
 from ttsRepo.stream_tts import tts_manager
 from typing import Final
 import wave
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
+ 
+
 
 conversation_active: Final[threading.Event] = threading.Event()
+
+# --- 单例 ROS 资源 ---
+_ros = {"node": None, "speech_pub": None}
+SPEECH_TOPIC = "/speech_text"
+ 
+def _ensure_ros():
+    if not rclpy.is_initialized():
+        rclpy.init()
+    if _ros["node"] is None:
+        node = rclpy.create_node("whisper_speech_publisher")
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        _ros["speech_pub"] = node.create_publisher(String, SPEECH_TOPIC, qos)
+        _ros["node"] = node
+        # 后台自旋（非阻塞）
+        threading.Thread(target=lambda: rclpy.spin(node), daemon=True).start()
 
 # === 参数 ===
 SAMPLERATE = 48000
@@ -137,33 +158,20 @@ def recognize(delay: float = 0.0) -> str:
 def Whisper_run(callback_func):
     def loop():
         print("🟢 Whisper hotword loop started")
+        _ensure_ros()
+ 
         while True:
             if conversation_active.is_set():
                 time.sleep(0.2)
                 continue
-
+ 
             raw_text   = recognize(delay=3)
             clean_text = _clean(raw_text)
             if not clean_text:
                 continue
-
-            if "open robot system" in clean_text:
-                config.set(chat_or_instruct=False)
-                logger.info("🎮 Switched to CONTROL mode.")
-                tts_manager.say("Okay, I'm now in control mode.")
-                conversation_active.set()
-                callback_func()
-            elif clean_text in {"i want to chat with you", "open chat system"}:
-                config.set(chat_or_instruct=True)
-                logger.info("💬 Switched to CHAT mode.")
-                tts_manager.say("Sure, I'm now in chat mode.")
-                conversation_active.set()
-                callback_func()
-
-            elif clean_text in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
-                tts_manager.say("Goodbye!")
-                time.sleep(1)
-                os._exit(0)
+ 
+            # ✅ 始终发布到 /speech_text（其它模块各自判断）
+            _ros["speech_pub"].publish(String(data=clean_text))
 
     threading.Thread(target=loop, daemon=True).start()
 
