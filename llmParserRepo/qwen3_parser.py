@@ -246,7 +246,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 time.sleep(1)
             else:
                 logger.warning("⚠️ Failed")
-                tts_manager.say("Parsing failed so the command cannot be executed.")
+                tts_manager.say("Command execution failed, please re-give the command")
                 time.sleep(1)
 
 if __name__ == "__main__":
