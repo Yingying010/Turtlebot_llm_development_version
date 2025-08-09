@@ -34,8 +34,18 @@ def _ensure_ros():
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         _ros["speech_pub"] = node.create_publisher(String, SPEECH_TOPIC, qos)
         _ros["node"] = node
-        # 后台自旋（非阻塞）
-        threading.Thread(target=lambda: rclpy.spin(node), daemon=True).start()
+        
+
+def _publish_text(text: str):
+    if not text:
+        return
+    _ensure_ros()
+    try:
+        _ros["pub"].publish(String(data=text))
+        # 可选：日志
+        logger.info(f"🗣️ Published to {SPEECH_TOPIC}: {text}")
+    except Exception as e:
+        logger.error(f"❌ Publish failed: {e}")
 
 # === 参数 ===
 SAMPLERATE = 48000
@@ -171,6 +181,8 @@ def Whisper_run(callback_func):
             clean_text = _clean(raw_text)
             if not clean_text:
                 continue
+
+            _publish_text(clean_text)
  
             # ✅ 始终发布到 /speech_text（其它模块各自判断）
             _ros["speech_pub"].publish(String(data=clean_text))
