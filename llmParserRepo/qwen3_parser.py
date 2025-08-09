@@ -217,6 +217,10 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         #     continue
 
         logger.info(f"🗣️ You said: {user_input}")
+        tts_manager.say("User command has been received")
+        time.sleep(0.5)
+        tts_manager.say(f"Your cammand is {user_input}. Currently parsing it for you ....")
+        time.sleep(0.5)
 
         exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "endding of this mode","ok finish", "endding this mode"]
 
