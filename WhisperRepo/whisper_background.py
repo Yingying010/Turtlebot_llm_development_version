@@ -178,55 +178,23 @@ def recognize(delay: float = 0.0) -> str:
 
 # === 新增：持续监听主循环 ===
 # === 持续监听主循环（修正 transcribe_file -> transcribe_audio；加入“归属 shutdown”）===
-def run_continuous_listen(
-    keyword_passthrough: bool = True,
-    min_chars: int = 1,
-    sleep_after_publish: float = 0.05
-):
-    """
-    持续执行：录到一句 -> 转写 -> 发布到 /speech_text。
-    仅使用 publisher，不启动 spin。
-    """
-    global _ros_node, _ros_owned_init
+# 支持外部停止信号
+def run_continuous_listen(stop_event=None, sleep_after_publish: float = 0.05):
     _ensure_ros_publisher()
-    print("🎧 Whisper continuous listening started. Speak anytime...")
-
+    print("🎧 Whisper continuous listening started.")
     try:
-        while rclpy.ok():  # Ctrl+C 或 rclpy.shutdown() 会退出
-            # 1) 录到一段（自动起止，含静音检测）
+        while rclpy.ok() and not (stop_event and stop_event.is_set()):
             wav_path = record_until_silence()
-            if not wav_path:
+            if not wav_path: 
                 continue
-
-            # 2) 转写（修正函数名）
             text = transcribe_audio(wav_path)
             if not text:
                 continue
-
-            # 3) （可选）重复清理可省略，因为 transcribe_audio 已清理
-            # text = _clean(text)
-
-            # 4) 过滤长度
-            if len(text.strip()) < min_chars:
-                continue
-
-            # 5) 发布
-            print(f"🗣️ Whisper: {text}")
             _publish_text(text)
-
-            # 6) 轻微休眠，避免硬循环过快
-            if sleep_after_publish > 0:
-                import time
-                time.sleep(sleep_after_publish)
-
-    except KeyboardInterrupt:
-        print("👋 Whisper listening stopped by user.")
+            if sleep_after_publish:
+                import time; time.sleep(sleep_after_publish)
     finally:
-        # 只在“本模块负责 init”的情况下关掉 ROS，避免影响同进程其他节点
-        try:
-            if _ros_node is not None:
-                _ros_node.destroy_node()
-        except Exception:
-            pass
-        if _ros_owned_init and rclpy.is_initialized():
-            rclpy.shutdown()
+        # 不要在这里 rclpy.shutdown()，避免影响同进程其他节点
+        if _ros_node is not None:
+            try: _ros_node.destroy_node()
+            except: pass

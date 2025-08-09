@@ -12,6 +12,7 @@ from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from WhisperRepo.whisper_background import run_continuous_listen
  
 # 工程根路径
 
@@ -29,6 +30,43 @@ publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 # ------------------------------------------------------------------
 SPEECH_TOPIC = "/speech_text"
 CTRL_TOPIC   = "/follow_service"
+
+
+# ───────────────── Whisper 后台监听 · 引用计数管理 ─────────────────
+# 放在文件顶部的全局区域
+_WHISPER_REF = 0
+_WHISPER_LOCK = threading.Lock()
+_WHISPER_THREAD: threading.Thread | None = None
+_WHISPER_STOP: threading.Event | None = None
+
+def _whisper_ref_inc():
+    """第一个 follow 启动时，开启唯一的 Whisper 后台监听线程。"""
+    global _WHISPER_REF, _WHISPER_THREAD, _WHISPER_STOP
+    with _WHISPER_LOCK:
+        _WHISPER_REF += 1
+        if _WHISPER_REF == 1:
+            _WHISPER_STOP = threading.Event()
+            _WHISPER_THREAD = threading.Thread(
+                target=run_continuous_listen,      # 来自 whisper_background.py
+                kwargs={"stop_event": _WHISPER_STOP, "sleep_after_publish": 0.05},
+                daemon=True,
+                name="whisper-bg",
+            )
+            _WHISPER_THREAD.start()
+
+def _whisper_ref_dec():
+    """最后一个 follow 结束时，关闭并回收 Whisper 监听线程。"""
+    global _WHISPER_REF, _WHISPER_THREAD, _WHISPER_STOP
+    with _WHISPER_LOCK:
+        _WHISPER_REF = max(0, _WHISPER_REF - 1)
+        if _WHISPER_REF == 0 and _WHISPER_THREAD:
+            try:
+                if _WHISPER_STOP:
+                    _WHISPER_STOP.set()
+                _WHISPER_THREAD.join(timeout=2.0)
+            finally:
+                _WHISPER_THREAD = None
+                _WHISPER_STOP = None
  
 # ---------- 工具 ----------
 
@@ -238,38 +276,62 @@ class SpeechStopListener(Node):
 
 # === 主入口 ===
 def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedExecutor):
+    """启动跟随任务：开启/复用 Whisper 监听、订阅语音停指令、循环控制到目标距离内。"""
     stop_event = threading.Event()
- 
+
+    # 1) 启动或复用 Whisper 后台监听（引用计数 + 单例线程）
+    _whisper_ref_inc()
+
+    # 2) PhaseSpace 订阅节点（写入全局缓存）
     tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
     tracker_target   = RigidTracker(position_cache=robot_position_cache, robot_name=target)
     executor.add_node(tracker_follower)
     executor.add_node(tracker_target)
- 
+
+    # 3) 等待位姿就绪
     if not wait_pose(follower) or not wait_pose(target):
         print("❌ Abort follow: pose not available.")
-        for n in [tracker_follower, tracker_target]:
+        for n in (tracker_follower, tracker_target):
             try:
-                executor.remove_node(n); n.destroy_node()
+                executor.remove_node(n)
             except Exception:
                 pass
+            try:
+                n.destroy_node()
+            except Exception:
+                pass
+        # 本次 follow 失败，引用-1（若这是唯一的 follow，会顺带停 Whisper）
+        _whisper_ref_dec()
         return
- 
+
+    # 4) 订阅 /speech_text，关键字触发 stop_event
     listener = SpeechStopListener(stop_event, name_suffix=follower)
     executor.add_node(listener)
- 
-    th = threading.Thread(target=follow_loop, args=(node, follower, target, stop_event),
-                          daemon=True, name=f"follow-{follower}")
+
+    # 5) 跟随控制线程
+    th = threading.Thread(
+        target=follow_loop,
+        args=(node, follower, target, stop_event),
+        daemon=True,
+        name=f"follow-{follower}",
+    )
     th.start()
- 
+
+    # 6) 阻塞等待直到结束（或被 stop_event 打断）
     try:
         while rclpy.ok() and th.is_alive() and not stop_event.is_set():
             time.sleep(0.2)
     finally:
+        # 6.1 结束跟随线程
         stop_event.set()
         th.join(timeout=2.0)
+
+        # 6.2 刹停机器人
         safe_publish_twist(node, follower, Twist())
         time.sleep(0.05)
-        for n in [listener, tracker_follower, tracker_target]:
+
+        # 6.3 清理 ROS 节点
+        for n in (listener, tracker_follower, tracker_target):
             try:
                 executor.remove_node(n)
             except Exception:
@@ -279,9 +341,5 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
             except Exception:
                 pass
 
-
-
-
-
-
- 
+        # 6.4 Whisper 引用-1：若为最后一个 follow，则关闭监听线程
+        _whisper_ref_dec()
