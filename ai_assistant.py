@@ -18,8 +18,6 @@ actived = 0
 allow_running = True
 
 def hwcallback():
-
-
     global running, actived, allow_running
     logger.info('🟡 HotWord triggered')
 

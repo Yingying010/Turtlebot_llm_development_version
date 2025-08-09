@@ -68,7 +68,7 @@ def execute_action(node, executor, task: Dict):
     elif action == "follow":
         if "target" in params:
             target = params["target"]
-            follow_run(robot, target)
+            follow_run(robot, target, executor)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
 
