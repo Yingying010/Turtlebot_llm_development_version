@@ -218,7 +218,8 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
         # firstly, try to find real position
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
-            resolved_target = get_current_position(target)
+            x, y, heading = get_current_position(target)
+            resolved_target = {"x": x, "y": y, "heading": heading}
             print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
         else:
             if target in semantic_locations:
