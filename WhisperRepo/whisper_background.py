@@ -45,12 +45,12 @@ def _ensure_ros_publisher():
             _ros_inited = True
 
 def _publish_text(text: str):
-    """确保节点存在然后直接 publish。"""
     if not text or not text.strip():
         return
     _ensure_ros_publisher()
-    msg = String()
-    msg.data = text.strip()
+    from std_msgs.msg import String
+    msg = String(); msg.data = text.strip()
+    print(f"📤 publishing to /speech_text: {msg.data}")   # <— 新增：可见的stdout
     _ros_pub.publish(msg)
 
 
