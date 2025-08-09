@@ -3,7 +3,7 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 from config import config
-from WhisperRepo.whisper_recognizer import Whisper_run, conversation_active, recognize
+from WhisperRepo.whisper_recognizer import conversation_active, recognize
 from llmParserRepo.qwen3_parser import run_conversation_loop
 # import TinyLlama_Chat
 import time
