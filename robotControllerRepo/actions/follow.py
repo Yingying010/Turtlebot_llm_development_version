@@ -224,7 +224,7 @@ class SpeechStopListener(Node):
 
 
 # === 主入口 ===
-def follow_run(follower: str, target: str, executor: MultiThreadedExecutor, ctrl_node: Node):
+def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedExecutor):
     stop_event = threading.Event()
  
     tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
@@ -244,7 +244,7 @@ def follow_run(follower: str, target: str, executor: MultiThreadedExecutor, ctrl
     listener = SpeechStopListener(stop_event, name_suffix=follower)
     executor.add_node(listener)
  
-    th = threading.Thread(target=follow_loop, args=(ctrl_node, follower, target, stop_event),
+    th = threading.Thread(target=follow_loop, args=(node, follower, target, stop_event),
                           daemon=True, name=f"follow-{follower}")
     th.start()
  
@@ -254,7 +254,7 @@ def follow_run(follower: str, target: str, executor: MultiThreadedExecutor, ctrl
     finally:
         stop_event.set()
         th.join(timeout=2.0)
-        safe_publish_twist(ctrl_node, follower, Twist())
+        safe_publish_twist(node, follower, Twist())
         time.sleep(0.05)
         for n in [listener, tracker_follower, tracker_target]:
             try:
