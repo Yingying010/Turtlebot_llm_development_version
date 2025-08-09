@@ -32,17 +32,16 @@ _ros_owned_init = False   # ← 我们是否自己调用了 rclpy.init()
 
 def _ensure_ros_publisher():
     """只创建 publisher，不启动 spin（发布不需要 spin）。"""
-    global _ros_inited, _ros_node, _ros_pub, _ros_owned_init
+    global _ros_node, _ros_pub, _ros_owned_init
     with _ros_lock:
-        if not _ros_inited:
-            try:
-                rclpy.init()
-                _ros_owned_init = True
-            except:
-                pass
+        try:
+            rclpy.init()
+            _ros_owned_init = True
+        except:
+            pass
 
-            if _ros_node is None:
-                _ros_node = Node("whisper_publisher")
+        if _ros_node is None:
+            _ros_node = Node("whisper_publisher")
 
         # 若 publisher 不存在或已被销毁，重新创建
         if _ros_pub is None:
