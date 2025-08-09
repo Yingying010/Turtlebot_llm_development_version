@@ -212,7 +212,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         logger.info(f"🗣️ You said: {user_input}")
 
-        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "endding of this mode","ok finish"]
+        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "endding of this mode","ok finish", "endding this mode"]
 
         if any(kw in user_input.lower() for kw in exit_keywords):
             tts_manager.say("Exiting voice control.")

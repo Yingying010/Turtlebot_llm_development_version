@@ -150,7 +150,7 @@ def Whisper_run(callback_func):
             if "open robot system" in clean_text:
                 config.set(chat_or_instruct=False)
                 logger.info("🎮 Switched to CONTROL mode.")
-                tts_manager.say("Okay, I'm now in control mode.")
+                tts_manager.say("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
                 conversation_active.set()
                 callback_func()
             elif clean_text in {"i want to chat with you", "open chat system"}:
