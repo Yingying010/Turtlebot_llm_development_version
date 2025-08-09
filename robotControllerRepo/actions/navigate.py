@@ -200,18 +200,20 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
  
  
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
+    is_successful = False
+
     # 1) 确保位置跟踪节点已接入 executor 并数据就绪
     rigid_node = getRobotPositionCache(robot_name, executor)
 
     if rigid_node is None:
         print("❌ Abort navigation due to missing pose.")
-        return
+        return is_successful
  
     # 2) 解析语义位置或直接使用坐标
     if isinstance(target, str):
         if target not in semantic_locations:
             print(f"❌ Error: target '{target}' not found in semantic_locations")
-            return
+            return is_successful
 
         resolved_target = semantic_locations[target]
         print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
@@ -226,4 +228,8 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
 
     else:
         print(f"⚠️ Invalid resolved target: {resolved_target}")
+        return is_successful
+
+    is_successful = True
+    return is_successful
  

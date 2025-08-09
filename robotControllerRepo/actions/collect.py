@@ -21,7 +21,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target
  # === 执行 collect 行为 ===
 def collect_item(node: Node, robot_name: str, item: str, target, executor):
     # === 阶段 1：导航到目标位置 ===
-    navigate_to_target(node, executor, robot_name, target)
+    is_successful = navigate_to_target(node, executor, robot_name, target)
     print(f"🎯 Reached target location, collecting {item}...")
  
     # === 阶段 2：收集 ===
@@ -29,6 +29,8 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
     tts_manager.say(f"I am collecting {item}")
     time.sleep(3)  # 模拟收集时间
     tts_manager.say(f"{item} collected successfully")
+
+    return is_successful
 
 
 

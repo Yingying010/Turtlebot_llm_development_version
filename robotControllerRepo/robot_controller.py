@@ -57,10 +57,10 @@ def execute_action(node, executor, task: Dict):
 
     elif action == "navigate":
         if "position" in params:
-            navigate_to_target(node, executor, robot, params["position"])
+            is_successful = navigate_to_target(node, executor, robot, params["position"])
             # print(f"  → Navigating to {params.get('position')}")
         elif "target" in params:
-            navigate_to_target(node, executor, robot, params["target"])
+            is_successful = navigate_to_target(node, executor, robot, params["target"])
             # print(f"  → Navigating to {params.get('target')}")
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
@@ -81,26 +81,29 @@ def execute_action(node, executor, task: Dict):
             face_run(robot, target)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
-    
-    elif action == "wait":
-        print(f"  → Waiting for {params['duration_sec']} seconds")
-        time.sleep(params["duration_sec"])
+
     elif action == "collect":
         item = params["item"]
         if "position" in params:
-            collect_item(node, robot, item, params["position"], executor)
+            is_successful = collect_item(node, robot, item, params["position"], executor)
         elif "target" in params:
-            collect_item(node, robot, item, params["target"], executor)
+            is_successful = collect_item(node, robot, item, params["target"], executor)
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
     elif action == "deliver":
         item = params["item"]
         if "position" in params:
-            deliver_item(node, robot, item, params["position"], executor)
+            is_successful = deliver_item(node, robot, item, params["position"], executor)
         elif "target" in params:
-            deliver_item(node, robot, item, params["target"], executor)
+            is_successful = deliver_item(node, robot, item, params["target"], executor)
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
+    
+    elif action == "wait":
+        print(f"  → Waiting for {params['duration_sec']} seconds")
+        time.sleep(params["duration_sec"])
+
+
     else:
         print(f"⚠️ Unknown action: {action}")
 
