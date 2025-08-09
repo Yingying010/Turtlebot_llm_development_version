@@ -6,6 +6,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
 def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, target: str = "self"):
+    is_successful = False
     print(f"🔁 {robot_id} turning {direction} {value} {unit} around {target}")
 
     pub = node.create_publisher(Twist, f"/{robot_id}/cmd_vel", 10)
@@ -18,7 +19,7 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
         twist.angular.z = -angular_speed
     else:
         print(f"⚠️ Unknown direction: {direction}")
-        return
+        return is_successful
 
     if unit == "degrees":
         angle_rad = math.radians(value)
@@ -30,14 +31,19 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
         print(f"{robot_id} turning {direction} for {duration:.2f}s around {target}")
     else:
         print(f"⚠️ Unsupported unit: {unit}")
-        return
+        return is_successful
 
     time.sleep(0.2)
 
     start_time = time.time()
-    while time.time() - start_time < duration:
-        pub.publish(twist)
-        time.sleep(0.01)
+    try:
+        while time.time() - start_time < duration:
+            pub.publish(twist)
+            time.sleep(0.01)
 
-    pub.publish(Twist())  # 停止
-    print(f"✅ {robot_id} finished rotating.")
+        pub.publish(Twist())  # 停止
+        print(f"✅ {robot_id} finished rotating.")
+        is_successful = True
+        return is_successful
+    except Exception:
+        return is_successful

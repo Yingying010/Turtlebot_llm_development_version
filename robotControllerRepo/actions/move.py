@@ -4,6 +4,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
 def move(node: Node, robot_id, direction, value, unit):
+    is_successful = False
     print(f"🚗 {robot_id} moving {direction} for {value} {unit}")
     publisher = node.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
 
@@ -30,10 +31,15 @@ def move(node: Node, robot_id, direction, value, unit):
 
     time.sleep(0.2)  # 等待 publisher 初始化
 
-    start = time.time()
-    while time.time() - start < duration:
-        publisher.publish(twist)
-        time.sleep(0.01)  # 提高平滑度
+    try:
+        start = time.time()
+        while time.time() - start < duration:
+            publisher.publish(twist)
+            time.sleep(0.01)  # 提高平滑度
 
-    publisher.publish(Twist())  # stop
-    print(f"✅ {robot_id} finished moving.")
+        publisher.publish(Twist())  # stop
+        print(f"✅ {robot_id} finished moving.")
+        is_successful = True
+        return is_successful
+    except Exception:
+        return is_successful
