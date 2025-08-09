@@ -41,6 +41,7 @@ from ttsRepo.stream_tts import tts_manager
 
 
 def execute_action(node, executor, task: Dict):
+    is_successful = False
     print(node)
     robot = task["robot"]
     action = task["action"]
