@@ -13,6 +13,7 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from WhisperRepo.whisper_background import run_continuous_listen
+from ttsRepo.stream_tts import tts_manager
  
 # 工程根路径
 
@@ -70,22 +71,25 @@ def _whisper_ref_dec():
  
 # ---------- 工具 ----------
 
-def getRobotPositionCache(robot_id: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     rigid_node = RigidTracker(
         position_cache=robot_position_cache,
-        robot_name=robot_id,
+        robot_name=robot_name,
         position_lock=cache_lock,  # 传入同一把锁，避免读写冲突
     )
     executor.add_node(rigid_node)
-    print(f"⏳ Waiting for position data of {robot_id}...")
+    print(f"⏳ Waiting for position data of {robot_name}...")
+    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
-            ok = robot_id in robot_position_cache
+            ok = robot_name in robot_position_cache
         if ok:
-            print(f"✅ Got position data for {robot_id}.")
+            print(f"✅ Got position data for {robot_name}.")
+            tts_manager.say(f"Position data acquired for {robot_name}.")
             return rigid_node
         time.sleep(0.2)
-    print(f"❌ Timeout: No position data for {robot_id}")
+    print(f"❌ Timeout: No position data for {robot_name}")
+    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
 def get_current_position(robot_name: str) -> tuple:
@@ -97,6 +101,7 @@ def get_current_position(robot_name: str) -> tuple:
             heading_y = rigid["heading_y"]
             return x, y, heading_y
     print(f"⚠️ No position data for {robot_name}")
+    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
 
 
