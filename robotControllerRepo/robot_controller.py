@@ -51,10 +51,10 @@ def execute_action(node, executor, task: Dict):
     tts_manager.say(f"{robot} is executing {action}")
 
     if action == "move":
-        move(node, robot, params["direction"], params["value"], params["unit"])
+        is_successful = move(node, robot, params["direction"], params["value"], params["unit"])
 
     elif action == "turn":
-        rotate(node, robot, params["direction"], params["value"], params["unit"], params.get("target", "self"))
+        is_successful = rotate(node, robot, params["direction"], params["value"], params["unit"], params.get("target", "self"))
 
     elif action == "navigate":
         if "position" in params:
