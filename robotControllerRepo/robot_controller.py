@@ -77,8 +77,8 @@ def execute_action(node, executor, task: Dict):
 
     elif action == "face":
         if "target" in params:
-            is_successful = target = params["target"]
-            face_run(node, robot, target, executor)
+            target = params["target"]
+            is_successful = face_run(node, robot, target, executor)
         else:
             logger.warning(f"Missing 'target' in follow params: {params}")
 
