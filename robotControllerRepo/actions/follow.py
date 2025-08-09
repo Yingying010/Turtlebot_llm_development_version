@@ -94,83 +94,83 @@ def wait_pose(robot_id: str, timeout_s: float = 10.0) -> bool:
 
 # --------- rotate and move
 
-def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
-                          angle_tolerance_deg: float = 5.0):
-    x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_id)
-    dx = x_target - x_now
-    dz = y_target - y_now
-    target_angle = math.degrees(math.atan2(dx, dz)) % 360
- 
-    print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
- 
-    while True:
-        _, _, heading_y_now = get_current_position(robot_id)
-        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
-
-        if abs(angle_error) < angle_tolerance_deg:
-            print("✅ ROTATE done.")
-            break
- 
-        new_direction = 1 if angle_error > 0 else -1
-        twist = Twist()
-
-        if abs(angle_error) > 25:
-            twist.angular.z = 0.5 * new_direction
-        elif abs(angle_error) > 10:
-            twist.angular.z = 0.3 * new_direction
-        else:
-            twist.angular.z = 0.15 * new_direction
- 
-        safe_publish_twist(node, robot_id, twist)
-        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
-              f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
-
-        time.sleep(0.1)
- 
-    safe_publish_twist(node, robot_id, Twist())
-    time.sleep(0.2)
-
-
-
-def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
-                               tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0):
-    x_target, y_target = target["x"], target["y"]
-
-    print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
-
-    while True:
-        x_now, y_now, heading_y_now = get_current_position(robot_name)
+def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float], stop_event = None, angle_tolerance_deg: float = 5.0):
+    while not stop_event.is_set():
+        x_target, y_target = target["x"], target["y"]
+        x_now, y_now, _ = get_current_position(robot_id)
         dx = x_target - x_now
         dz = y_target - y_now
-        distance = math.hypot(dx, dz)
-
-        if distance < tolerance:
-            print("🎉 Reached target.")
-            break
- 
-        # 目标方向角与误差
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
-        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
- 
-        if abs(angle_error) > max_acceptable_angle_error:
-            print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
-            rotate_to_face_target(node, robot_name, target)
-            continue
- 
-        # 前进（小速度：精度更好）
-        twist = Twist()
-        twist.linear.x = 0.1
-        safe_publish_twist(node, robot_name, twist)
-        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, "
-              f"error={angle_error:.1f}°")
+    
+        print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
+    
+        while True:
+            _, _, heading_y_now = get_current_position(robot_id)
+            angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
+            if abs(angle_error) < angle_tolerance_deg:
+                print("✅ ROTATE done.")
+                break
+    
+            new_direction = 1 if angle_error > 0 else -1
+            twist = Twist()
+
+            if abs(angle_error) > 25:
+                twist.angular.z = 0.5 * new_direction
+            elif abs(angle_error) > 10:
+                twist.angular.z = 0.3 * new_direction
+            else:
+                twist.angular.z = 0.15 * new_direction
+    
+            safe_publish_twist(node, robot_id, twist)
+            print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
+                f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
+
+            time.sleep(0.1)
+    
+        safe_publish_twist(node, robot_id, Twist())
         time.sleep(0.2)
 
-        safe_publish_twist(node, robot_name, Twist())
 
-        time.sleep(0.1)
- 
+
+def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float], stop_event=None, tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0):
+    while not stop_event.is_set():
+        x_target, y_target = target["x"], target["y"]
+
+        print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
+
+        while True:
+            x_now, y_now, heading_y_now = get_current_position(robot_name)
+            dx = x_target - x_now
+            dz = y_target - y_now
+            distance = math.hypot(dx, dz)
+
+            if distance < tolerance:
+                print("🎉 Reached target.")
+                break
+    
+            # 目标方向角与误差
+            target_angle = math.degrees(math.atan2(dx, dz)) % 360
+            angle_error = (target_angle - heading_y_now + 180) % 360 - 180
+    
+            if abs(angle_error) > max_acceptable_angle_error:
+                print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
+                rotate_to_face_target(node, robot_name, target)
+                continue
+    
+            # 前进（小速度：精度更好）
+            twist = Twist()
+            twist.linear.x = 0.1
+            safe_publish_twist(node, robot_name, twist)
+            print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, "
+                f"error={angle_error:.1f}°")
+
+            time.sleep(0.2)
+
+            safe_publish_twist(node, robot_name, Twist())
+
+            time.sleep(0.1)
+    
 # ---------- 跟随线程 ----------
 FOLLOW_DIST_MM = 200.0
 HYSTERESIS_MM = 50.0
