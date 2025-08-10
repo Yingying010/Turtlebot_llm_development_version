@@ -236,7 +236,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 continue
         
             user_input = _clean(raw_text)
-            if not user_input or user_input == "blank_audio" or not any(aliases in user_input):
+            if not user_input or user_input == "blank_audio" or not any(alias in user_input for alias in aliases):
                 continue
             else:
                 break
