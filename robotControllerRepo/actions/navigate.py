@@ -115,7 +115,17 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
  
 def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
                             angle_tolerance_deg: float = 5.0):
-    print(f"\n🎯 ROTATE TO HEADING: {heading_deg:.1f}°")
+    if heading_deg is None:
+        print("No final heading specified; skipping final rotate.")
+        return True  # 不需要旋转，视为成功
+
+    try:
+        heading_deg = float(heading_deg)
+    except (TypeError, ValueError):
+        print(f"⚠️ Invalid heading_deg: {heading_deg}, skipping final rotate.")
+        return True
+
+    print(f"\ROTATE TO HEADING: {heading_deg:.1f}°")
     while True:
         _, _, heading_y_now = get_current_position(robot_name)
         angle_error = (heading_deg - heading_y_now + 180) % 360 - 180
