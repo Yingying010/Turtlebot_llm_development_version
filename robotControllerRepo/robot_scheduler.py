@@ -1,30 +1,37 @@
 #!/usr/bin/env python3
-import os, sys
+import os, sys, json, time, threading, traceback
+from collections import defaultdict
+from typing import Dict, Any
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 
-import json
-import time
-from collections import defaultdict
-from typing import Dict, Any
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import String
-from textwrap import dedent
-import threading
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from robotControllerRepo.robot_controller import execute_action
 from config import config
 from loguru import logger
-import traceback
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from textwrap import dedent
 
 # === 全局变量 ===
 ros_node = None
 status_pub = None
 status_cache = defaultdict(lambda: defaultdict(str))  # {(seq, sync_group): {robot: status}}
-target_counts = {}
+target_counts: Dict[tuple, int] = {}
 
+# 心跳
+HEARTBEAT_INTERVAL = 2.0
+_heartbeat_stop = threading.Event()
+_heartbeat_thread: threading.Thread | None = None
+
+# 事件 & 锁
+status_events = defaultdict(threading.Event)
+cache_lock = threading.Lock()
+
+def status_rank(s: str) -> int:
+    return {"ready": 1, "running": 2, "finished": 3}.get(s, 0)
 
 # === 提取任务中每个 sync_group 的机器人数量 ===
 def count_robots_per_sync_key(task_data: Dict[str, Any]) -> Dict[tuple, int]:
@@ -37,67 +44,78 @@ def count_robots_per_sync_key(task_data: Dict[str, Any]) -> Dict[tuple, int]:
                 count_map[(seq, sg)].add(robot)
     return {k: len(v) for k, v in count_map.items()}
 
-# === 发布任务状态 ===
-def publish_status(robot: str, task_id: str, sequence: int, sync_group: str, status: str):
+# === 安全发布 ===
+def _safe_publish(payload: dict):
+    if status_pub is None or not rclpy.ok():
+        return
+    try:
+        status_pub.publish(String(data=json.dumps(payload)))
+    except Exception:
+        logger.exception("publish failed")
+
+# === 只在状态变化时发一次（ready→running→finished）===
+def publish_state(robot: str, task_id: str, sequence: int, sync_group: str | None, status: str):
     msg = {
+        "kind": "state",
         "robot": robot,
         "task_id": task_id,
         "sequence": sequence,
         "sync_group": sync_group,
-        "status": status
+        "status": status,
+        "ts": time.time()
     }
-    status_pub.publish(String(data=json.dumps(msg)))
-    print(f"[{robot}] 📣 Published status: {status} for {sequence}-{sync_group}")
+    _safe_publish(msg)
+    print(f"[{robot}] 📣 State: {status} @ ({sequence}, {sync_group})")
 
+# === 低频心跳（仅活性检测，不参与 barrier 判断）===
+def start_heartbeat(robot: str):
+    global _heartbeat_thread
+    if _heartbeat_thread and _heartbeat_thread.is_alive():
+        return
+    def loop():
+        while not _heartbeat_stop.is_set():
+            _safe_publish({
+                "kind": "heartbeat",
+                "robot": robot,
+                "ts": time.time()
+            })
+            time.sleep(HEARTBEAT_INTERVAL)
+    _heartbeat_thread = threading.Thread(target=loop, daemon=True)
+    _heartbeat_thread.start()
 
-def start_periodic_status_publisher(robot, task_id, seq, sync_group, status, stop_event):
-    def publish_loop():
-        msg = {
-            "robot": robot,
-            "task_id": task_id,
-            "sequence": seq,
-            "sync_group": sync_group,
-            "status": status
-        }
-        while not stop_event.is_set():
-            try:
-                status_pub.publish(String(data=json.dumps(msg)))
-                print(f"[{robot}] ⏱️ Periodic status: {status} for {seq}-{sync_group}")
-            except Exception as e:
-                print(f"[{robot}] ⚠️ Failed to publish: {e}")
-                break
-            time.sleep(0.5)
-    t = threading.Thread(target=publish_loop, daemon=True)
-    t.start()
-    return t
+def stop_heartbeat():
+    _heartbeat_stop.set()
+    if _heartbeat_thread:
+        _heartbeat_thread.join(timeout=1)
 
 # === 状态订阅回调 ===
-status_events = defaultdict(threading.Event)
-cache_lock = threading.Lock()
-def status_callback(msg):
+def status_callback(msg: String):
     try:
         data = json.loads(msg.data)
+        kind = data.get("kind", "state")
+        if kind == "heartbeat":
+            # 心跳不计入 barrier；可按需记录 last_seen
+            print(f"💓 HB from {data.get('robot')} at {data.get('ts')}")
+            return
+
         key = (data["sequence"], data["sync_group"])
         robot = data["robot"]
         status = data["status"]
 
         with cache_lock:
             status_cache[key][robot] = status
- 
-            # 计算达到“当前阶段”要求的机器人数量
-            reached_ready    = sum(status_rank(s)>=status_rank("ready")    for s in status_cache[key].values())
-            reached_finished = sum(status_rank(s)>=status_rank("finished") for s in status_cache[key].values())
- 
-            if reached_ready   >= target_counts.get(key, 0):
+
+            reached_ready    = sum(status_rank(s) >= status_rank("ready")    for s in status_cache[key].values())
+            reached_finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
+
+            if reached_ready    >= target_counts.get(key, 0):
                 status_events[(key, "ready")].set()
-            if reached_finished>= target_counts.get(key, 0):
+            if reached_finished >= target_counts.get(key, 0):
                 status_events[(key, "finished")].set()
-            print(f"📥 {robot} → {status} @ {key}")
+            print(f"📥 {robot} → {status} @ {key}  "
+                  f"(need {target_counts.get(key,0)}, ready={reached_ready}, fin={reached_finished})")
     except Exception:
         print(f"⚠️ status_callback error: \n{traceback.format_exc()}")
-
-def status_rank(s: str) -> int:
-    return {"ready": 1, "running": 2, "finished": 3}.get(s, 0)
 
 # === 等待所有机器人 status 为某个值 ===
 def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
@@ -105,13 +123,13 @@ def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
     ok = ev.wait(timeout)
     if not ok:
         raise TimeoutError(f"{sync_key} 等待 {expected} 超时")
-    ev.clear()           # 复位给下一个阶段用
-  
-# === 执行任务调度 ===
+    ev.clear()
+
+# === 执行任务调度（变更触发：ready/run/finished 各发一次）===
 def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], executor):
     print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
 
-    is_schedule = False
+    is_successful_overall = False
     robot_tasks = task_data["robots"].get(robot_name, [])
     robot_tasks.sort(key=lambda x: x["sequence"])
 
@@ -123,128 +141,102 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             sync_key = (seq, sync_group)
             task_id = task["task_id"]
 
-            if sync_group:
-                # Step 1: 启动 ready 状态的周期广播
-                stop_event = threading.Event()
-                _ = start_periodic_status_publisher(robot_name, task_id, seq, sync_group, "ready", stop_event)
-
-                # Step 2: 等待所有机器人 ready
+            if sync_group is not None:
+                # 所有人就绪屏障：先各自发 ready，然后等待 all ready
+                publish_state(robot_name, task_id, seq, sync_group, "ready")
                 wait_for_all_status(sync_key, "ready")
-
-                # Step 3: 停止广播
-                stop_event.set()
-
                 print(f"[{robot_name}] ✅ All ready → executing task {task_id}")
+                # 开始执行前，发 running
+                publish_state(robot_name, task_id, seq, sync_group, "running")
 
-            
+            # 执行动作
+            ok = execute_action(node, executor, task)
+            is_successful_overall = ok or is_successful_overall
 
-            # Step 3: 执行动作
-            is_successful = execute_action(node, executor, task)
-            is_schedule = is_successful
-
-            # Step 4: 发布 finished 状态
-            if sync_group:
-                # Step 4: 启动 finished 状态的周期广播
-                stop_event = threading.Event()
-                _ = start_periodic_status_publisher(robot_name, task_id, seq, sync_group, "finished", stop_event)
-
-                # Step 5: 等待所有机器人 finished
+            if sync_group is not None:
+                # 执行完成，发 finished，然后等待 all finished
+                publish_state(robot_name, task_id, seq, sync_group, "finished")
                 wait_for_all_status(sync_key, "finished")
-
-                # Step 6: 停止广播
-                stop_event.set()
-
                 print(f"[{robot_name}] 🎉 All finished for {sync_key}")
 
-        if is_schedule == True:
+        if is_successful_overall:
             print(f"🎯 All tasks completed for `{robot_name}`!")
-
-        return is_schedule
+        return is_successful_overall
     except Exception:
         logger.warning(f"⚠️ Failed to execute tasks:\n{traceback.format_exc()}")
-        is_schedule = False
-        return is_schedule
-
-
+        return False
 
 def shutdown_node(node: Node) -> bool:
-    """
-    尝试安全销毁 ROS2 Node。
-    返回 True 表示 destroy 成功；False 表示未执行或出错。
-    """
- 
     if node is None or not rclpy.ok():
-        # rclpy 已 shutdown 或 node 无效
         return False
- 
-    # 若 node 被某个 executor 管理，先移除
-    if getattr(node, "_executor", None) is not None:
-        try:
-            node._executor.remove_node(node)
-        except Exception:
-            # 不阻塞主流程，但留痕
-            node.get_logger().warning(f"⚠️ Unable to remove node from executor: :\n{traceback.format_exc()}")
- 
-    # 记录 shutdown 日志
-    node.get_logger().info("🛑 Safe shutdown")
- 
-    # 真正销毁
     try:
+        # 更安全：如果被 executor 管理，应该先从外部 remove
+        node.get_logger().info("🛑 Safe shutdown")
         node.destroy_node()
         return True
     except Exception:
         node.get_logger().exception(f"❌ Node destruction failed: \n{traceback.format_exc()}")
         return False
 
-
- 
 def run(task_data: Dict[str, Any]):
     global ros_node, status_pub, target_counts
     robot_id = config.get("robot_id")
-    is_successul = False
- 
-    # 1) init（多次调用保护）
+    is_successful = False
+
+    # 1) 先统计同步组规模（避免回调早来时还没 target_counts）
+    target_counts = count_robots_per_sync_key(task_data)
+    print("🎯 target_counts =", target_counts)
+
+    # 2) init（多次调用保护）
     try:
         rclpy.init()
     except RuntimeError:
         pass
- 
-    # 2) node & executor
+
+    # 3) node & executor
     ros_node = rclpy.create_node(f"status_node_{robot_id}")
     executor = MultiThreadedExecutor()
     executor.add_node(ros_node)
- 
-    # 3) pub / sub（可靠 QoS）
-    qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+
+    # 4) QoS：RELIABLE + TRANSIENT_LOCAL（关键）
+    qos = QoSProfile(depth=1)
+    qos.reliability = ReliabilityPolicy.RELIABLE
+    qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL
+
+    # 5) pub/sub
     status_pub = ros_node.create_publisher(String, "/robot_status", qos)
     ros_node.create_subscription(String, "/robot_status", status_callback, qos)
- 
-    # 4) spin thread
+
+    # 6) spin + 心跳
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
- 
+    start_heartbeat(robot_id)
+
     try:
-        target_counts = count_robots_per_sync_key(task_data)
-        is_successul = run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
-        return is_successul
+        is_successful = run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
+        return is_successful
     except Exception:
-        logger.exception("⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
-        return is_successul
+        logger.exception(f"⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
+        return is_successful
     finally:
         print(f"🛑 Shutting down ROS node for {robot_id}")
-        executor.shutdown()          # ← 先停执行器
-        shutdown_node(ros_node)      # ← 再销毁 node
-        rclpy.shutdown()             # ← 最后关 context
-        spin_thread.join(timeout=1)  # ← 等后台线程退出
-
+        stop_heartbeat()
+        try:
+            executor.remove_node(ros_node)
+        except Exception:
+            pass
+        executor.shutdown()
+        shutdown_node(ros_node)
+        rclpy.shutdown()
+        spin_thread.join(timeout=1)
 
 if __name__ == "__main__":
     raw_response = dedent("""
     {
       "robots": {
         "robot1": [
-          {"task_id": "t0", "action": "move", "parameters": {"direction": "forward", "value": 2, "unit": "meters"}, "sync_group": null, "sequence": 1},
-          {"task_id": "t1", "action": "turn", "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, "sync_group": null, "sequence": 2}
+          {"task_id": "t0", "action": "move", "parameters": {"direction": "forward", "value": 2, "unit": "meters"}, "sync_group": "A", "sequence": 1},
+          {"task_id": "t1", "action": "turn", "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, "sync_group": "A", "sequence": 2}
         ]
       }
     }
