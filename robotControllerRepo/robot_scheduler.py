@@ -53,25 +53,42 @@ def _safe_publish(payload: dict):
     except Exception:
         logger.exception("publish failed")
 
+# === 本地写入状态 + 触发事件（不依赖回环）===
+def _apply_status_and_maybe_signal(robot: str, seq: int, sync_group, status: str):
+    key = (seq, sync_group)
+    with cache_lock:
+        status_cache[key][robot] = status
+
+        reached_ready    = sum(status_rank(s) >= status_rank("ready")    for s in status_cache[key].values())
+        reached_finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
+        need = target_counts.get(key, 0)
+
+        if reached_ready >= need:
+            status_events[(key, "ready")].set()
+        if reached_finished >= need:
+            status_events[(key, "finished")].set()
+
+        print(f"📥(local) {robot} → {status} @ {key} "
+              f"(need {need}, ready={reached_ready}, fin={reached_finished})")
+
 # === 只在状态变化时发一次（ready→running→finished）===
-def publish_state(robot: str, task_id: str, sequence: int, sync_group: str | None, status: str):
-    msg = {
-        "kind": "state",
-        "robot": robot,
-        "task_id": task_id,
-        "sequence": sequence,
-        "sync_group": sync_group,
-        "status": status,
-        "ts": time.time()
-    }
-    _safe_publish(msg)
+def publish_state(robot, task_id, sequence, sync_group, status):
+    # 1) 本地直接计入（立刻让 ready+1）
+    _apply_status_and_maybe_signal(robot, sequence, sync_group, status)
+
+    # 2) 再通过话题广播给对方
+    payload = {"kind":"state","robot":robot,"task_id":task_id,
+               "sequence":sequence,"sync_group":sync_group,
+               "status":status,"ts":time.time()}
+    _safe_publish(payload)
     print(f"[{robot}] 📣 State: {status} @ ({sequence}, {sync_group})")
 
 # === 低频心跳（仅活性检测，不参与 barrier 判断）===
 def start_heartbeat(robot: str):
-    global _heartbeat_thread
+    global _heartbeat_thread, _heartbeat_stop
     if _heartbeat_thread and _heartbeat_thread.is_alive():
         return
+    _heartbeat_stop.clear()  # ← 关键：确保每次 run 都能重新开始
     def loop():
         while not _heartbeat_stop.is_set():
             _safe_publish({
@@ -89,33 +106,40 @@ def stop_heartbeat():
         _heartbeat_thread.join(timeout=1)
 
 # === 状态订阅回调 ===
-def status_callback(msg: String):
+def status_callback(msg):
     try:
         data = json.loads(msg.data)
         kind = data.get("kind", "state")
-        if kind == "heartbeat":
-            # 心跳不计入 barrier；可按需记录 last_seen
-            print(f"💓 HB from {data.get('robot')} at {data.get('ts')}")
-            return
+        if kind != "state":
+            return  # 心跳忽略
 
+        src_robot = data["robot"]
         key = (data["sequence"], data["sync_group"])
-        robot = data["robot"]
         status = data["status"]
 
-        with cache_lock:
-            status_cache[key][robot] = status
+        # 新增：区分来源
+        if src_robot == config.get("robot_id"):
+            print(f"📩 收到【自己】的状态: {src_robot} → {status} @ {key}")
+        else:
+            print(f"📩 收到【对方】的状态: {src_robot} → {status} @ {key}")
 
+        # 原有的状态处理逻辑
+        with cache_lock:
+            status_cache[key][src_robot] = status
             reached_ready    = sum(status_rank(s) >= status_rank("ready")    for s in status_cache[key].values())
             reached_finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
 
-            if reached_ready    >= target_counts.get(key, 0):
+            if reached_ready >= target_counts.get(key, 0):
                 status_events[(key, "ready")].set()
             if reached_finished >= target_counts.get(key, 0):
                 status_events[(key, "finished")].set()
-            print(f"📥 {robot} → {status} @ {key}  "
+
+            print(f"📥 {src_robot} → {status} @ {key} "
                   f"(need {target_counts.get(key,0)}, ready={reached_ready}, fin={reached_finished})")
+
     except Exception:
         print(f"⚠️ status_callback error: \n{traceback.format_exc()}")
+
 
 # === 等待所有机器人 status 为某个值 ===
 def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
