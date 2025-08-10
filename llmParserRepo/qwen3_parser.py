@@ -14,6 +14,37 @@ import robotControllerRepo.robot_scheduler as robot_scheduler
 import traceback
 
 
+import re
+ 
+def generate_robot_aliases(robot_id: str):
+    """
+    根据 robot_id 生成变体，例如:
+    robot1 -> ['robot1', 'robot 1', 'robot one', 'robotone']
+    """
+    # 英文数字映射
+    num_words = {
+        1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+        6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"
+    }
+ 
+    # 提取前缀和数字
+    match = re.match(r"([a-zA-Z]+)(\d+)", robot_id)
+    if not match:
+        raise ValueError(f"Invalid robot_id format: {robot_id}")
+ 
+    prefix, num_str = match.groups()
+    num_int = int(num_str)
+ 
+    # 生成变体
+    aliases = [
+        f"{prefix}{num_str}",              # robot1
+        f"{prefix} {num_str}",             # robot 1
+        f"{prefix} {num_words.get(num_int, num_str)}",  # robot one
+        f"{prefix}{num_words.get(num_int, num_str)}"    # robotone
+    ]
+    return aliases
+
+
 
 SYSTEM_PROMPT: str = dedent("""
         You are a specialized robot command interpreter that converts natural language instructions into structured JSON task sequences for robotic systems. Your role is to parse human commands and output precise, executable robot task definitions.
@@ -192,6 +223,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
     history_messages[:] = [{"role": "system", "content": SYSTEM_PROMPT}]
     save_history(history_messages)
     robot_id = config.get("robot_id") 
+    aliases = generate_robot_aliases(robot_id)
     
     while True:
         while True:
@@ -204,7 +236,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 continue
         
             user_input = _clean(raw_text)
-            if not user_input or user_input == "blank_audio":
+            if not user_input or user_input == "blank_audio" or not any(aliases in user_input):
                 continue
             else:
                 break
