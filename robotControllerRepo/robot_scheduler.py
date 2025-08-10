@@ -100,7 +100,7 @@ def status_rank(s: str) -> int:
     return {"ready": 1, "running": 2, "finished": 3}.get(s, 0)
 
 # === 等待所有机器人 status 为某个值 ===
-def wait_for_all_status(sync_key: tuple, expected: str, timeout=15):
+def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
     ev = status_events[(sync_key, expected)]
     ok = ev.wait(timeout)
     if not ok:
