@@ -6,7 +6,7 @@ class LaserScanSubscriber(Node):
         super().__init__('laser_scan_subscriber')
         self.subscription = self.create_subscription(
             LaserScan,
-            '/scan',
+            '/robot1/scan',
             self.listener_callback,
             10)
         self.subscription  # prevent unused variable warning

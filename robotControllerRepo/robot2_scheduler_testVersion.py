@@ -328,6 +328,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
         return False
 
 
+
 # =========================
 # 节点生命周期
 # =========================
@@ -352,7 +353,7 @@ def run(task_data: Dict[str, Any]):
     # —— 本地计划校验（只用 task_data["robots"]）——
     validate_local_plan(task_data)
 
-    robot_id = config.get("robot_id")
+    robot_id = config.get("robot_id2")
     is_successful = False
 
     # 1) 先统计屏障规模

@@ -6,6 +6,7 @@ from loguru import logger
 # 状态参数（可用于控制 TurtleBot）
 params = {
     "robot_id":"robot1",
+    "robot_id2":"robot2",
     "isConversation": True,
     # 运行状态锁
     "notify_enable": False,

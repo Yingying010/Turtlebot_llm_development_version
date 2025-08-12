@@ -3,6 +3,9 @@ from rclpy.node import Node
 from phasespace_msgs.msg import Rigid
 import math
 from scipy.spatial.transform import Rotation as R
+from rclpy.executors import MultiThreadedExecutor
+import threading
+import time
  
  
 class RigidTracker(Node):
@@ -56,17 +59,44 @@ def yaw_from_quat(qw, qx, qy, qz):
     f = R.from_quat([qx, qy, qz, qw]).apply([0, 0, 1])
     return (math.degrees(math.atan2(f[0], f[2])) + 360) % 360
  
-def main(args=None):
-    rclpy.init(args=args)
+def main():
+    rclpy.init()
+ 
+    # 用来存储位置信息
     position_cache = {}
-    robot_name = "robot1"
-    node = RigidTracker(position_cache,robot_name)
-    # ✅ 打印缓存
-    # print("📦 Current position cache:", position_cache)
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    position_lock = threading.Lock()
  
-if __name__ == '__main__':
+    # 创建 robot2 的跟踪器
+    tracker = RigidTracker(position_cache, "robot1", position_lock)
+ 
+    executor = MultiThreadedExecutor()
+    executor.add_node(tracker)
+ 
+    try:
+        # 启一个线程运行 ROS2 executor
+        thread = threading.Thread(target=executor.spin, daemon=True)
+        thread.start()
+ 
+        print("📡 Listening for robot2's position updates... (Ctrl+C to stop)")
+ 
+        # 循环打印 robot2 位置信息
+        while rclpy.ok():
+            with position_lock:
+                if "robot1" in position_cache:
+                    data = position_cache["robot1"]
+                    print(
+                        f"[robot1] x={data['x']:.2f}, y={data['y']:.2f}, z={data['z']:.2f}, "
+                        f"heading_y={data['heading_y']:.2f}, cond={data['cond']:.2f}"
+                    )
+            time.sleep(1.0)
+ 
+    except KeyboardInterrupt:
+        print("\n🛑 Stopping...")
+    finally:
+        executor.shutdown()
+        tracker.destroy_node()
+        rclpy.shutdown()
+ 
+ 
+if __name__ == "__main__":
     main()
- 
