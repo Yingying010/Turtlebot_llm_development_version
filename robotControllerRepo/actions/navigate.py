@@ -12,32 +12,65 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from phasespace.rigid_tracker import RigidTracker
 from config import semantic_locations
 from ttsRepo.stream_tts import tts_manager
-from config import config
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
-DEFAULT_CP = {
-    "priority_table": {},
-    "default_priority": 5,
-    "safe_yield_radius": 350.0,
-    "resume_radius": 450.0,
-    "yield_timeout_sec": 15.0,
-    "probe_speed": 0.05,
-}
-cp = {**DEFAULT_CP, **(config.get("collision_params") or {})}
+# === Rendezvous (同点会合) 分配器 ===
+RENDEZVOUS_RADIUS = 20.0      # 圆周半径，可改
+RENDEZVOUS_EPS    = 1e-3      # 目标点判定精度
+GOLDEN_ANGLE_DEG  = 137.508   # 黄金角（均匀分布）
 
-SAFE_YIELD_RADIUS = float(cp.get("safe_yield_radius"))
-RESUME_RADIUS     = float(cp.get("resume_radius"))
-YIELD_TIMEOUT_SEC = float(cp.get("yield_timeout_sec"))
-PROBE_SPEED       = float(cp.get("probe_speed"))
-PRIORITY_TABLE    = dict(cp.get("priority_table") or {})
-DEFAULT_PRIORITY  = int(cp.get("default_priority"))
+rendezvous_book: Dict[Tuple[float, float], Dict] = {}
 
-def get_priority(name: str) -> int:
-    return PRIORITY_TABLE.get(name, DEFAULT_PRIORITY)
+def _point_key(x: float, y: float) -> Tuple[float, float]:
+    # 也可以用更粗的量化以合并“几乎一致”的点
+    return (round(x, 3), round(y, 3))
+
+
+def _assign_rendezvous_slot(center: Dict[str, float], robot_name: str,
+                            radius: float = RENDEZVOUS_RADIUS) -> Dict[str, float]:
+    """
+    对同一个精确目标点进行圆周分点分配，返回偏移后的新目标坐标字典。
+    """
+    x0, y0 = float(center["x"]), float(center["y"])
+
+    k = _point_key(x0, y0)
+
+    with cache_lock:
+        entry = rendezvous_book.get(k)
+        if entry is None:
+            entry = {"count": 0, "angles": {}}
+            rendezvous_book[k] = entry
+
+        if robot_name in entry["angles"]:
+            angle_deg = entry["angles"][robot_name]
+        else:
+            idx = entry["count"]
+            angle_deg = (idx * GOLDEN_ANGLE_DEG) % 360.0
+            entry["angles"][robot_name] = angle_deg
+            entry["count"] = idx + 1
+
+    theta = math.radians(angle_deg)
+    x_new = x0 + radius * math.cos(theta)
+    y_new = y0 + radius * math.sin(theta)
+
+    new_target = {"x": x_new, "y": y_new}
+    # 如果原目标带有 heading，可选择保留或改成“面向圆心”
+    # 保留原 heading（如有）：
+    if "heading_deg" in center and center["heading_deg"] is not None:
+        new_target["heading_deg"] = center["heading_deg"]
+
+    # 或者让机器人最终朝向圆心（可选，注掉上面的保留逻辑改为以下3行）：
+    # heading_to_center = (math.degrees(math.atan2(x0 - x_new, y0 - y_new)) % 360.0)
+    # new_target["heading_deg"] = heading_to_center
+
+    print(f"🟢 Rendezvous assigned for {robot_name} @ ({x0:.1f}, {y0:.1f}) "
+          f"→ angle={angle_deg:.1f}°, goal=({x_new:.1f}, {y_new:.1f}), R={radius:.1f}")
+    return new_target
+ 
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
 
@@ -94,88 +127,7 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         publisher_dict[key] = pub
         pub.publish(twist)
  
-# === NEW: 工具函数：获取所有机器人位姿快照（避免锁外迭代）===
-def snapshot_positions() -> Dict[str, Dict[str, float]]:
-    with cache_lock:
-        return {k: v.copy() for k, v in robot_position_cache.items()}
-
-def distance_xy(a: Dict[str, float], b: Dict[str, float]) -> float:
-    dx = a["x"] - b["x"]
-    dz = a["z"] - b["z"]
-    return math.hypot(dx, dz)
-
-# === NEW: 查找最近的“冲突对象”及距离 ===
-def find_nearest_robot(robot_name: str, radius: float) -> Optional[Tuple[str, float]]:
-    poses = snapshot_positions()
-    if robot_name not in poses:
-        return None
-    me = poses[robot_name]
-    nearest = None
-    best_d = float("inf")
-    for other, pose in poses.items():
-        if other == robot_name:
-            continue
-        d = distance_xy(me, pose)
-        if d < radius and d < best_d:
-            best_d = d
-            nearest = other
-    if nearest is None:
-        return None
-    return nearest, best_d
-
-# === NEW: 让路等待：若自己优先级低且进入让路半径，就停车并等待到 RESUME_RADIUS 再恢复 ===
-def yield_if_needed(node: Node, robot_name: str) -> bool:
-    """返回 True 表示需要让路（已停车/等待），False 表示可继续行驶"""
-    found = find_nearest_robot(robot_name, SAFE_YIELD_RADIUS)
-    if not found:
-        return False
-
-    other, dist = found
-    my_p = get_priority(robot_name)
-    other_p = get_priority(other)
-
-    # 仅当自己优先级更低时让路
-    if my_p > other_p:
-        # 停车一次
-        safe_publish_twist(node, robot_name, Twist())
-        print(f"🛑 {robot_name} 让路给 {other} | dist={dist:.1f} | priority {my_p}>{other_p}")
-        try:
-            tts_manager.say(f"{robot_name} yielding to {other}.")
-        except Exception:
-            pass
-
-        # 等待直到拉开到 RESUME_RADIUS
-        t0 = time.time()
-        has_announced_timeout = False
-        while True:
-            found2 = find_nearest_robot(robot_name, RESUME_RADIUS)
-            if not found2:
-                print(f"✅ {robot_name} 让路结束，距离已恢复安全。")
-                try:
-                    tts_manager.say(f"{robot_name} resuming.")
-                except Exception:
-                    pass
-                return True  # 本周期已让路，调用方应跳过本次直行输出
-            # 超时兜底：低速探行，避免永久僵持（如优先级相近但对面卡住）
-            if time.time() - t0 > YIELD_TIMEOUT_SEC:
-                if not has_announced_timeout:
-                    print(f"⏳ {robot_name} 让路超时，低速试探前进避免僵持。")
-                    try:
-                        tts_manager.say(f"{robot_name} probing forward slowly due to timeout.")
-                    except Exception:
-                        pass
-                    has_announced_timeout = True
-                twist = Twist()
-                twist.linear.x = PROBE_SPEED
-                safe_publish_twist(node, robot_name, twist)
-                time.sleep(0.25)
-                safe_publish_twist(node, robot_name, Twist())
-            time.sleep(0.1)
-    return False  # 不是自己让路
-
-
-
-
+ 
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
     x_target, y_target = target["x"], target["y"]
@@ -226,7 +178,7 @@ def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
         print(f"⚠️ Invalid heading_deg: {heading_deg}, skipping final rotate.")
         return True
 
-    print(f"\ROTATE TO HEADING: {heading_deg:.1f}°")
+    print(f"ROTATE TO HEADING: {heading_deg:.1f}°")
     while True:
         _, _, heading_y_now = get_current_position(robot_name)
         angle_error = (heading_deg - heading_y_now + 180) % 360 - 180
@@ -272,12 +224,6 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         if distance < semantic_threshold:
             print("🎉 Reached target.")
             break
-
-        # === NEW: 先做避撞与让路判断（若需要让路，此次循环仅等待，不发布前进）===
-        if yield_if_needed(node, robot_name):
-            # 已让路并（可能）恢复，此次循环不前进，重新评估方向和距离
-            time.sleep(0.05)
-            continue
         
  
         # 目标方向角与误差
@@ -317,7 +263,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     rotate_to_face_target(node, robot_name, target)
  
     # Phase 2: 直行
-    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
+    move_forward_until_reached(node, robot_name, target, semantic_threshold=0.0)
  
     # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:
@@ -357,13 +303,16 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
  
     # 3) 执行导航
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
+        # rendezvous 分配
+        resolved_target = _assign_rendezvous_slot(resolved_target, robot_name)
+
         if "heading_deg" in resolved_target:
             print(f"📐 Target includes heading: {resolved_target['heading_deg']}°")
         navigate_to_position(node, robot_name, resolved_target)
+        is_successful = True
     else:
         print(f"⚠️ Invalid resolved target: {resolved_target}")
-        return is_successful
+        is_successful = False
 
-    is_successful = True
     return is_successful
  
