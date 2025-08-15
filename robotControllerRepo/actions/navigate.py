@@ -24,10 +24,9 @@ navigation_cache_lock = threading.Lock()
 
 # 配置参数 - 简化并修正
 DISTRIBUTION_CONFIG = {
-   "conflict_detection_radius": 300.0,  # 多远算同一目标
-   "base_distribution_radius": 200.0,   # 基础分布半径
-   "planning_wait_time": 0.5,          # 等待其他机器人广播的时间
-   "enable_dynamic_radius": True,       # 是否根据机器人数量调整半径
+    "conflict_detection_radius": 300.0,  # 多远算同一目标(mm)
+    "base_distribution_radius": 200.0,   # 基础分布半径(mm)
+    "planning_wait_time": 0.3,          # 等待其他机器人广播的时间(秒)
 }
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
