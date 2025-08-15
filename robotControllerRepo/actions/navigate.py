@@ -12,6 +12,41 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from phasespace.rigid_tracker import RigidTracker
 from config import semantic_locations
 from ttsRepo.stream_tts import tts_manager
+import hashlib, struct, time
+from std_msgs.msg import String
+import json
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+
+# 全局：所有收到的 claim（持久化于内存）
+rendezvous_claims = {}  # key=(xk,yk) → {robot_name: {"angle":..., "radius":..., "ts":...}}
+
+def _qos_transient_local():
+    qos = QoSProfile(depth=100)
+    qos.reliability = ReliabilityPolicy.RELIABLE
+    qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL
+    return qos
+
+def init_rendezvous_comms(node: Node):
+    # 订阅已有/未来的占位声明
+    def _on_claim(msg: String):
+        try:
+            data = json.loads(msg.data)
+            xk, yk = data["key"]
+            robot = data["robot"]
+            angle = float(data["angle_deg"])
+            radius = float(data["radius"])
+            ts = float(data.get("ts", time.time()))
+            key = (float(xk), float(yk))
+            with cache_lock:
+                store = rendezvous_claims.setdefault(key, {})
+                # 只接受“字典序最小”的首次声明（简化并发冲突）
+                if robot not in store:
+                    store[robot] = {"angle": angle, "radius": radius, "ts": ts}
+        except Exception as e:
+            print(f"[RDZ-CLAIM] parse error: {e}")
+
+    node.rdz_pub = node.create_publisher(String, "/rendezvous_claims", _qos_transient_local())
+    node.rdz_sub = node.create_subscription(String, "/rendezvous_claims", _on_claim, _qos_transient_local())
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}
@@ -29,39 +64,84 @@ def _point_key(x: float, y: float) -> Tuple[float, float]:
     # 也可以用更粗的量化以合并“几乎一致”的点
     return (round(x, 3), round(y, 3))
 
+def _hash_to_angle(center_key: Tuple[float, float], robot_name: str) -> float:
+    # center_key 是 (round(x,3), round(y,3))
+    payload = f"{center_key[0]},{center_key[1]}|{robot_name}".encode("utf-8")
+    h = hashlib.md5(payload).digest()
+    # 取前4字节为无符号整数，映射到 [0,360)
+    u32 = struct.unpack("I", h[:4])[0]
+    return (u32 % 36000) / 100.0  # 两位小数
 
-def _assign_rendezvous_slot(center: Dict[str, float], robot_name: str,
-                            radius: float = RENDEZVOUS_RADIUS) -> Dict[str, float]:
+
+def _assign_rendezvous_slot_distributed(node: Node, center: Dict[str, float], robot_name: str,
+                                        base_radius: float = 20.0, delta_radius: float = 10.0,
+                                        max_retry: int = 5) -> Dict[str, float]:
     x0, y0 = float(center["x"]), float(center["y"])
-    print(f"[DEBUG] Rendezvous: center=({x0},{y0}), robot={robot_name}")
- 
-    k = _point_key(x0, y0)
+    key = _point_key(x0, y0)
+
+    # 读取已知声明
     with cache_lock:
-        entry = rendezvous_book.get(k)
-        if entry is None:
-            entry = {"count": 0, "angles": {}}
-            rendezvous_book[k] = entry
- 
-        if robot_name in entry["angles"]:
-            angle_deg = entry["angles"][robot_name]
-            print(f"[DEBUG] {robot_name} already assigned angle={angle_deg}°")
-        else:
-            idx = entry["count"]
-            angle_deg = (idx * GOLDEN_ANGLE_DEG) % 360.0
-            entry["angles"][robot_name] = angle_deg
-            entry["count"] = idx + 1
-            print(f"[DEBUG] {robot_name} new slot idx={idx}, angle={angle_deg}°")
- 
+        store = rendezvous_claims.get(key, {}).copy()
+    existing_robots = sorted(store.keys())
+    n = len(existing_robots)
+
+    # 已有自己的声明则直接用
+    if robot_name in store:
+        angle_deg = store[robot_name]["angle"]
+        n_effective = len(store)  # 用当前观测人数计算半径
+    else:
+        # 选角：按黄金角，从当前 n 起步，确保角唯一
+        tried = set(v["angle"] for v in store.values())
+        angle_deg = None
+        idx = n
+        for _ in range(n + max_retry):
+            cand = (idx * GOLDEN_ANGLE_DEG) % 360.0
+            # 容忍1e-3的角度重复
+            if all(abs(cand - a) > 1e-3 for a in tried):
+                angle_deg = cand
+                break
+            idx += 1
+        if angle_deg is None:
+            # 退化：哈希兜底
+            angle_deg = _hash_to_angle(key, robot_name)
+
+        # 动态半径：R = base + delta*(人数)
+        n_effective = n + 1
+
+        claim = {
+            "key": [key[0], key[1]],
+            "robot": robot_name,
+            "angle_deg": angle_deg,
+            "radius": base_radius + delta_radius * max(0, n_effective - 1),
+            "ts": time.time(),
+        }
+        msg = String()
+        msg.data = json.dumps(claim)
+        node.rdz_pub.publish(msg)
+        print(f"[RDZ-PUB] {robot_name} claim → {claim}")
+
+        # 等 0.2s 让自己也能通过订阅拿到“最终一致”的声明
+        time.sleep(0.2)
+        with cache_lock:
+            store = rendezvous_claims.get(key, store)
+        # 如有并发冲突：取“名字字典序最小”的那个角；否则维持自己
+        all_entries = dict(store)
+        all_entries[robot_name] = {"angle": angle_deg, "radius": claim["radius"], "ts": claim["ts"]}
+        angle_deg = all_entries[robot_name]["angle"]
+
+    R = base_radius + delta_radius * max(0, n_effective - 1)
+
     theta = math.radians(angle_deg)
-    x_new = x0 + radius * math.cos(theta)
-    y_new = y0 + radius * math.sin(theta)
- 
+    x_new = x0 + R * math.cos(theta)
+    y_new = y0 + R * math.sin(theta)
+
     new_target = {"x": x_new, "y": y_new}
     if "heading_deg" in center and center["heading_deg"] is not None:
         new_target["heading_deg"] = center["heading_deg"]
- 
-    print(f"[DEBUG] {robot_name} assigned goal=({x_new:.2f},{y_new:.2f}) from center=({x0},{y0}) radius={radius}")
+
+    print(f"[RDZ-FINAL] {robot_name} @ {key} → n={n_effective}, angle={angle_deg:.1f}°, R={R:.1f}, goal=({x_new:.1f},{y_new:.1f})")
     return new_target
+
  
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
@@ -267,6 +347,10 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
     is_successful = False
 
+    # 在函数最前面加一次（可用一个flag避免重复init）
+    if not hasattr(node, "rdz_pub"):
+        init_rendezvous_comms(node)
+
     # 1) 确保位置跟踪节点已接入 executor 并数据就绪
     tracker_robot = getRobotPositionCache(robot_name, executor)
     if tracker_robot is None:
@@ -289,6 +373,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
             else:
                 print(f"❌ Error: target '{target}' not found in semantic_locations")
                 tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
+                resolved_target = None
 
     else:
         resolved_target = target
@@ -296,7 +381,9 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     # 3) 执行导航
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
         print(f"[DEBUG] {robot_name} BEFORE rendezvous assign: {resolved_target}")
-        resolved_target = _assign_rendezvous_slot(resolved_target, robot_name)
+        resolved_target = _assign_rendezvous_slot_distributed(node, resolved_target, robot_name,
+                                                      base_radius=20.0, delta_radius=10.0)
+
         print(f"[DEBUG] {robot_name} AFTER rendezvous assign:  {resolved_target}")
  
         if "heading_deg" in resolved_target:
