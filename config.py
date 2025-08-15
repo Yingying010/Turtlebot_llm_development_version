@@ -44,23 +44,6 @@ tracked_params = [
     "Noticenotify"
 ]
 
-# === 碰撞检测参数 ===
-collision_params = {
-    "priority_table": {
-        "robot1": 1,   # 数字越小优先级越高
-        "robot2": 2,
-        "robot3": 3
-    },
-    "default_priority": 5,        # 未列出的默认优先级
-    "safe_yield_radius": 30.0,    # 进入该半径且自己优先级低 → 停车让路
-    "resume_radius": 60.0,        # 拉开到该半径以上再恢复
-    "yield_timeout_sec": 15.0,     # 让路最长等待时间（秒）
-    "probe_speed": 0.05            # 超时后的低速试探速度
-}
-
-# 把它注册进 tracked_params，如果你希望变更也写入日志：
-tracked_params += ["collision_params"]
-
 # 外设控制参数
 device_params = {
     "turtlebot1": "robot",

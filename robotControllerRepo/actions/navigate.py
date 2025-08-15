@@ -19,7 +19,7 @@ cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
 # === Rendezvous (同点会合) 分配器 ===
-RENDEZVOUS_RADIUS = 20.0      # 圆周半径，可改
+RENDEZVOUS_RADIUS = 200.0      # 圆周半径，可改
 RENDEZVOUS_EPS    = 1e-3      # 目标点判定精度
 GOLDEN_ANGLE_DEG  = 137.508   # 黄金角（均匀分布）
 
@@ -32,43 +32,35 @@ def _point_key(x: float, y: float) -> Tuple[float, float]:
 
 def _assign_rendezvous_slot(center: Dict[str, float], robot_name: str,
                             radius: float = RENDEZVOUS_RADIUS) -> Dict[str, float]:
-    """
-    对同一个精确目标点进行圆周分点分配，返回偏移后的新目标坐标字典。
-    """
     x0, y0 = float(center["x"]), float(center["y"])
-
+    print(f"[DEBUG] Rendezvous: center=({x0},{y0}), robot={robot_name}")
+ 
     k = _point_key(x0, y0)
-
     with cache_lock:
         entry = rendezvous_book.get(k)
         if entry is None:
             entry = {"count": 0, "angles": {}}
             rendezvous_book[k] = entry
-
+ 
         if robot_name in entry["angles"]:
             angle_deg = entry["angles"][robot_name]
+            print(f"[DEBUG] {robot_name} already assigned angle={angle_deg}°")
         else:
             idx = entry["count"]
             angle_deg = (idx * GOLDEN_ANGLE_DEG) % 360.0
             entry["angles"][robot_name] = angle_deg
             entry["count"] = idx + 1
-
+            print(f"[DEBUG] {robot_name} new slot idx={idx}, angle={angle_deg}°")
+ 
     theta = math.radians(angle_deg)
     x_new = x0 + radius * math.cos(theta)
     y_new = y0 + radius * math.sin(theta)
-
+ 
     new_target = {"x": x_new, "y": y_new}
-    # 如果原目标带有 heading，可选择保留或改成“面向圆心”
-    # 保留原 heading（如有）：
     if "heading_deg" in center and center["heading_deg"] is not None:
         new_target["heading_deg"] = center["heading_deg"]
-
-    # 或者让机器人最终朝向圆心（可选，注掉上面的保留逻辑改为以下3行）：
-    # heading_to_center = (math.degrees(math.atan2(x0 - x_new, y0 - y_new)) % 360.0)
-    # new_target["heading_deg"] = heading_to_center
-
-    print(f"🟢 Rendezvous assigned for {robot_name} @ ({x0:.1f}, {y0:.1f}) "
-          f"→ angle={angle_deg:.1f}°, goal=({x_new:.1f}, {y_new:.1f}), R={radius:.1f}")
+ 
+    print(f"[DEBUG] {robot_name} assigned goal=({x_new:.2f},{y_new:.2f}) from center=({x0},{y0}) radius={radius}")
     return new_target
  
  
@@ -303,16 +295,18 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
  
     # 3) 执行导航
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
-        # rendezvous 分配
+        print(f"[DEBUG] {robot_name} BEFORE rendezvous assign: {resolved_target}")
         resolved_target = _assign_rendezvous_slot(resolved_target, robot_name)
-
+        print(f"[DEBUG] {robot_name} AFTER rendezvous assign:  {resolved_target}")
+ 
         if "heading_deg" in resolved_target:
-            print(f"📐 Target includes heading: {resolved_target['heading_deg']}°")
+            print(f"[DEBUG] {robot_name} final heading: {resolved_target['heading_deg']}°")
         navigate_to_position(node, robot_name, resolved_target)
         is_successful = True
     else:
-        print(f"⚠️ Invalid resolved target: {resolved_target}")
+        print(f"[DEBUG] ⚠️ {robot_name} invalid resolved target: {resolved_target}")
         is_successful = False
-
+ 
+    print(f"[DEBUG] {robot_name} navigate_to_target finished, success={is_successful}")
     return is_successful
  
