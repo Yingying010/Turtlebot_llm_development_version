@@ -52,8 +52,8 @@ collision_params = {
         "robot3": 3
     },
     "default_priority": 5,        # 未列出的默认优先级
-    "safe_yield_radius": 350.0,    # 进入该半径且自己优先级低 → 停车让路
-    "resume_radius": 450.0,        # 拉开到该半径以上再恢复
+    "safe_yield_radius": 30.0,    # 进入该半径且自己优先级低 → 停车让路
+    "resume_radius": 60.0,        # 拉开到该半径以上再恢复
     "yield_timeout_sec": 15.0,     # 让路最长等待时间（秒）
     "probe_speed": 0.05            # 超时后的低速试探速度
 }
