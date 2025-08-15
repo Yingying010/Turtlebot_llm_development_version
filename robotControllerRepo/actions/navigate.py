@@ -54,8 +54,8 @@ cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
 # === Rendezvous (同点会合) 分配器 ===
-RENDEZVOUS_RADIUS = 200.0      # 圆周半径，可改
-RENDEZVOUS_EPS    = 1e-3      # 目标点判定精度
+# RENDEZVOUS_RADIUS = 200.0      # 圆周半径，可改
+# RENDEZVOUS_EPS    = 1e-3      # 目标点判定精度
 GOLDEN_ANGLE_DEG  = 137.508   # 黄金角（均匀分布）
 
 rendezvous_book: Dict[Tuple[float, float], Dict] = {}
@@ -73,75 +73,97 @@ def _hash_to_angle(center_key: Tuple[float, float], robot_name: str) -> float:
     return (u32 % 36000) / 100.0  # 两位小数
 
 
-def _assign_rendezvous_slot_distributed(node: Node, center: Dict[str, float], robot_name: str,
-                                        base_radius: float = 20.0, delta_radius: float = 10.0,
-                                        max_retry: int = 5) -> Dict[str, float]:
+def _assign_rendezvous_slot_distributed(
+    node: Node, center: Dict[str, float], robot_name: str,
+    base_radius: float = 20.0, delta_radius: float = 20.0 * 0.5,
+    max_retry: int = 5
+) -> Dict[str, float]:
     x0, y0 = float(center["x"]), float(center["y"])
     key = _point_key(x0, y0)
-
-    # 读取已知声明
+ 
+    # 读取本地视图
     with cache_lock:
         store = rendezvous_claims.get(key, {}).copy()
-    existing_robots = sorted(store.keys())
-    n = len(existing_robots)
-
-    # 已有自己的声明则直接用
+    n = len(store)
+ 
+    # 已有自己的声明：直接复用（后面仍会根据最终人数重算 R）
     if robot_name in store:
-        angle_deg = store[robot_name]["angle"]
-        n_effective = len(store)  # 用当前观测人数计算半径
+        angle_deg = float(store[robot_name]["angle"])
     else:
-        # 选角：按黄金角，从当前 n 起步，确保角唯一
-        tried = set(v["angle"] for v in store.values())
-        angle_deg = None
+        # 先挑一个候选角（黄金角）
+        tried = set(float(v["angle"]) for v in store.values())
         idx = n
+        angle_deg = None
         for _ in range(n + max_retry):
             cand = (idx * GOLDEN_ANGLE_DEG) % 360.0
-            # 容忍1e-3的角度重复
             if all(abs(cand - a) > 1e-3 for a in tried):
                 angle_deg = cand
                 break
             idx += 1
         if angle_deg is None:
-            # 退化：哈希兜底
-            angle_deg = _hash_to_angle(key, robot_name)
-
-        # 动态半径：R = base + delta*(人数)
-        n_effective = n + 1
-
+            angle_deg = _hash_to_angle(key, robot_name)  # 兜底
+ 
+        # 先发布 presence/claim（让别人能“看见我”）
         claim = {
             "key": [key[0], key[1]],
             "robot": robot_name,
-            "angle_deg": angle_deg,
-            "radius": base_radius + delta_radius * max(0, n_effective - 1),
+            "angle_deg": float(angle_deg),
+            # 这里的半径只是占位，最终会按合并后的 n_effective 重算
+            "radius": float(base_radius),
             "ts": time.time(),
         }
-        msg = String()
-        msg.data = json.dumps(claim)
+        msg = String(); msg.data = json.dumps(claim)
         node.rdz_pub.publish(msg)
         print(f"[RDZ-PUB] {robot_name} claim → {claim}")
-
-        # 等 0.2s 让自己也能通过订阅拿到“最终一致”的声明
-        time.sleep(0.2)
-        with cache_lock:
-            store = rendezvous_claims.get(key, store)
-        # 如有并发冲突：取“名字字典序最小”的那个角；否则维持自己
-        all_entries = dict(store)
-        all_entries[robot_name] = {"angle": angle_deg, "radius": claim["radius"], "ts": claim["ts"]}
-        angle_deg = all_entries[robot_name]["angle"]
-
-    R = base_radius + delta_radius * max(0, n_effective - 1)
-
+ 
+    # 等待收敛一点点，再合并最终视图（含自己）
+    time.sleep(0.5)
+    with cache_lock:
+        store2 = rendezvous_claims.get(key, {})
+        merged = dict(store2)
+        if robot_name not in merged:
+            merged[robot_name] = {"angle": angle_deg, "radius": base_radius, "ts": time.time()}
+ 
+    # 冲突化解：同角时按“字典序更小名字优先”，自己让步到下一个可用角
+    taken_by = {}
+    for r, v in merged.items():
+        a = float(v["angle"])
+        if (a not in taken_by) or (r < taken_by[a]):
+            taken_by[a] = r
+    my_angle = float(merged[robot_name]["angle"])
+    if taken_by.get(my_angle) != robot_name:
+        print(f"[RDZ-CONFLICT] {robot_name} angle {my_angle:.2f}° taken by {taken_by[my_angle]}; reselecting...")
+        tried = set(float(v["angle"]) for v in merged.values())
+        # 从当前 idx 继续往后找（或直接从 0 开始都行）
+        idx += 1
+        found = None
+        for _ in range(max_retry):
+            cand = (idx * GOLDEN_ANGLE_DEG) % 360.0
+            if all(abs(cand - a) > 1e-3 for a in tried):
+                found = cand; break
+            idx += 1
+        angle_deg = found if found is not None else _hash_to_angle(key, robot_name)
+        print(f"[RDZ-RESOLVE] {robot_name} new angle → {angle_deg:.2f}°")
+ 
+    # ✅ 最关键：根据“最终视图”决定是否分散 + 动态半径
+    n_effective = len(merged)  # 观测到的参与者数量
+    if n_effective <= 1:
+        R = 0.0  # 只有我一个 → 不分散，直达中心
+        print(f"[RDZ-SKIP] {robot_name} is alone @ {key}; go to center with R=0")
+    else:
+        R = base_radius + delta_radius * (n_effective - 1)
+ 
+    # 最终目标（并回写半径供自适应 tolerance 使用）
     theta = math.radians(angle_deg)
     x_new = x0 + R * math.cos(theta)
     y_new = y0 + R * math.sin(theta)
-
-    new_target = {"x": x_new, "y": y_new}
+ 
+    new_target = {"x": x_new, "y": y_new, "rdz_radius": float(R)}
     if "heading_deg" in center and center["heading_deg"] is not None:
         new_target["heading_deg"] = center["heading_deg"]
-
+ 
     print(f"[RDZ-FINAL] {robot_name} @ {key} → n={n_effective}, angle={angle_deg:.1f}°, R={R:.1f}, goal=({x_new:.1f},{y_new:.1f})")
     return new_target
-
  
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
@@ -382,7 +404,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
         print(f"[DEBUG] {robot_name} BEFORE rendezvous assign: {resolved_target}")
         resolved_target = _assign_rendezvous_slot_distributed(node, resolved_target, robot_name,
-                                                      base_radius=20.0, delta_radius=10.0)
+                                                      base_radius=200.0, delta_radius=10.0)
 
         print(f"[DEBUG] {robot_name} AFTER rendezvous assign:  {resolved_target}")
  
