@@ -12,12 +12,32 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from phasespace.rigid_tracker import RigidTracker
 from config import semantic_locations
 from ttsRepo.stream_tts import tts_manager
+from config import config
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
- 
+
+DEFAULT_CP = {
+    "priority_table": {},
+    "default_priority": 5,
+    "safe_yield_radius": 350.0,
+    "resume_radius": 450.0,
+    "yield_timeout_sec": 15.0,
+    "probe_speed": 0.05,
+}
+cp = {**DEFAULT_CP, **(config.get("collision_params") or {})}
+
+SAFE_YIELD_RADIUS = float(cp.get("safe_yield_radius"))
+RESUME_RADIUS     = float(cp.get("resume_radius"))
+YIELD_TIMEOUT_SEC = float(cp.get("yield_timeout_sec"))
+PROBE_SPEED       = float(cp.get("probe_speed"))
+PRIORITY_TABLE    = dict(cp.get("priority_table") or {})
+DEFAULT_PRIORITY  = int(cp.get("default_priority"))
+
+def get_priority(name: str) -> int:
+    return PRIORITY_TABLE.get(name, DEFAULT_PRIORITY)
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
 
@@ -74,7 +94,88 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         publisher_dict[key] = pub
         pub.publish(twist)
  
- 
+# === NEW: 工具函数：获取所有机器人位姿快照（避免锁外迭代）===
+def snapshot_positions() -> Dict[str, Dict[str, float]]:
+    with cache_lock:
+        return {k: v.copy() for k, v in robot_position_cache.items()}
+
+def distance_xy(a: Dict[str, float], b: Dict[str, float]) -> float:
+    dx = a["x"] - b["x"]
+    dz = a["z"] - b["z"]
+    return math.hypot(dx, dz)
+
+# === NEW: 查找最近的“冲突对象”及距离 ===
+def find_nearest_robot(robot_name: str, radius: float) -> Optional[Tuple[str, float]]:
+    poses = snapshot_positions()
+    if robot_name not in poses:
+        return None
+    me = poses[robot_name]
+    nearest = None
+    best_d = float("inf")
+    for other, pose in poses.items():
+        if other == robot_name:
+            continue
+        d = distance_xy(me, pose)
+        if d < radius and d < best_d:
+            best_d = d
+            nearest = other
+    if nearest is None:
+        return None
+    return nearest, best_d
+
+# === NEW: 让路等待：若自己优先级低且进入让路半径，就停车并等待到 RESUME_RADIUS 再恢复 ===
+def yield_if_needed(node: Node, robot_name: str) -> bool:
+    """返回 True 表示需要让路（已停车/等待），False 表示可继续行驶"""
+    found = find_nearest_robot(robot_name, SAFE_YIELD_RADIUS)
+    if not found:
+        return False
+
+    other, dist = found
+    my_p = get_priority(robot_name)
+    other_p = get_priority(other)
+
+    # 仅当自己优先级更低时让路
+    if my_p > other_p:
+        # 停车一次
+        safe_publish_twist(node, robot_name, Twist())
+        print(f"🛑 {robot_name} 让路给 {other} | dist={dist:.1f} | priority {my_p}>{other_p}")
+        try:
+            tts_manager.say(f"{robot_name} yielding to {other}.")
+        except Exception:
+            pass
+
+        # 等待直到拉开到 RESUME_RADIUS
+        t0 = time.time()
+        has_announced_timeout = False
+        while True:
+            found2 = find_nearest_robot(robot_name, RESUME_RADIUS)
+            if not found2:
+                print(f"✅ {robot_name} 让路结束，距离已恢复安全。")
+                try:
+                    tts_manager.say(f"{robot_name} resuming.")
+                except Exception:
+                    pass
+                return True  # 本周期已让路，调用方应跳过本次直行输出
+            # 超时兜底：低速探行，避免永久僵持（如优先级相近但对面卡住）
+            if time.time() - t0 > YIELD_TIMEOUT_SEC:
+                if not has_announced_timeout:
+                    print(f"⏳ {robot_name} 让路超时，低速试探前进避免僵持。")
+                    try:
+                        tts_manager.say(f"{robot_name} probing forward slowly due to timeout.")
+                    except Exception:
+                        pass
+                    has_announced_timeout = True
+                twist = Twist()
+                twist.linear.x = PROBE_SPEED
+                safe_publish_twist(node, robot_name, twist)
+                time.sleep(0.25)
+                safe_publish_twist(node, robot_name, Twist())
+            time.sleep(0.1)
+    return False  # 不是自己让路
+
+
+
+
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
     x_target, y_target = target["x"], target["y"]
@@ -171,6 +272,12 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         if distance < semantic_threshold:
             print("🎉 Reached target.")
             break
+
+        # === NEW: 先做避撞与让路判断（若需要让路，此次循环仅等待，不发布前进）===
+        if yield_if_needed(node, robot_name):
+            # 已让路并（可能）恢复，此次循环不前进，重新评估方向和距离
+            time.sleep(0.05)
+            continue
         
  
         # 目标方向角与误差
@@ -235,7 +342,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
             x, y, heading = get_current_position(target)
-            resolved_target = {"x": x, "y": y, "heading": heading}
+            resolved_target = {"x": x, "y": y, "heading_deg": heading}
             print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
         else:
             if target in semantic_locations:
