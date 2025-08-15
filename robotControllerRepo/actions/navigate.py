@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os, sys, math, time, threading
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 # 允许从项目根目录导入
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from rclpy.node import Node
@@ -12,161 +12,140 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from phasespace.rigid_tracker import RigidTracker
 from config import semantic_locations
 from ttsRepo.stream_tts import tts_manager
-import hashlib, struct, time
-from std_msgs.msg import String
-import json
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
-
-# 全局：所有收到的 claim（持久化于内存）
-rendezvous_claims = {}  # key=(xk,yk) → {robot_name: {"angle":..., "radius":..., "ts":...}}
-
-def _qos_transient_local():
-    qos = QoSProfile(depth=100)
-    qos.reliability = ReliabilityPolicy.RELIABLE
-    qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL
-    return qos
-
-def init_rendezvous_comms(node: Node):
-    # 订阅已有/未来的占位声明
-    def _on_claim(msg: String):
-        try:
-            data = json.loads(msg.data)
-            xk, yk = data["key"]
-            robot = data["robot"]
-            angle = float(data["angle_deg"])
-            radius = float(data["radius"])
-            ts = float(data.get("ts", time.time()))
-            key = (float(xk), float(yk))
-            with cache_lock:
-                store = rendezvous_claims.setdefault(key, {})
-                # 只接受“字典序最小”的首次声明（简化并发冲突）
-                if robot not in store:
-                    store[robot] = {"angle": angle, "radius": radius, "ts": ts}
-        except Exception as e:
-            print(f"[RDZ-CLAIM] parse error: {e}")
-
-    node.rdz_pub = node.create_publisher(String, "/rendezvous_claims", _qos_transient_local())
-    node.rdz_sub = node.create_subscription(String, "/rendezvous_claims", _on_claim, _qos_transient_local())
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
-# === Rendezvous (同点会合) 分配器 ===
-# RENDEZVOUS_RADIUS = 200.0      # 圆周半径，可改
-# RENDEZVOUS_EPS    = 1e-3      # 目标点判定精度
-GOLDEN_ANGLE_DEG  = 137.508   # 黄金角（均匀分布）
+# === 新增：分布式目标点管理 ===
+# 记录每个目标点的占用情况: {target_key: [robot1, robot2, ...]}
+target_occupation: Dict[str, List[str]] = {}
+target_occupation_lock = threading.Lock()
 
-rendezvous_book: Dict[Tuple[float, float], Dict] = {}
-
-def _point_key(x: float, y: float) -> Tuple[float, float]:
-    # 也可以用更粗的量化以合并“几乎一致”的点
-    return (round(x, 3), round(y, 3))
-
-def _hash_to_angle(center_key: Tuple[float, float], robot_name: str) -> float:
-    # center_key 是 (round(x,3), round(y,3))
-    payload = f"{center_key[0]},{center_key[1]}|{robot_name}".encode("utf-8")
-    h = hashlib.md5(payload).digest()
-    # 取前4字节为无符号整数，映射到 [0,360)
-    u32 = struct.unpack("I", h[:4])[0]
-    return (u32 % 36000) / 100.0  # 两位小数
+# 记录每个机器人的分配位置: {robot_name: {"x": x, "y": y, "original_target": target_key}}
+robot_assigned_positions: Dict[str, Dict] = {}
 
 
-def _assign_rendezvous_slot_distributed(
-    node: Node, center: Dict[str, float], robot_name: str,
-    base_radius: float = 20.0, delta_radius: float = 20.0 * 0.5,
-    max_retry: int = 5
-) -> Dict[str, float]:
-    x0, y0 = float(center["x"]), float(center["y"])
-    key = _point_key(x0, y0)
- 
-    # 读取本地视图
-    with cache_lock:
-        store = rendezvous_claims.get(key, {}).copy()
-    n = len(store)
- 
-    # 已有自己的声明：直接复用（后面仍会根据最终人数重算 R）
-    if robot_name in store:
-        angle_deg = float(store[robot_name]["angle"])
+def get_target_key(target: Dict[str, float], tolerance: float = 10.0) -> str:
+    """根据目标坐标生成唯一键值，用于识别相同目标点"""
+    x = target.get("x", 0)
+    y = target.get("y", 0)
+    # 使用tolerance将相近的点归为同一个目标
+    x_rounded = round(x / tolerance) * tolerance
+    y_rounded = round(y / tolerance) * tolerance
+    return f"{x_rounded:.1f},{y_rounded:.1f}"
+
+
+def distribute_robots_around_target(target: Dict[str, float], robot_list: List[str], 
+                                  radius: float = 200.0) -> Dict[str, Dict[str, float]]:
+    """
+    将多个机器人分布在目标点周围的圆形区域上
+    
+    Args:
+        target: 原始目标点 {"x": x, "y": y, ...}
+        robot_list: 需要分配位置的机器人列表
+        radius: 分布半径
+    
+    Returns:
+        Dict[robot_name, {"x": new_x, "y": new_y, "heading_deg": heading}]
+    """
+    center_x = target["x"]
+    center_y = target["y"]
+    num_robots = len(robot_list)
+    
+    distributed_positions = {}
+    
+    if num_robots == 1:
+        # 只有一个机器人，直接去原始目标点
+        distributed_positions[robot_list[0]] = target.copy()
     else:
-        # 先挑一个候选角（黄金角）
-        tried = set(float(v["angle"]) for v in store.values())
-        idx = n
-        angle_deg = None
-        for _ in range(n + max_retry):
-            cand = (idx * GOLDEN_ANGLE_DEG) % 360.0
-            if all(abs(cand - a) > 1e-3 for a in tried):
-                angle_deg = cand
-                break
-            idx += 1
-        if angle_deg is None:
-            angle_deg = _hash_to_angle(key, robot_name)  # 兜底
- 
-        # 先发布 presence/claim（让别人能“看见我”）
-        claim = {
-            "key": [key[0], key[1]],
-            "robot": robot_name,
-            "angle_deg": float(angle_deg),
-            # 这里的半径只是占位，最终会按合并后的 n_effective 重算
-            "radius": float(base_radius),
-            "ts": time.time(),
-        }
-        msg = String(); msg.data = json.dumps(claim)
-        node.rdz_pub.publish(msg)
-        print(f"[RDZ-PUB] {robot_name} claim → {claim}")
- 
-    # 等待收敛一点点，再合并最终视图（含自己）
-    time.sleep(0.5)
-    with cache_lock:
-        store2 = rendezvous_claims.get(key, {})
-        merged = dict(store2)
-        if robot_name not in merged:
-            merged[robot_name] = {"angle": angle_deg, "radius": base_radius, "ts": time.time()}
- 
-    # 冲突化解：同角时按“字典序更小名字优先”，自己让步到下一个可用角
-    taken_by = {}
-    for r, v in merged.items():
-        a = float(v["angle"])
-        if (a not in taken_by) or (r < taken_by[a]):
-            taken_by[a] = r
-    my_angle = float(merged[robot_name]["angle"])
-    if taken_by.get(my_angle) != robot_name:
-        print(f"[RDZ-CONFLICT] {robot_name} angle {my_angle:.2f}° taken by {taken_by[my_angle]}; reselecting...")
-        tried = set(float(v["angle"]) for v in merged.values())
-        # 从当前 idx 继续往后找（或直接从 0 开始都行）
-        idx += 1
-        found = None
-        for _ in range(max_retry):
-            cand = (idx * GOLDEN_ANGLE_DEG) % 360.0
-            if all(abs(cand - a) > 1e-3 for a in tried):
-                found = cand; break
-            idx += 1
-        angle_deg = found if found is not None else _hash_to_angle(key, robot_name)
-        print(f"[RDZ-RESOLVE] {robot_name} new angle → {angle_deg:.2f}°")
- 
-    # ✅ 最关键：根据“最终视图”决定是否分散 + 动态半径
-    n_effective = len(merged)  # 观测到的参与者数量
-    if n_effective <= 1:
-        R = 0.0  # 只有我一个 → 不分散，直达中心
-        print(f"[RDZ-SKIP] {robot_name} is alone @ {key}; go to center with R=0")
-    else:
-        R = base_radius + delta_radius * (n_effective - 1)
- 
-    # 最终目标（并回写半径供自适应 tolerance 使用）
-    theta = math.radians(angle_deg)
-    x_new = x0 + R * math.cos(theta)
-    y_new = y0 + R * math.sin(theta)
- 
-    new_target = {"x": x_new, "y": y_new, "rdz_radius": float(R)}
-    if "heading_deg" in center and center["heading_deg"] is not None:
-        new_target["heading_deg"] = center["heading_deg"]
- 
-    print(f"[RDZ-FINAL] {robot_name} @ {key} → n={n_effective}, angle={angle_deg:.1f}°, R={R:.1f}, goal=({x_new:.1f},{y_new:.1f})")
-    return new_target
- 
- 
-# === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
+        # 多个机器人，均匀分布在圆周上
+        angle_step = 360.0 / num_robots
+        
+        for i, robot_name in enumerate(robot_list):
+            angle_deg = i * angle_step
+            angle_rad = math.radians(angle_deg)
+            
+            new_x = center_x + radius * math.cos(angle_rad)
+            new_y = center_y + radius * math.sin(angle_rad)
+            
+            # 计算朝向目标中心的角度
+            heading_to_center = math.degrees(math.atan2(center_x - new_x, center_y - new_y)) % 360
+            
+            distributed_positions[robot_name] = {
+                "x": new_x,
+                "y": new_y,
+                "heading_deg": heading_to_center,
+                "original_target": get_target_key(target)
+            }
+            
+            print(f"🎯 分配位置给 {robot_name}: ({new_x:.1f}, {new_y:.1f}) 朝向 {heading_to_center:.1f}°")
+    
+    return distributed_positions
+
+
+def register_robot_for_target(robot_name: str, target: Dict[str, float]) -> Dict[str, float]:
+    """
+    为机器人注册目标点，如果有多个机器人去同一个目标，则自动分配分布式位置
+    
+    Args:
+        robot_name: 机器人名称
+        target: 目标点坐标
+    
+    Returns:
+        分配给该机器人的实际目标位置
+    """
+    target_key = get_target_key(target)
+    
+    with target_occupation_lock:
+        # 检查是否已经有机器人在前往这个目标
+        if target_key not in target_occupation:
+            target_occupation[target_key] = []
+        
+        # 如果这个机器人还没有注册到这个目标
+        if robot_name not in target_occupation[target_key]:
+            target_occupation[target_key].append(robot_name)
+            print(f"📝 注册 {robot_name} 到目标 {target_key}, 当前队列: {target_occupation[target_key]}")
+        
+        # 获取当前前往这个目标的所有机器人
+        robots_for_target = target_occupation[target_key].copy()
+    
+    # 重新分配所有机器人的位置
+    distributed_positions = distribute_robots_around_target(target, robots_for_target)
+    
+    # 更新全局分配记录
+    with target_occupation_lock:
+        for robot, pos in distributed_positions.items():
+            robot_assigned_positions[robot] = pos
+            print(f"🎯 更新 {robot} 的分配位置: ({pos['x']:.1f}, {pos['y']:.1f})")
+    
+    return distributed_positions[robot_name]
+
+
+def unregister_robot_from_target(robot_name: str):
+    """
+    机器人到达目标后，从占用列表中移除
+    """
+    with target_occupation_lock:
+        if robot_name in robot_assigned_positions:
+            original_target = robot_assigned_positions[robot_name].get("original_target")
+            if original_target and original_target in target_occupation:
+                if robot_name in target_occupation[original_target]:
+                    target_occupation[original_target].remove(robot_name)
+                    print(f"✅ {robot_name} 已从目标 {original_target} 的占用列表中移除")
+                
+                # 如果没有机器人前往这个目标了，清空记录
+                if not target_occupation[original_target]:
+                    del target_occupation[original_target]
+                    print(f"🗑️ 目标 {original_target} 的占用记录已清空")
+            
+            # 移除机器人的分配位置记录
+            del robot_assigned_positions[robot_name]
+            print(f"🗑️ 清除 {robot_name} 的分配位置记录")
+
+
+# === 原有函数保持不变 ===
 
 def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     rigid_node = RigidTracker(
@@ -186,7 +165,6 @@ def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> O
             return rigid_node
         time.sleep(0.2)
     print(f"❌ Timeout: No position data for {robot_name}")
-    # tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
 def get_current_position(robot_name: str) -> tuple:
@@ -272,7 +250,7 @@ def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
         print(f"⚠️ Invalid heading_deg: {heading_deg}, skipping final rotate.")
         return True
 
-    print(f"ROTATE TO HEADING: {heading_deg:.1f}°")
+    print(f"\🔄 ROTATE TO HEADING: {heading_deg:.1f}°")
     while True:
         _, _, heading_y_now = get_current_position(robot_name)
         angle_error = (heading_deg - heading_y_now + 180) % 360 - 180
@@ -314,11 +292,9 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
             print("🎉 Reached target.")
             break
         
-        
         if distance < semantic_threshold:
             print("🎉 Reached target.")
             break
-        
  
         # 目标方向角与误差
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
@@ -357,7 +333,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     rotate_to_face_target(node, robot_name, target)
  
     # Phase 2: 直行
-    move_forward_until_reached(node, robot_name, target, semantic_threshold=0.0)
+    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
  
     # Phase 3: 若给了目标朝向则调整
     if "heading_deg" in target:
@@ -368,10 +344,6 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
  
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
     is_successful = False
-
-    # 在函数最前面加一次（可用一个flag避免重复init）
-    if not hasattr(node, "rdz_pub"):
-        init_rendezvous_comms(node)
 
     # 1) 确保位置跟踪节点已接入 executor 并数据就绪
     tracker_robot = getRobotPositionCache(robot_name, executor)
@@ -386,7 +358,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
             x, y, heading = get_current_position(target)
-            resolved_target = {"x": x, "y": y, "heading_deg": heading}
+            resolved_target = {"x": x, "y": y, "heading": heading}
             print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
         else:
             if target in semantic_locations:
@@ -395,27 +367,52 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
             else:
                 print(f"❌ Error: target '{target}' not found in semantic_locations")
                 tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
-                resolved_target = None
-
+                return is_successful
     else:
         resolved_target = target
- 
-    # 3) 执行导航
-    if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
-        print(f"[DEBUG] {robot_name} BEFORE rendezvous assign: {resolved_target}")
-        resolved_target = _assign_rendezvous_slot_distributed(node, resolved_target, robot_name,
-                                                      base_radius=200.0, delta_radius=10.0)
 
-        print(f"[DEBUG] {robot_name} AFTER rendezvous assign:  {resolved_target}")
- 
-        if "heading_deg" in resolved_target:
-            print(f"[DEBUG] {robot_name} final heading: {resolved_target['heading_deg']}°")
-        navigate_to_position(node, robot_name, resolved_target)
-        is_successful = True
+    # 3) 新增：分布式目标点管理
+    if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
+        # 注册机器人到目标点，获取分配的实际位置
+        actual_target = register_robot_for_target(robot_name, resolved_target)
+        
+        print(f"🎯 {robot_name} 分配到实际目标: ({actual_target['x']:.1f}, {actual_target['y']:.1f})")
+        if "heading_deg" in actual_target:
+            print(f"📐 Target includes heading: {actual_target['heading_deg']}°")
+        
+        # 执行导航到分配的位置
+        navigate_to_position(node, robot_name, actual_target)
+        
+        # 导航完成后，从占用列表中移除
+        unregister_robot_from_target(robot_name)
+        
     else:
-        print(f"[DEBUG] ⚠️ {robot_name} invalid resolved target: {resolved_target}")
-        is_successful = False
- 
-    print(f"[DEBUG] {robot_name} navigate_to_target finished, success={is_successful}")
+        print(f"⚠️ Invalid resolved target: {resolved_target}")
+        return is_successful
+
+    is_successful = True
     return is_successful
- 
+
+
+# === 新增：辅助函数用于调试和监控 ===
+
+def get_target_occupation_status() -> Dict:
+    """获取当前目标占用状态，用于调试"""
+    with target_occupation_lock:
+        return {
+            "target_occupation": target_occupation.copy(),
+            "robot_assigned_positions": robot_assigned_positions.copy()
+        }
+
+
+def print_occupation_status():
+    """打印当前占用状态"""
+    status = get_target_occupation_status()
+    print("\n" + "="*50)
+    print("🎯 目标占用状态:")
+    for target_key, robots in status["target_occupation"].items():
+        print(f"  {target_key}: {robots}")
+    print("\n🤖 机器人分配位置:")
+    for robot, pos in status["robot_assigned_positions"].items():
+        print(f"  {robot}: ({pos['x']:.1f}, {pos['y']:.1f}) heading={pos.get('heading_deg', 'N/A'):.1f}°")
+    print("="*50 + "\n")
