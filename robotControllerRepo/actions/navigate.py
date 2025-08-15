@@ -30,6 +30,20 @@ navigation_coordinator_pub: Optional[Publisher] = None
 navigation_responses: Dict[str, List[Dict]] = {}  # {requesting_robot: [response1, response2, ...]}
 responses_lock = threading.Lock()
 
+# 当前机器人名称（需要在navigate_to_target中设置）
+current_robot_name: str = ""
+
+
+def get_current_robot_name() -> str:
+    """获取当前机器人名称"""
+    return current_robot_name
+
+
+def set_current_robot_name(robot_name: str):
+    """设置当前机器人名称"""
+    global current_robot_name
+    current_robot_name = robot_name
+
 
 def setup_navigation_coordinator(node: Node):
     """初始化导航协调的ROS通信"""
@@ -72,25 +86,30 @@ def handle_navigation_request(data):
     target = data["target"]
     request_id = data["request_id"]
     
-    # 检查自己是否有相同的导航意图
+    # 检查所有机器人的导航意图（包括自己）
     with intentions_lock:
-        my_intentions = navigation_intentions.copy()
+        all_intentions = navigation_intentions.copy()
     
     # 检查是否有冲突的目标
     conflicting_targets = []
-    for robot_name, intention in my_intentions.items():
-        if intention["status"] in ["announcing", "confirmed"] and targets_are_same(intention["target"], target):
+    for robot_name, intention in all_intentions.items():
+        if (robot_name != requesting_robot and 
+            intention["status"] in ["announcing", "confirmed"] and 
+            targets_are_same(intention["target"], target)):
             conflicting_targets.append({
                 "robot_name": robot_name,
                 "target": intention["target"],
                 "timestamp": intention["timestamp"]
             })
     
-    # 发送响应
+    # 发送响应 - 注意：这里需要知道当前机器人的名称
+    # 从全局变量或其他方式获取当前机器人名称
+    current_robot_name = get_current_robot_name()
+    
     response = {
         "type": "navigation_response",
         "request_id": request_id,
-        "responding_robot": "current_robot",  # 这里应该用实际机器人名称
+        "responding_robot": current_robot_name,
         "conflicts": conflicting_targets
     }
     
@@ -167,10 +186,6 @@ def broadcast_navigation_request(robot_name: str, target: Dict[str, float], time
     # 等待响应
     start_time = time.time()
     while time.time() - start_time < timeout:
-        with responses_lock:
-            responses = navigation_responses.get(request_id, [])
-        
-        # 简单的响应收集策略：等待一段时间后处理收到的所有响应
         time.sleep(0.1)
     
     # 收集所有冲突
@@ -178,6 +193,25 @@ def broadcast_navigation_request(robot_name: str, target: Dict[str, float], time
     with responses_lock:
         for response in navigation_responses.get(request_id, []):
             all_conflicts.extend(response["conflicts"])
+    
+    # 同时检查当前已记录的导航意图（防止消息丢失）
+    with intentions_lock:
+        current_intentions = navigation_intentions.copy()
+    
+    for other_robot, intention in current_intentions.items():
+        if (other_robot != robot_name and 
+            intention["status"] in ["announcing", "confirmed"] and 
+            targets_are_same(intention["target"], target)):
+            
+            # 检查是否已经在冲突列表中
+            already_exists = any(c["robot_name"] == other_robot for c in all_conflicts)
+            if not already_exists:
+                all_conflicts.append({
+                    "robot_name": other_robot,
+                    "target": intention["target"],
+                    "timestamp": intention["timestamp"]
+                })
+                print(f"🔍 检测到本地记录的冲突: {other_robot}")
     
     print(f"📊 {robot_name} 收到 {len(all_conflicts)} 个冲突响应")
     return all_conflicts
@@ -207,12 +241,16 @@ def resolve_navigation_conflicts(robot_name: str, target: Dict[str, float], conf
             all_robots.append(conflict["robot_name"])
     
     print(f"🎯 检测到 {len(all_robots)} 个机器人要去相同目标: {all_robots}")
+    print(f"🔍 冲突详情:")
+    for conflict in conflicts:
+        print(f"  - {conflict['robot_name']}: ({conflict['target']['x']:.1f}, {conflict['target']['y']:.1f})")
     
     # 根据时间戳或名称排序，确保分配的一致性
     all_robots.sort()
     
     # 计算当前机器人在列表中的索引
     robot_index = all_robots.index(robot_name)
+    print(f"📍 {robot_name} 在排序列表中的索引: {robot_index}")
     
     # 使用圆形分布算法
     center_x = target["x"]
@@ -223,6 +261,7 @@ def resolve_navigation_conflicts(robot_name: str, target: Dict[str, float], conf
     if num_robots == 1:
         # 只有自己，使用原始目标
         new_target = target.copy()
+        print(f"🎯 {robot_name} 独自导航，使用原始目标")
     else:
         # 分布在圆周上
         angle_step = 360.0 / num_robots
@@ -240,8 +279,13 @@ def resolve_navigation_conflicts(robot_name: str, target: Dict[str, float], conf
             "y": new_y,
             "heading_deg": heading_to_center
         }
+        
+        print(f"🎯 {robot_name} 分布式分配:")
+        print(f"  - 原始目标: ({center_x:.1f}, {center_y:.1f})")
+        print(f"  - 分配角度: {angle_deg:.1f}°")
+        print(f"  - 新目标: ({new_x:.1f}, {new_y:.1f})")
+        print(f"  - 朝向角度: {heading_to_center:.1f}°")
     
-    print(f"🎯 {robot_name} 分配新目标: ({new_target['x']:.1f}, {new_target['y']:.1f})")
     return new_target
 
 
@@ -469,6 +513,9 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     """
     is_successful = False
 
+    # 0) 设置当前机器人名称
+    set_current_robot_name(robot_name)
+    
     # 1) 初始化导航协调器
     setup_navigation_coordinator(node)
     
@@ -500,24 +547,32 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     # 4) 分布式协商导航
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
         
-        # Step 1: 广播导航意图，询问是否有冲突
+        # Step 1: 先记录自己的导航意图为"announcing"状态
+        with intentions_lock:
+            navigation_intentions[robot_name] = {
+                "target": resolved_target,
+                "timestamp": time.time(),
+                "status": "announcing"
+            }
+        
+        # Step 2: 广播导航意图，询问是否有冲突
         print(f"\n🤝 {robot_name} 开始导航协商...")
         conflicts = broadcast_navigation_request(robot_name, resolved_target)
         
-        # Step 2: 根据冲突情况分配实际目标
+        # Step 3: 根据冲突情况分配实际目标
         actual_target = resolve_navigation_conflicts(robot_name, resolved_target, conflicts)
         
-        # Step 3: 确认导航意图
+        # Step 4: 确认导航意图
         confirm_navigation_intent(robot_name, actual_target)
         
-        # Step 4: 执行导航
+        # Step 5: 执行导航
         print(f"🎯 {robot_name} 开始导航到分配目标: ({actual_target['x']:.1f}, {actual_target['y']:.1f})")
         if "heading_deg" in actual_target:
             print(f"📐 Target includes heading: {actual_target['heading_deg']}°")
         
         navigate_to_position(node, robot_name, actual_target)
         
-        # Step 5: 导航完成，清理意图
+        # Step 6: 导航完成，清理意图
         cleanup_navigation_intent(robot_name)
         
     else:
