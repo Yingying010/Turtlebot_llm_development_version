@@ -82,19 +82,30 @@ def validate_local_plan(task_data: Dict[str, Any]):
     2) 全局 sequence 唯一：同一个 sequence 只能出现在一个机器人的一条任务上
     """
     seen_seq_owner: Dict[int, str] = {}
-
     for robot, tasks in task_data.get("robots", {}).items():
+        # 额外：统计该机器人内的 sequence 是否重复
+        seen_seq_in_robot = set()
+
         for t in tasks:
             s = t.get("sequence")
             sg = t.get("sync_group")
+
             if s is not None and sg is not None:
                 raise ValueError(f"Task cannot have both sequence and sync_group: {t}")
+
             if s is not None:
+                # 同一机器人内不得重复 sequence
+                if s in seen_seq_in_robot:
+                    raise ValueError(f"Duplicate sequence={s} in robot '{robot}'")
+                seen_seq_in_robot.add(s)
+
+                # 同一 sequence 不能出现在不同机器人
                 if s in seen_seq_owner and seen_seq_owner[s] != robot:
                     raise ValueError(
                         f"Duplicate global sequence={s} found on '{seen_seq_owner[s]}' and '{robot}'"
                     )
                 seen_seq_owner[s] = robot
+
 
 
 def build_prev_stage_map(task_data: Dict[str, Any]) -> Dict[int, Optional[int]]:
@@ -183,14 +194,26 @@ def _apply_status_and_maybe_signal(robot: str, seq, sync_group, status: str):
         print(f"📥(local) {robot} → {status} @ {key} (need={need}, ready={reached_ready}, fin={reached_finished})")
 
 
-def publish_state(robot: str, sequence, sync_group, status: str):
+def ensure_task_ids(task_data: Dict[str, Any]):
+    for robot, tasks in task_data.get("robots", {}).items():
+        for i, t in enumerate(tasks):
+            # 生成一个可复现的ID：robot-序号或组-索引-动作
+            seq = t.get("sequence")
+            sg  = t.get("sync_group")
+            tag = f"seq{seq}" if seq is not None else (f"sg{sg}" if sg is not None else "local")
+            act = t.get("action", "act")
+            t["task_id"] = f"{robot}-{tag}-{i}-{act}"
+
+
+def publish_state(robot: str, task_id, sequence, sync_group, status: str):
     """
-    统一的状态发布（无 task_id）。
+    统一的状态发布
     """
     _apply_status_and_maybe_signal(robot, sequence, sync_group, status)
     payload = {
         "kind": "state",
         "robot": robot,
+        "task_id": task_id,
         "sequence": sequence,
         "sync_group": sync_group,
         "status": status,
@@ -211,6 +234,7 @@ def status_callback(msg):
             return  # 忽略心跳等其他类型
 
         src_robot = data["robot"]
+        tid = data.get("task_id")
         seq = data.get("sequence")
         sg = data.get("sync_group")
         status = data["status"]
@@ -221,6 +245,7 @@ def status_callback(msg):
             print(f"📩 收到【对方】状态: {src_robot} → {status} @ ({seq}, {sg})")
 
         # 入账 + 触发事件
+        print(f"📩 {src_robot} → {status} @ ({seq}, {sg}) tid={tid}")
         _apply_status_and_maybe_signal(src_robot, seq, sg, status)
 
     except Exception:
@@ -275,6 +300,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
     try:
         for task in tasks:
             task["robot"] = robot_name
+            tid   = task.get("task_id")
             seq = task.get("sequence")
             sg = task.get("sync_group")
 
@@ -289,28 +315,28 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
                     tts_manager.say(f"sequence {p} is finished, i'm going to start the mission")
 
                 # 本阶段执行
-                publish_state(robot_name, seq, None, "running")
+                publish_state(robot_name, tid, seq, None, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
 
                 # 广播本阶段完成
-                publish_state(robot_name, seq, None, "finished")
+                publish_state(robot_name, tid, seq, None, "finished")
                 continue
 
             # B) 跨机器人同步（只有 sync_group）
             if sg is not None and seq is None:
                 key = (None, sg)
-                publish_state(robot_name, None, sg, "ready")
+                publish_state(robot_name, tid, None, sg, "ready")
                 tts_manager.say(f"i'm waiting for the other robots to synchronise with me")
                 wait_for_all_status(key, "ready")
                 tts_manager.say(f"All robots are ready for action.")
                 print(f"[{robot_name}] ✅ All ready @ sync_group={sg}")
 
-                publish_state(robot_name, None, sg, "running")
+                publish_state(robot_name, tid, None, sg, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
 
-                publish_state(robot_name, None, sg, "finished")
+                publish_state(robot_name, tid, None, sg, "finished")
                 wait_for_all_status(key, "finished")
                 print(f"[{robot_name}] 🎉 All finished @ sync_group={sg}")
                 continue
@@ -386,6 +412,7 @@ def run(task_data: Dict[str, Any]):
     start_heartbeat(robot_id)
 
     try:
+        ensure_task_ids(task_data)
         is_successful = run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
         return is_successful
     except Exception:
