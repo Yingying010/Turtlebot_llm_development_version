@@ -28,8 +28,8 @@ target_lock = threading.Lock()
 
 # 配置参数
 DISTRIBUTION_CONFIG = {
-   "conflict_detection_radius": 300.0,  # 多远算同一目标
-   "base_distribution_radius": 200.0,   # 基础分布半径
+   "conflict_detection_radius": 20.0,  # 多远算同一目标
+   "base_distribution_radius": 50.0,   # 基础分布半径
    "planning_wait_time": 0.5,          # 等待其他机器人广播的时间
    "enable_dynamic_radius": True,       # 是否根据机器人数量调整半径
 }

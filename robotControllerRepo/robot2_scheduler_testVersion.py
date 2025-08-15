@@ -409,19 +409,31 @@ def run(task_data: Dict[str, Any]):
 # 自测示例（注意：sequence 全局唯一）
 # =========================
 if __name__ == "__main__":
+    # raw_response = dedent("""
+    # {
+    #   "robots": {
+    #     "robot1": [
+    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}},
+    #       {"action": "turn",  "parameters": {"direction": "left",    "value": 180, "unit": "degrees"}, "sync_group": "1"},
+    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 1},
+    #       {"action": "turn",  "parameters": {"direction": "right",   "value": 45, "unit": "degrees"}}
+    #     ],
+    #     "robot2": [
+    #       {"action": "navigate",  "parameters": {"target": "table"}},
+    #       {"action": "turn","parameters": {"direction": "right",   "value": 180, "unit": "degrees"}, "sync_group": "1"},
+    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 2}
+    #     ]
+    #   }
+    # }
+    # """)
     raw_response = dedent("""
     {
       "robots": {
         "robot1": [
-          {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}},
-          {"action": "turn",  "parameters": {"direction": "left",    "value": 180, "unit": "degrees"}, "sync_group": "1"},
-          {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 1},
-          {"action": "turn",  "parameters": {"direction": "right",   "value": 45, "unit": "degrees"}}
+          {"action": "navigate",  "parameters": {"target": "table"}}
         ],
         "robot2": [
-          {"action": "navigate",  "parameters": {"target": "table"}},
-          {"action": "turn","parameters": {"direction": "right",   "value": 180, "unit": "degrees"}, "sync_group": "1"},
-          {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 2}
+          {"action": "navigate",  "parameters": {"target": "table"}}
         ]
       }
     }
