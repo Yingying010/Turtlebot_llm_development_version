@@ -21,12 +21,12 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
         print(f"⚠️ Unknown direction: {direction}")
         return is_successful
 
-    if unit == "degrees":
+    if unit == "degree":
         angle_rad = math.radians(value)
         duration = angle_rad / abs(angular_speed)
         print(f"{robot_id} turning {direction} for {value}° ({duration:.2f}s) around {target}")
  
-    elif unit == "seconds":
+    elif unit == "second":
         duration = value
         print(f"{robot_id} turning {direction} for {duration:.2f}s around {target}")
     else:

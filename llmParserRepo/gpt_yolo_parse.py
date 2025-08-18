@@ -477,9 +477,9 @@ def normalize_for_scheduler(cmd: dict) -> dict:
     return {"robots": {}}
 
 
-def run_conversation_loop() -> Optional[Dict[str, Any]]:
-    robot_id = config.get("robot_id") 
-    aliases = generate_robot_aliases(robot_id)
+def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
+    robot_id = robot_id
+    # aliases = generate_robot_aliases(robot_id)
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
 
     while True:
@@ -488,8 +488,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 raw_text = recognize(delay=3).strip()
             except Exception as e:
                 logger.warning(f"🎙️ recognition failed: {e}")
-                tts_manager.say("Sorry, could not hear you.")
-                time.sleep(2)
+                tts_manager.say_sync("Sorry, could not hear you.")
                 continue
 
             user_input = _clean(raw_text)
@@ -501,15 +500,12 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up", "i want to change the chat mode", "ending of this mode","ok finish", "ending this mode"]
 
         if any(kw in user_input.lower() for kw in exit_keywords):
-            tts_manager.say("Exiting voice control.")
-            time.sleep(1)
+            tts_manager.say_sync("Exiting voice control.")
             break
 
         logger.info(f"🗣️ You said: {user_input}")
-        # tts_manager.say("User command has been received")
-        time.sleep(0.5)
-        # tts_manager.say(f"Your cammand is {user_input}. Currently parsing it for you ....")
-        time.sleep(0.5)
+        # tts_manager.say_sync("User command has been received")
+        # tts_manager.say_sync(f"Your cammand is {user_input}. Currently parsing it for you ....")
 
         try:
             pre_settings = f"Your are a robot and your name is {robot_id}."
@@ -522,14 +518,12 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 resp = out.get("command", {}).get("response")
                 print(resp or "i can't give you any response")
                 tts_manager.say_sync(resp)
-                time.sleep(1)
             else:
-                tts_manager.say("Could not understand the command.")
-                time.sleep(1)
+                tts_manager.say_sync("Could not understand the command.")
 
         except Exception:
             logger.warning(f"⚠️ Error during LLM or parsing: \n{traceback.format_exc()}")
-            tts_manager.say("Something went wrong.")
+            tts_manager.say_sync("Something went wrong.")
 
 
         # call scheduler
@@ -538,12 +532,10 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             isSchedule = robot_scheduler.run(execution_payload)
             if isSchedule == True:
                 logger.info("✅ Command(s) executed successfully.")
-                tts_manager.say("Command executed.")
-                time.sleep(1)
+                tts_manager.say_sync("Command executed.")
             else:
                 logger.warning("⚠️ Failed")
-                tts_manager.say("Command execution failed, please re-give the command.")
-                time.sleep(3)
+                tts_manager.say_sync("Command execution failed, please re-give the command.")
 
 
 # ================== 示例（可删） ==================

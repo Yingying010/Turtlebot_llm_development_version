@@ -309,10 +309,10 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
                 # 有前驱阶段则等待 (prev_seq, None, "finished")
                 p = prev_stage.get(seq)
                 if p is not None:
-                    tts_manager.say(f"i'm waiting for the other robots to finish")
+                    tts_manager.say_sync(f"i'm waiting for the other robots to finish")
                     wait_for_all_status((p, None), "finished")
                     print(f"[{robot_name}] ⏩ Stage {p} finished → start Stage {seq}")
-                    tts_manager.say(f"sequence {p} is finished, i'm going to start the mission")
+                    tts_manager.say_sync(f"sequence {p} is finished, i'm going to start the mission")
 
                 # 本阶段执行
                 publish_state(robot_name, tid, seq, None, "running")
@@ -327,9 +327,9 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             if sg is not None and seq is None:
                 key = (None, sg)
                 publish_state(robot_name, tid, None, sg, "ready")
-                tts_manager.say(f"i'm waiting for the other robots to synchronise with me")
+                tts_manager.say_sync(f"i'm waiting for the other robots to synchronise with me")
                 wait_for_all_status(key, "ready")
-                tts_manager.say(f"All robots are ready for action.")
+                tts_manager.say_sync(f"All robots are ready for action.")
                 print(f"[{robot_name}] ✅ All ready @ sync_group={sg}")
 
                 publish_state(robot_name, tid, None, sg, "running")
@@ -467,39 +467,28 @@ if __name__ == "__main__":
     # """)
 
     raw_response = dedent("""
+    {
         "robots": {
             "robot1": [
                 {
-                    "action": "collect",
-                    "parameters": {
-                        "item": "package", 
-                        "target": "cabinet"
-                    },
-                    "sequence": null,
-                    "sync_group": null
+                "action": "navigate",
+                "parameters": {
+                    "target": "table"
                 },
-                {
-                    "action": "deliver",
-                    "parameters": {
-                        "item": "package", 
-                        "target": "robot2"
-                    },
-                    "sequence": 0,
-                    "sync_group": null
+                "sync_group": 0
                 }
             ],
             "robot2": [
                 {
-                    "action": "deliver",
-                    "parameters": {
-                        "item": "package",
-                        "target": "table"
-                    },
-                    "sequence": 1,
-                    "sync_group": null
+                "action": "navigate",
+                "parameters": {
+                    "target": "table"
+                },
+                "sync_group": 0
                 }
             ]
         }
+    }
     """)
     task_data = json.loads(raw_response)
     run(task_data)

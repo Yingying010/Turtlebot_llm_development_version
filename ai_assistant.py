@@ -18,10 +18,9 @@ running = False
 actived = 0
 allow_running = True
 
-def run_conversation():
+def run_conversation(robot_id):
     logger.info("🎤 Recording...")
-    tts_manager.say("I'm listening.")
-    time.sleep(0.5)
+    tts_manager.say_sync("I'm listening.")
 
     # -------- Chat / Control ----------------------------------
     is_chat = config.get("chat_or_instruct")
@@ -30,23 +29,22 @@ def run_conversation():
             # response = TinyLlama_Chat.run()
             response = None
         else:
-            response = run_conversation_loop()
+            response = run_conversation_loop(robot_id)
 
     except Exception:
         logger.error(f"🧠 LLM error: \n{traceback.format_exc()}")
-        tts_manager.say("Something went wrong while thinking")
-        time.sleep(0.5)
+        tts_manager.say_sync("Something went wrong while thinking")
         conversation_active.clear()
         return
 
     # -------- 根据模式反馈 ------------------------------------------------
     if config.get("chat_or_instruct"):  # Chat 模式
         if isinstance(response, str):
-            tts_manager.say(response)
+            tts_manager.say_sync(response)
             logger.info("✅ Chat response delivered.")
         else:
             logger.warning("⚠️ LLM chat mode returned unexpected format.")
-            tts_manager.say("Sorry, something went wrong.")
+            tts_manager.say_sync("Sorry, something went wrong.")
     else:
             conversation_active.clear()
             return
@@ -60,8 +58,7 @@ def run_conversation():
 def startchat():
     os.system("afplay beep.wav")
     logger.info("📢 Starting chat system")
-    tts_manager.say("Welcome! You can start speaking after the beep.")
-    time.sleep(0.5)
+    tts_manager.say_sync("Welcome! You can start speaking after the beep.")
 
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
@@ -86,8 +83,7 @@ if __name__ == "__main__":
                 raw_text = recognize(delay=3).strip()
             except Exception as e:
                 logger.warning(f"🎙️ recognition failed: {e}")
-                tts_manager.say("Sorry, could not hear you.")
-                time.sleep(2)
+                tts_manager.say_sync("Sorry, could not hear you.")
                 continue
         
             wakeup_word = _clean(raw_text)
@@ -99,17 +95,17 @@ if __name__ == "__main__":
         if "open robot system" in wakeup_word:
             config.set(chat_or_instruct=False)
             logger.info("🎮 Switched to CONTROL mode.")
-            tts_manager.say("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
+            tts_manager.say_sync("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
         elif wakeup_word in {"i want to chat with you", "open chat system"}:
             config.set(chat_or_instruct=True)
             logger.info("💬 Switched to CHAT mode.")
-            tts_manager.say("Sure, I'm now in chat mode.")
+            tts_manager.say_sync("Sure, I'm now in chat mode.")
         elif wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
-            tts_manager.say("Goodbye!")
+            tts_manager.say_sync("Goodbye!")
             time.sleep(1)
             os._exit(0)
         else:
             continue
 
-        run_conversation()
+        run_conversation(robot_id)
 

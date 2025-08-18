@@ -8,3 +8,4 @@ CUDA_VISIBLE_DEVICES=0 GRADIO_SHARE_PORT=7860 llamafactory-cli webui
 
 export PULSE_SERVER=tcp:192.168.0.208
 python3 ttsRepo/stream_tts_test.py
+

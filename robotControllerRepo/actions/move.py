@@ -19,9 +19,9 @@ def move(node: Node, robot_id, direction, value, unit):
         print(f"⚠️ Unknown direction: {direction}")
         return  # ❌ 不调用 rclpy.shutdown()
 
-    if unit == "seconds":
+    if unit == "second":
         duration = value
-    elif unit == "meters":
+    elif unit == "meter":
         duration = value / abs(speed)
     else:
         print(f"⚠️ Unknown unit: {unit}")
