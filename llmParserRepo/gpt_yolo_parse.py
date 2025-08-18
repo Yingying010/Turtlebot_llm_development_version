@@ -453,6 +453,30 @@ def perceive_and_parse(user_instruction: str,
 
     return {"command": parsed}
 
+def normalize_for_scheduler(cmd: dict) -> dict:
+    """
+    接受各种可能的结构，统一转成 {'robots': {...}} 给调度器用。
+    """
+    if not isinstance(cmd, dict):
+        return {"robots": {}}
+
+    # 常规：已经是 {'robots': {...}}
+    if "robots" in cmd and isinstance(cmd["robots"], dict):
+        return cmd
+
+    # 直接是 {'robot1': [...], 'robot2': [...]} 这样的纯 robots 映射
+    if all(isinstance(v, list) for v in cmd.values()):
+        return {"robots": cmd}
+
+    # 有些模型会嵌套一层：{'command': {'robots': {...}}}
+    if "command" in cmd and isinstance(cmd["command"], dict):
+        inner = cmd["command"]
+        if "robots" in inner and isinstance(inner["robots"], dict):
+            return inner
+
+    return {"robots": {}}
+
+
 def run_conversation_loop() -> Optional[Dict[str, Any]]:
     robot_id = config.get("robot_id") 
     aliases = generate_robot_aliases(robot_id)
@@ -509,9 +533,9 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
 
         # call scheduler
-        execution_json = out["command"]["robots"]
-        if execution_json:
-            isSchedule = robot_scheduler.run(execution_json)
+        execution_payload = normalize_for_scheduler(out.get("command", {}))
+        if execution_payload["robots"]:
+            isSchedule = robot_scheduler.run(execution_payload)
             if isSchedule == True:
                 logger.info("✅ Command(s) executed successfully.")
                 tts_manager.say("Command executed.")
