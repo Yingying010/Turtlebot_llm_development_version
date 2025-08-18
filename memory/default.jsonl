@@ -1,0 +1,6 @@
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:08:56", "summary": {}, "objects": []}, "time": "2025-08-18T05:08:56"}
+{"type": "user", "content": "hello robot 1", "time": "2025-08-18T05:08:56"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:08:54\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"Hello! How can I assist you today?\"}", "time": "2025-08-18T05:08:56"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:12:48", "summary": {}, "objects": []}, "time": "2025-08-18T05:12:48"}
+{"type": "user", "content": "Your are a robot and your name is robot1.hello whats your name", "time": "2025-08-18T05:12:48"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:12:45\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"I'm robot1. How can I help you?\"}", "time": "2025-08-18T05:12:48"}

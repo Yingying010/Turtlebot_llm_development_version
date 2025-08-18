@@ -345,7 +345,7 @@ def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
 class PerceptionAwareLLM:
     def __init__(self, model: str = DEFAULT_MODEL):
         # api_key = os.getenv("OPENAI_API_KEY")
-        api_key = "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"
+        api_key = "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"
         self.client = openai.OpenAI(api_key=api_key) if api_key else None
         self.model = model
 
@@ -468,7 +468,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 continue
 
             user_input = _clean(raw_text)
-            if not user_input or user_input == "blank_audio" or not any(alias in user_input for alias in aliases):
+            if not user_input or user_input == "blank_audio":
                 continue
             else:
                 break
@@ -481,13 +481,14 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             break
 
         logger.info(f"🗣️ You said: {user_input}")
-        tts_manager.say("User command has been received")
+        # tts_manager.say("User command has been received")
         time.sleep(0.5)
-        tts_manager.say(f"Your cammand is {user_input}. Currently parsing it for you ....")
+        # tts_manager.say(f"Your cammand is {user_input}. Currently parsing it for you ....")
         time.sleep(0.5)
 
         try:
-            out = perceive_and_parse(user_input, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
+            pre_settings = f"Your are a robot and your name is {robot_id}."
+            out = perceive_and_parse(pre_settings + user_input, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2))
 
