@@ -344,7 +344,8 @@ def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
 # ================== LLM 解析（感知 + 历史 + 用户输入） ==================
 class PerceptionAwareLLM:
     def __init__(self, model: str = DEFAULT_MODEL):
-        api_key = os.getenv("OPENAI_API_KEY")
+        # api_key = os.getenv("OPENAI_API_KEY")
+        api_key = "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"
         self.client = openai.OpenAI(api_key=api_key) if api_key else None
         self.model = model
 
