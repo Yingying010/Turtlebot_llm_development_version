@@ -453,17 +453,53 @@ if __name__ == "__main__":
     # }
     # """)
 
+    # raw_response = dedent("""
+    # {
+    #   "robots": {
+    #     "robot1": [
+    #       {"action": "navigate",  "parameters": {"target": "table"}}
+    #     ],
+    #     "robot2": [
+    #       {"action": "navigate",  "parameters": {"target": "table"}}
+    #     ]
+    #   }
+    # }
+    # """)
+
     raw_response = dedent("""
-    {
-      "robots": {
-        "robot1": [
-          {"action": "navigate",  "parameters": {"target": "table"}}
-        ],
-        "robot2": [
-          {"action": "navigate",  "parameters": {"target": "table"}}
-        ]
-      }
-    }
+        "robots": {
+            "robot1": [
+                {
+                    "action": "collect",
+                    "parameters": {
+                        "item": "package", 
+                        "target": "cabinet"
+                    },
+                    "sequence": null,
+                    "sync_group": null
+                },
+                {
+                    "action": "deliver",
+                    "parameters": {
+                        "item": "package", 
+                        "target": "robot2"
+                    },
+                    "sequence": 0,
+                    "sync_group": null
+                }
+            ],
+            "robot2": [
+                {
+                    "action": "deliver",
+                    "parameters": {
+                        "item": "package",
+                        "target": "table"
+                    },
+                    "sequence": 1,
+                    "sync_group": null
+                }
+            ]
+        }
     """)
     task_data = json.loads(raw_response)
     run(task_data)
