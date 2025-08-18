@@ -58,7 +58,7 @@ def run_conversation(robot_id):
 def startchat():
     os.system("afplay beep.wav")
     logger.info("📢 Starting chat system")
-    tts_manager.say_sync("Welcome! You can start speaking after the beep.")
+    tts_manager.say_sync("Welcome! You can start speaking after the beep")
 
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
@@ -75,7 +75,6 @@ if __name__ == "__main__":
     print(config.get("robot_id"))
 
     startchat()
-    time.sleep(4)
 
     while True:
         while True:

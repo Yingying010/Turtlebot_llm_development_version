@@ -158,7 +158,6 @@ class TTSManager:
                         part,
                         "-w", wav_path
                     ]
-                    logger.debug(f"🎙️ espeak-ng synth: {part}")
                     synth = subprocess.run(es_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     if synth.returncode != 0:
                         logger.error(f"espeak-ng failed: {synth.stderr.decode(errors='ignore')}")
