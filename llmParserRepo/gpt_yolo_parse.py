@@ -344,8 +344,9 @@ def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
 # ================== LLM 解析（感知 + 历史 + 用户输入） ==================
 class PerceptionAwareLLM:
     def __init__(self, model: str = DEFAULT_MODEL):
-        # api_key = os.getenv("OPENAI_API_KEY")
-        api_key = "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"
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY no settings")
         self.client = openai.OpenAI(api_key=api_key) if api_key else None
         self.model = model
 
@@ -496,7 +497,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
                 # robot_scheduler.run(json_response)
                 resp = out.get("command", {}).get("response")
                 print(resp or "i can't give you any response")
-                tts_manager.say(resp)
+                tts_manager.say_sync(resp)
                 time.sleep(1)
             else:
                 tts_manager.say("Could not understand the command.")
