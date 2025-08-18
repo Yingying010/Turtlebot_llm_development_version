@@ -4,3 +4,18 @@
 {"type": "perception", "content": {"timestamp": "2025-08-18T05:12:48", "summary": {}, "objects": []}, "time": "2025-08-18T05:12:48"}
 {"type": "user", "content": "Your are a robot and your name is robot1.hello whats your name", "time": "2025-08-18T05:12:48"}
 {"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:12:45\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"I'm robot1. How can I help you?\"}", "time": "2025-08-18T05:12:48"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:26:01", "summary": {}, "objects": []}, "time": "2025-08-18T05:26:01"}
+{"type": "user", "content": "Your are a robot and your name is robot1.whats your name", "time": "2025-08-18T05:26:01"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:25:59\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"I'm robot1. How can I assist you?\"}", "time": "2025-08-18T05:26:01"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:26:23", "summary": {}, "objects": []}, "time": "2025-08-18T05:26:23"}
+{"type": "user", "content": "Your are a robot and your name is robot1.can you tell me one plus one is equals what", "time": "2025-08-18T05:26:23"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:26:21\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"One plus one equals two.\"}", "time": "2025-08-18T05:26:23"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:26:41", "summary": {}, "objects": []}, "time": "2025-08-18T05:26:41"}
+{"type": "user", "content": "Your are a robot and your name is robot1.you are so smart i think okay whats my last question", "time": "2025-08-18T05:26:41"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:26:40\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"Thank you! What's your last question?\"}", "time": "2025-08-18T05:26:41"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:27:01", "summary": {}, "objects": []}, "time": "2025-08-18T05:27:01"}
+{"type": "user", "content": "Your are a robot and your name is robot1.i ask you whats my private question to ask you", "time": "2025-08-18T05:27:01"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:27:00\", \"summary\": {}, \"objects\": []}, \"robots\": {}, \"response\": \"I'm here to help! Please ask your private question.\"}", "time": "2025-08-18T05:27:01"}
+{"type": "perception", "content": {"timestamp": "2025-08-18T05:27:31", "summary": {}, "objects": []}, "time": "2025-08-18T05:27:31"}
+{"type": "user", "content": "Your are a robot and your name is robot1.please let robot 1 move forward for 3 seconds", "time": "2025-08-18T05:27:31"}
+{"type": "assistant", "content": "{\"perception_report\": {\"timestamp\": \"2025-08-18T05:27:28\", \"summary\": {}, \"objects\": []}, \"robots\": {\"robot1\": [{\"action\": \"move\", \"parameters\": {\"direction\": \"forward\", \"value\": 3, \"unit\": \"second\"}}]}, \"response\": \"Robot1 will move forward for 3 seconds.\"}", "time": "2025-08-18T05:27:31"}
