@@ -391,30 +391,44 @@ def perceive_and_parse(user_instruction: str,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
     """
-    1. 抓取一帧并做 YOLO 检测
+    1. 抓取一帧并做 YOLO 检测（如果失败则返回空感知）
     2. 构造 CURRENT_PERCEPTION 上下文
     3. 读取历史（对话+感知摘要）并注入
     4. 调用 LLM 返回统一 JSON；把此次对话与感知摘要写回历史
     """
-    # --- 感知 ---
-    perceiver = YOLOPerceiver()
-    frame = YOLOPerceiver.grab_one_frame(source)
-    annotated, det_json = perceiver.detect_frame(frame)
-
-    if show_window:
-        cv2.imshow("Perception", annotated)
-        cv2.waitKey(800)
-        cv2.destroyAllWindows()
-    if save_annotated:
-        cv2.imwrite(save_annotated, annotated)
-
-    # --- 历史 ---
     store = HistoryStore(MEMORY_PATH)
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
 
-    # 当前感知文本 & 历史感知文本
-    perception_ctx = build_perception_context(det_json)
+    det_json = {"detections": [], "image": {}}  # 默认空感知
+    perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
+        {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False
+    )
+
+    try:
+        perceiver = YOLOPerceiver()
+        frame = YOLOPerceiver.grab_one_frame(source)
+        annotated, det_json = perceiver.detect_frame(frame)
+
+        if show_window:
+            cv2.imshow("Perception", annotated)
+            cv2.waitKey(800)
+            cv2.destroyAllWindows()
+        if save_annotated:
+            cv2.imwrite(save_annotated, annotated)
+
+        # 正常构造上下文
+        perception_ctx = build_perception_context(det_json)
+
+    except Exception as e:
+        # 摄像头/YOLO错误时，只输出提示 + 空感知
+        logger.warning(f"⚠️ Camera or YOLO unavailable: {e}")
+        det_json = {"detections": [], "image": {}}
+        perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
+            {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False
+        )
+
+    # --- 历史感知文本 ---
     perception_hist_text = build_perception_history_text(perception_hist_summaries)
 
     # --- LLM ---
@@ -426,21 +440,17 @@ def perceive_and_parse(user_instruction: str,
         perception_history_text=perception_hist_text
     )
 
-    # --- 解析输出，并写历史 ---
     try:
         parsed = json.loads(llm.extract_json(raw))
     except Exception:
         parsed = {"raw": raw, "note": "LLM 输出非严格 JSON，已原样返回在 raw 字段中"}
 
-    # 写入历史（先写感知，然后对话）
+    # 写入历史（感知为空时也要写）
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
-    # 为了便于人读/调试，把 assistant 写入统一 JSON 字符串（与 messages 同源）
     store.append("assistant", json.dumps(parsed, ensure_ascii=False))
 
-    return {
-        "command": parsed
-    }
+    return {"command": parsed}
 
 def run_conversation_loop() -> Optional[Dict[str, Any]]:
     robot_id = config.get("robot_id") 
