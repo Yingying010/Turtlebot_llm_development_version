@@ -72,6 +72,32 @@ def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
         raise TimeoutError(f"{sync_key} 等待 {expected} 超时")
     ev.clear()
 
+def _counts_for_key(key: tuple):
+    """返回 (need, ready, finished, remaining)"""
+    with cache_lock:
+        need = target_counts.get(key, 0)
+        ready = sum(status_rank(s) >= status_rank("ready") for s in status_cache[key].values())
+        finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
+    remaining = max(need - finished, 0)
+    return need, ready, finished, remaining
+
+
+def publish_barrier_snapshot(sync_group: int):
+    """将同步组的聚合状态发布到 /robot_status（kind=barrier）"""
+    key = (None, sync_group)
+    need, ready, finished, remaining = _counts_for_key(key)
+    payload = {
+        "kind": "barrier",
+        "sync_group": sync_group,
+        "need": need,
+        "ready": ready,
+        "remaining": remaining,
+        "ts": time.time(),
+    }
+    _safe_publish(payload)
+    print(f"📊 Barrier snapshot sg={sync_group} → need={need}, ready={ready}, remaining={remaining}")
+
+
 
 # =========================
 # 本地计划校验（仅用 task_data["robots"]）
@@ -190,8 +216,14 @@ def _apply_status_and_maybe_signal(robot: str, seq, sync_group, status: str):
         if key[0] is not None and key[1] is None and need > 0:
             if reached_finished >= need:
                 status_events[(key, "finished")].set()
+        
+        # —— 在任何状态变化后，如果是同步组，发布一次聚合快照 —— 
+        if key[0] is None and key[1] is not None:
+            publish_barrier_snapshot(key[1])
 
         print(f"(local) {robot} → {status} @ {key} (need={need}, ready={reached_ready}, fin={reached_finished})")
+
+
 
 
 def ensure_task_ids(task_data: Dict[str, Any]):
@@ -229,6 +261,15 @@ def status_callback(msg):
     try:
         data = json.loads(msg.data)
         kind = data.get("kind", "state")
+
+        if kind == "barrier":
+            sg = data.get("sync_group")
+            need = data.get("need")
+            ready = data.get("ready")
+            remaining = data.get("remaining")
+            print(f"barrier | sync_group={sg} | need={need}, ready={ready}, remaining={remaining}")
+            return
+
         if kind != "state":
             return  # 忽略心跳等其他类型
 
@@ -325,19 +366,36 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             # B) 跨机器人同步（只有 sync_group）
             if sg is not None and seq is None:
                 key = (None, sg)
+
+                # —— 首次进入该同步组时，先发初始快照（如 need=2, ready=0, remaining=2）——
+                publish_barrier_snapshot(sg)
+
+                # 发布 ready 并等待齐活
                 publish_state(robot_name, tid, None, sg, "ready")
-                tts_manager.say_sync(f"i'm waiting for the other robots to synchronise with me")
+
+                # 语音：若未齐活则报“还在等待X个”
+                need, ready, _, _ = _counts_for_key(key)
+                waiting = max(need - ready, 0)
+
+                if waiting > 0:
+                    tts_manager.say_sync(f"i'm waiting for {waiting} robots to synchronise with me")
+
                 wait_for_all_status(key, "ready")
-                tts_manager.say_sync(f"All robots are ready for action.")
-                print(f"[{robot_name}] ✅ All ready @ sync_group={sg}")
+                tts_manager.say_sync(f"sync_group={sg} | All robots are ready")
 
                 publish_state(robot_name, tid, None, sg, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
 
                 publish_state(robot_name, tid, None, sg, "finished")
+
+                # 报告剩余未完成数量（如果>0）
+                need, _, finished, remaining = _counts_for_key(key)
+                if remaining > 0:
+                    print(f"There are {remaining} robots left in the sync group")
+
                 wait_for_all_status(key, "finished")
-                print(f"[{robot_name}] 🎉 All finished @ sync_group={sg}")
+                print(f"sync_group={sg} | All robots are finished")
                 continue
 
             # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
