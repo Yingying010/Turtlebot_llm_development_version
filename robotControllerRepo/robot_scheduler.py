@@ -24,6 +24,23 @@ from config import config
 # =========================
 ros_node: Optional[Node] = None
 status_pub = None
+sync_group_id = None
+need_count = None
+ready_count = None
+remaining_count = None
+ts = None
+# 全局状态（添加）
+sync_go_events = defaultdict(threading.Event)  # sg -> Event
+sync_go_times: Dict[int, float] = {}           # sg -> start_at(Unix time)
+
+global_barrier = {
+    "kind": "barrier", 
+    "sync_group": sync_group_id, 
+    "need": need_count, 
+    "ready": ready_count, 
+    "remaining": remaining_count, 
+    "ts": ts
+}
 
 # 状态缓存：key 为 (seq, sync_group) 二元组
 # - 跨机器人串行阶段：使用 (seq, None)，只统计 finished
@@ -40,6 +57,8 @@ status_events = defaultdict(threading.Event)
 
 # 锁
 cache_lock = threading.Lock()
+
+data = {}
 
 # 心跳
 HEARTBEAT_INTERVAL = 2.0
@@ -73,11 +92,11 @@ def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
     ev.clear()
 
 def _counts_for_key(key: tuple):
-    """返回 (need, ready, finished, remaining)"""
     with cache_lock:
         need = target_counts.get(key, 0)
-        ready = sum(status_rank(s) >= status_rank("ready") for s in status_cache[key].values())
-        finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
+        # ✅ 精确匹配，避免各种比较歧义
+        ready = sum(1 for s in status_cache[key].values() if s == "ready")
+        finished = sum(1 for s in status_cache[key].values() if s == "finished")
     remaining = max(need - finished, 0)
     return need, ready, finished, remaining
 
@@ -94,10 +113,38 @@ def publish_barrier_snapshot(sync_group: int):
         "remaining": remaining,
         "ts": time.time(),
     }
+    # global_barrier = payload
     _safe_publish(payload)
     print(f"📊 Barrier snapshot sg={sync_group} → need={need}, ready={ready}, remaining={remaining}")
 
-
+def publish_sync_go(sync_group: int, delay: float = 0.3):
+    """领导者发布统一起跑时间（当前时间+delay），所有人等到这个时间再运行。"""
+    start_at = time.time() + delay
+    payload = {
+        "kind": "go",
+        "sync_group": sync_group,
+        "start_at": start_at,
+        "ts": time.time(),
+    }
+    # 先本地记一份，避免领导者还要等自己发的消息回环
+    sync_go_times[sync_group] = start_at
+    sync_go_events[sync_group].set()
+    _safe_publish(payload)
+    print(f"🚦 publish GO | sg={sync_group} | start_at={start_at:.3f} (delay={delay}s)")
+ 
+ 
+def wait_for_sync_go(sync_group: int, timeout: float = 5.0):
+    """等待收到 GO，并在指定 start_at 时刻同步起跑。"""
+    ev = sync_go_events[sync_group]
+    ok = ev.wait(timeout)
+    if not ok:
+        raise TimeoutError(f"sync_group={sync_group} 等待 GO 超时")
+    start_at = sync_go_times[sync_group]
+    now = time.time()
+    remain = start_at - now
+    if remain > 0:
+        time.sleep(remain)
+    print(f"🚦 GO LATCHED | sg={sync_group} | now={time.time():.3f}")
 
 # =========================
 # 本地计划校验（仅用 task_data["robots"]）
@@ -177,6 +224,7 @@ def count_robots_per_sync_key(task_data: Dict[str, Any]) -> Dict[tuple, int]:
         for t in tasks:
             sg = t.get("sync_group")
             if sg is not None:
+                sg = int(sg)
                 sg_map[(None, sg)].add(robot)
     out.update({k: len(v) for k, v in sg_map.items()})
     return out
@@ -198,6 +246,8 @@ def _apply_status_and_maybe_signal(robot: str, seq, sync_group, status: str):
     else:
         key = (None, None)
 
+    print(f"DEBUG apply_status: robot={robot}, status={status}, key={key}, type={type(key[1])}")
+
     with cache_lock:
         status_cache[key][robot] = status
         need = target_counts.get(key, 0)
@@ -217,11 +267,11 @@ def _apply_status_and_maybe_signal(robot: str, seq, sync_group, status: str):
             if reached_finished >= need:
                 status_events[(key, "finished")].set()
         
-        # —— 在任何状态变化后，如果是同步组，发布一次聚合快照 —— 
-        if key[0] is None and key[1] is not None:
-            publish_barrier_snapshot(key[1])
+    # —— 在任何状态变化后，如果是同步组，发布一次聚合快照 —— 
+    if key[0] is None and key[1] is not None:
+        publish_barrier_snapshot(key[1])
 
-        print(f"(local) {robot} → {status} @ {key} (need={need}, ready={reached_ready}, fin={reached_finished})")
+    print(f"(local) {robot} → {status} @ {key} (need={need}, ready={reached_ready}, fin={reached_finished})")
 
 
 
@@ -258,38 +308,64 @@ def publish_state(robot: str, task_id, sequence, sync_group, status: str):
 # 订阅回调
 # =========================
 def status_callback(msg):
+
     try:
+
         data = json.loads(msg.data)
+
         kind = data.get("kind", "state")
+ 
+        # 1) 接收 barrier：只打印，别入账
 
         if kind == "barrier":
             sg = data.get("sync_group")
-            need = data.get("need")
-            ready = data.get("ready")
-            remaining = data.get("remaining")
-            print(f"barrier | sync_group={sg} | need={need}, ready={ready}, remaining={remaining}")
+            need = int(data.get("need", 0))
+            ready = int(data.get("ready", 0))
+            remaining = int(data.get("remaining", max(need - ready, 0)))
+            print(f"barrier | sync_group={sg} | need={need}, ready={ready}, remaining={remaining} | ts={data.get('ts')}")
             return
-
+        
+        if kind == "go":
+            sg = int(data.get("sync_group"))
+            start_at = float(data.get("start_at", time.time()))
+            sync_go_times[sg] = start_at
+            sync_go_events[sg].set()
+            print(f"📨 recv GO | sg={sg} | start_at={start_at:.3f} | ts={data.get('ts')}")
+            return
+ 
+        # 2) 非 state/barrier 一律忽略（心跳等）
         if kind != "state":
-            return  # 忽略心跳等其他类型
+            return
+        
 
-        src_robot = data["robot"]
-        tid = data.get("task_id")
+ 
+        # 3) 入账对方/自己的 state（关键！）
+
+        src_robot = data.get("robot")
+
         seq = data.get("sequence")
+
         sg = data.get("sync_group")
-        status = data["status"]
 
-        if src_robot == config.get("robot_id"):
-            print(f"📩 收到【自己】状态: {src_robot} → {status} @ ({seq}, {sg})")
-        else:
-            print(f"📩 收到【对方】状态: {src_robot} → {status} @ ({seq}, {sg})")
+        if sg is not None:
 
-        # 入账 + 触发事件
-        print(f"📩 {src_robot} → {status} @ ({seq}, {sg}) tid={tid}")
+            sg = int(sg)
+
+        status = data.get("status")
+ 
+        # （可选）调试输出
+
+        print(f"📩 state | {src_robot} → {status} @ (seq={seq}, sg={sg}) tid={data.get('task_id')} ts={data.get('ts')}")
+ 
+        # 入账 + 可能触发事件 + 触发 barrier 快照
+
         _apply_status_and_maybe_signal(src_robot, seq, sg, status)
-
+ 
     except Exception:
+
         print(f"⚠️ status_callback error: \n{traceback.format_exc()}")
+
+ 
 
 
 # =========================
@@ -343,6 +419,8 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
             tid   = task.get("task_id")
             seq = task.get("sequence")
             sg = task.get("sync_group")
+            if sg is not None:
+                sg = int(sg)
 
             # A) 跨机器人串行阶段（只有 sequence）
             if seq is not None and sg is None:
@@ -372,6 +450,10 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
 
                 # 发布 ready 并等待齐活
                 publish_state(robot_name, tid, None, sg, "ready")
+                print(f"publish_state: {robot_name}")
+
+                publish_barrier_snapshot(sg)
+
 
                 # 语音：若未齐活则报“还在等待X个”
                 need, ready, _, _ = _counts_for_key(key)
@@ -380,21 +462,30 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
                 if waiting > 0:
                     tts_manager.say_sync(f"i'm waiting for {waiting} robots to synchronise with me")
 
+                # 等待 ready 齐活
                 wait_for_all_status(key, "ready")
-                tts_manager.say_sync(f"sync_group={sg} | All robots are ready")
-
+                print(f"sync_group={sg} | All robots are ready")
+                
+                # —— 选举“领导者”（统一且可重复：按机器人名最小）——
+                with cache_lock:
+                    participants = list(status_cache[key].keys())  # 已在该组报过 ready 的机器人
+                leader = min(participants) if participants else robot_name
+                
+                # 领导者发布一个“未来时刻”的 GO；其他成员等待 GO
+                if robot_name == leader:
+                    publish_sync_go(sg, delay=0.3)  # 你也可以把 0.3 调成 0.1~0.5 之间
+                else:
+                    print(f"⏳ waiting GO from leader={leader} @ sg={sg}")
+                
+                # 所有人：等到 GO 的 timepoint 再起跑
+                wait_for_sync_go(sg)
+                
+                # 同步起跑（此刻基本同时）
                 publish_state(robot_name, tid, None, sg, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
-
+                
                 publish_state(robot_name, tid, None, sg, "finished")
-
-                # 报告剩余未完成数量（如果>0）
-                need, _, finished, remaining = _counts_for_key(key)
-                if remaining > 0:
-                    print(f"There are {remaining} robots left in the sync group")
-
-                wait_for_all_status(key, "finished")
                 print(f"sync_group={sg} | All robots are finished")
                 continue
 
@@ -454,7 +545,7 @@ def run(task_data: Dict[str, Any]):
     executor.add_node(ros_node)
 
     # 4) QoS：RELIABLE + TRANSIENT_LOCAL
-    qos = QoSProfile(depth=1)
+    qos = QoSProfile(depth=10)
     qos.reliability = ReliabilityPolicy.RELIABLE
     qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
