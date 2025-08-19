@@ -462,10 +462,12 @@ class PerceptionAwareLLM:
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
+                       history,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
     
-    store = HistoryStore(MEMORY_PATH)
+    store = history or HistoryStore(MEMORY_PATH)
+
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
 
@@ -544,7 +546,7 @@ def normalize_for_scheduler(cmd: dict) -> dict:
             return inner
     return {"robots": {}}
 
-def run_conversation_loop() -> Optional[Dict[str, Any]]:
+def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     while True:
         while True:
@@ -572,7 +574,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         out = {}
         try:
-            out = perceive_and_parse(user_input, source=DEFAULT_SOURCE,
+            out = perceive_and_parse(user_input, history, source=DEFAULT_SOURCE,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
