@@ -254,6 +254,41 @@ class GlobalVideoSource:
                 continue
             return frame
         raise RuntimeError("读取视频帧超时/有效帧未到达")
+    
+    def grab_one_frame_once(source: str,
+                        warmup_frames: int = 8,
+                        open_timeout_sec: float = 8.0) -> np.ndarray:
+        """一次性打开 → 预热 → 取一帧 → 释放；与最小可跑代码逻辑一致"""
+        backend = cv2.CAP_FFMPEG if isinstance(source, str) else 0
+        t0 = time.time()
+        cap = cv2.VideoCapture(source, backend)
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+
+        # 等待流真正打开（有的环境 isOpened 也可能 True 但实际没帧）
+        while time.time() - t0 < open_timeout_sec:
+            ok, _ = cap.read()
+            if ok:
+                break
+            time.sleep(0.05)
+
+        # 预热：丢掉起始不稳定帧（PPS/SPS）
+        got = 0
+        for _ in range(warmup_frames):
+            ok, _ = cap.read()
+            if ok:
+                got += 1
+            else:
+                time.sleep(0.02)
+
+        ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            raise RuntimeError("grab_one_frame_once: 无法读取有效帧")
+        return frame
+
 
     def release(self):
         with self.lock:
@@ -402,9 +437,22 @@ def perceive_and_parse(user_instruction: str,
 
     try:
         perceiver = YOLOPerceiver()
-        # FIX: 使用 OpenCV 持续读帧 → 单帧推理（与最小可跑版本一致）
-        frame = VIDEO.read(drop_n=5, timeout=2.0)
+
+        # 先尝试 GlobalVideoSource（持续流）
+        try:
+            frame = VIDEO.read(drop_n=3, timeout=5.0)  # 放宽参数
+        except Exception as e:
+            logger.warning(f"[VIDEO] GlobalVideoSource 读取失败，改用一次性直读兜底：{e}")
+            # 关键兜底：与最小可跑版本一致的直读方式
+            frame = GlobalVideoSource.grab_one_frame_once(DEFAULT_SOURCE, warmup_frames=8, open_timeout_sec=8.0)
+
+        # 跑 YOLO（与最小可跑保持一致：单帧推理）
         annotated, det_json = perceiver.detect_frame(frame)
+
+        # 调试输出来确认到底检测到了没有
+        print(f"[DEBUG] det_count={len(det_json.get('detections', []))}, image={det_json.get('image')}")
+        cv2.imwrite("/tmp/percep_raw.jpg", frame)
+        cv2.imwrite("/tmp/percep_annotated.jpg", annotated)
 
         if show_window:
             cv2.imshow("Perception", annotated)
