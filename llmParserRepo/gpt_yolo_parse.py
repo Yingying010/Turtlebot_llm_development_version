@@ -64,24 +64,38 @@ Output JSON Schema
               "bbox_xyxy":[<float>,<float>,<float>,<float>],
               "conf": <float>
             }
+        ],
+        "relations": [
+            { "subject":"<id>", "predicate":"on|left_of|right_of|near", "object":"<id>" }
         ]
     },
     "robots": {
         "<robot_name>": [ <task_object>, <task_object>, ... ],
         "<robot_name>": [ ... ]
-    }
+    },
     "response": "<short natural-language reply>"
 }
                        
-Perception report rules:
+========================
+Perception report rules
+========================
 - Base it ONLY on CURRENT_PERCEPTION. If IDs are not provided, assign per-class incremental IDs like "cup1","cup2"; if a class appears only once, using "cup" without a number is acceptable.
 - Keep numeric values as valid JSON floats. Include at most 20 objects.
-- If the user explicitly requests a scene description (e.g., "describe the scene", "what's in front of me"), 
-  then in the "response" field, generate a short natural-language summary of the perception. 
-  The description should include object categories, counts, and rough relative positions (e.g., front, left, right, near, far).
+- Spatial relation inference:
+  * Supported "supporting" classes: {"dining table","table","desk","shelf","counter","bench","floor"}.
+  * Supported "object-on-support" classes: {"bottle","cup","mug","plate","bowl","phone","book","laptop","remote"}.
+  * Infer "on" if an object-on-support has significant horizontal overlap with a supporting object and its bottom_y lies within the vertical extent of the supporting object.
+  * Infer "left_of" / "right_of" if the horizontal distance between centers ≥ 15% of the image width.
+  * Infer "near" if the distance between centers ≤ 25% of the image width and no stronger relation applies.
+  * Do not hallucinate relations; if conditions are not satisfied, omit them.
+- Natural-language response generation:
+  * If the user explicitly asks for a description of the scene, the "response" should summarize both the objects and any inferred relations (e.g., "The bottle is on the dining table").
+  * If no relations are inferred, fall back to a simpler count/position summary.
 
 
+========================
 A task_object has the following structure:
+========================
 {
     "action": "<action_name>",
     "parameters": { ... },
@@ -158,9 +172,9 @@ sync_group is a globally incrementing number starting from 0. Tasks with the sam
 Response
 ========================
 Return a short natural-language reply (<=120 characters) in the same language as the user's last message. 
-If tasks are generated, briefly acknowledge them; otherwise, briefly summarize the perception.
+If tasks are generated, briefly acknowledge them. If the user requests a scene description, describe both objects and relations if available. If the user is chatting with you, engage in free conversation with the user.
 
-According to the above rules, the following instructions are parsed:       
+     
 """).strip()
 
 
