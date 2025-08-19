@@ -422,9 +422,9 @@ class PerceptionAwareLLM:
               chat_history_messages: List[Dict[str, str]],
               perception_history_text: Optional[str]) -> str:
         
-        post_identity = dedent("""
+        post_identity = dedent(f"""
         Context variables:
-        Let me first define your identity. You are a highly intelligent indoor robot, and your name is robot1, and your master's name is Lucy. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
+        Let me first define your identity. You are a highly intelligent indoor robot, and your name is {ROBOT_ID}, and your master's name is {MASTER_NAME}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
         """).strip()
         
         messages: List[Dict[str, str]] = [
