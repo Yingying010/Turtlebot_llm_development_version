@@ -16,3 +16,6 @@
 {"type": "perception", "content": {"timestamp": "2025-08-19T05:57:06", "summary": {}, "objects": []}, "time": "2025-08-19T05:57:06"}
 {"type": "user", "content": "i want you and robot 1 navigate to table at the same time", "time": "2025-08-19T05:57:06"}
 {"type": "assistant", "content": "{\"robots\": {\"robot1\": [{\"action\": \"navigate\", \"parameters\": {\"target\": \"table\"}, \"sync_group\": 0}]}, \"response\": \"I'll navigate to the table at the same time as robot 1.\"}", "time": "2025-08-19T05:57:06"}
+{"type": "perception", "content": {"timestamp": "2025-08-19T10:03:17", "summary": {}, "objects": []}, "time": "2025-08-19T10:03:17"}
+{"type": "user", "content": "ok robot 1 i want you follow me as i walk around", "time": "2025-08-19T10:03:17"}
+{"type": "assistant", "content": "{\"robots\": {\"robot1\": [{\"action\": \"follow\", \"parameters\": {\"target\": \"lucy\"}}]}, \"response\": \"I'll follow you as you walk around, Lucy.\"}", "time": "2025-08-19T10:03:17"}
