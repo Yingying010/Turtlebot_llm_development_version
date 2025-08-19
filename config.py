@@ -7,23 +7,8 @@ from loguru import logger
 params = {
     "robot_id":"robot1",
     "robot_id2":"robot2",
-    "master_name": "Lucy",
+    "master_id": "lucy",
     "isConversation": True,
-    # 运行状态锁
-    "notify_enable": False,
-    "chat_enable": False,
-    "rec_enable": False,  # 是否启用远程控制模块（如 WiFi 控制）
-
-    # 核心控制参数
-    "command": "",             # 一般指令字符串
-    "answer": "turtlebot系统已启动，请下达指令。",
-    "turtlebot_command": "",   # 小车控制指令（如前进、转弯）
-    "turtlebot_mode": "standby",  # 控制模式：standby, manual, follow, explore
-    "robot_speed": 0.3,           # 控制移动速度（0~1）
-    
-    # 控制选项
-    "Noticenotify": True, # 是否启用“通知播报”功能。
-
     "chat_or_instruct": True,  # 默认聊天模式
 }
 
@@ -36,37 +21,9 @@ semantic_locations = {
     "shelf": {"x": -1000, "y": -1000}
 }
 
-# 哪些参数需要记录变更日志
-tracked_params = [
-    "command",
-    "turtlebot_command",
-    "turtlebot_mode",
-    "robot_speed",
-    "Noticenotify"
-]
-
-# 外设控制参数
-device_params = {
-    "turtlebot1": "robot",
-    "turtlebot2": "robot",
-    "speaker": "audio"
-}
-
 class ConfigManager:
-    def __init__(self, params, tracked_params):
+    def __init__(self, params):
         self.params = params
-        self.device_params = device_params
-        self.tracked_params = tracked_params
-
-    def write_to_file(self, changed_params):
-        """将变更记录写入日志文件"""
-        with open("Log/config_state.txt", "a") as file:
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            formatted_data = {
-                "timestamp": current_time,
-                "changed_params": changed_params
-            }
-            file.write(json.dumps(formatted_data, indent=4) + "\n\n")
 
     def set(self, **kwargs):
         """更新参数值"""
@@ -92,4 +49,4 @@ class ConfigManager:
 
 
 # 单例配置对象
-config = ConfigManager(params, tracked_params)
+config = ConfigManager(params)

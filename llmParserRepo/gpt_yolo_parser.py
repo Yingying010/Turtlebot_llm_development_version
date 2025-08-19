@@ -1,9 +1,3 @@
-
-"""
-Simple Perception-Aware LLM with History:
-抓一帧 → YOLO 感知 → 记录历史（感知+对话）→ 注入“当前感知 + 历史感知 + 历史对话” → LLM 返回统一 JSON
-"""
- 
 import os, sys, re, json, time, traceback, threading
 from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
@@ -29,11 +23,10 @@ DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", "yolov8n.pt")
 YOLO_CONF   = float(os.getenv("YOLO_CONF", "0.25"))
 YOLO_IOU    = float(os.getenv("YOLO_IOU", "0.45"))
-YOLO_DEVICE = os.getenv("YOLO_DEVICE", None)   # 例: "0"
-# FIX: 仅使用 OpenCV 读 UDP 流，不再把 URL 直接传给 Ultralytics
-DEFAULT_SOURCE = "udp://@:8888?fifo_size=1000000&overrun_nonfatal=1&buffer_size=1000000&probesize=32&analyzeduration=0"
+
+YOLO_DEVICE = os.getenv("YOLO_DEVICE", None)
  
-SESSION_ID = os.getenv("SESSION_ID", "default")
+SESSION_ID = os.getenv("SESSION_ID", "chattinglog")
 MEMORY_DIR = Path("./memory"); MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
  
@@ -42,6 +35,8 @@ PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
 
 ROBOT_ID = config.get("robot_id")
 MASTER_NAME = config.get("master_name")
+
+DEFAULT_SOURCE = "udp://@:8888?fifo_size=1000000&overrun_nonfatal=1&buffer_size=1000000&probesize=32&analyzeduration=0"
 
 # ——统一输出提示词（在此基础上增加“可选历史输入”说明）——
 SYSTEM_PROMPT = dedent("""
@@ -219,6 +214,11 @@ class HistoryStore:
     def recent_perception_summaries(self, depth: int) -> List[Dict]:
         snaps = [e["content"] for e in self.events if e.get("type") == "perception"]
         return snaps[-depth:] if depth > 0 else []
+    
+    def clear(self):
+        self.events = []
+        if self.path.exists():
+            self.path.unlink()
 
 # ================== OpenCV 统一视频源（关键修正） ==================
 class GlobalVideoSource:
@@ -238,8 +238,7 @@ class GlobalVideoSource:
                 except Exception:
                     pass
                 if not self.cap.isOpened():
-                    raise RuntimeError(f"无法打开视频源：{self.source}")
-                # 预热，丢掉起始不完整帧
+                    raise RuntimeError(f"Can't open video source: {self.source}")
                 deadline = time.time() + 5.0
                 ok_cnt = 0
                 while time.time() < deadline and ok_cnt < 10:
@@ -262,20 +261,18 @@ class GlobalVideoSource:
             if not ok or frame is None:
                 time.sleep(0.01)
                 continue
-            # 过滤明显坏帧
             m = float(frame.mean()); v = float(frame.var())
             h, w = frame.shape[:2]
-            if h < 32 or w < 32:      # 尺寸异常
+            if h < 32 or w < 32:
                 continue
-            if m < 1.0 or v < 5.0:    # 黑帧/坏帧
+            if m < 1.0 or v < 5.0:
                 continue
             return frame
-        raise RuntimeError("读取视频帧超时/有效帧未到达")
+        raise RuntimeError("Reading video frame timeout/valid frame not arrived")
     
     def grab_one_frame_once(source: str,
                         warmup_frames: int = 8,
                         open_timeout_sec: float = 8.0) -> np.ndarray:
-        """一次性打开 → 预热 → 取一帧 → 释放；与最小可跑代码逻辑一致"""
         backend = cv2.CAP_FFMPEG if isinstance(source, str) else 0
         t0 = time.time()
         cap = cv2.VideoCapture(source, backend)
@@ -284,14 +281,12 @@ class GlobalVideoSource:
         except Exception:
             pass
 
-        # 等待流真正打开（有的环境 isOpened 也可能 True 但实际没帧）
         while time.time() - t0 < open_timeout_sec:
             ok, _ = cap.read()
             if ok:
                 break
             time.sleep(0.05)
 
-        # 预热：丢掉起始不稳定帧（PPS/SPS）
         got = 0
         for _ in range(warmup_frames):
             ok, _ = cap.read()
@@ -303,7 +298,7 @@ class GlobalVideoSource:
         ok, frame = cap.read()
         cap.release()
         if not ok or frame is None:
-            raise RuntimeError("grab_one_frame_once: 无法读取有效帧")
+            raise RuntimeError("Unable to read valid frame")
         return frame
 
 
@@ -314,9 +309,6 @@ class GlobalVideoSource:
                 self.cap = None
                 self.ready = False
 
-# 全局视频对象（只读一次流，供本文件调用）
-VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
-
 # ================== YOLO 感知（关键：只接受 np.ndarray） ==================
 class YOLOPerceiver:
     def __init__(self,
@@ -324,21 +316,25 @@ class YOLOPerceiver:
                  conf: float = YOLO_CONF,
                  iou: float = YOLO_IOU,
                  device: Optional[str] = YOLO_DEVICE):
+        
         self.model = YOLO(weights)
         self.conf = conf
         self.iou = iou
         self.device = device
 
     def detect_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict]:
-        # FIX: 只传入 frame，不使用流/URL/生成器
         res = self.model.predict(
             source=frame, conf=self.conf, iou=self.iou, device=self.device, verbose=False
         )[0]
+
         annotated = res.plot()
+
         h, w = res.orig_shape
         detections: List[Dict] = []
-        names = res.names  # id -> class name
+        names = res.names
+
         result_boxes = getattr(res, "boxes", None)
+
         if result_boxes is not None and len(result_boxes) > 0:
             for b in result_boxes:
                 x1, y1, x2, y2 = b.xyxy[0].tolist()
@@ -446,11 +442,13 @@ class PerceptionAwareLLM:
         return resp.choices[0].message.content.strip()
 
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
+VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
-                       source: Any = DEFAULT_SOURCE,
+                       history,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
-    store = HistoryStore(MEMORY_PATH)
+    
+    store = history or HistoryStore(MEMORY_PATH)
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
 
@@ -462,18 +460,15 @@ def perceive_and_parse(user_instruction: str,
     try:
         perceiver = YOLOPerceiver()
 
-        # 先尝试 GlobalVideoSource（持续流）
         try:
-            frame = VIDEO.read(drop_n=3, timeout=5.0)  # 放宽参数
+            frame = VIDEO.read(drop_n=3, timeout=5.0)
         except Exception as e:
-            logger.warning(f"[VIDEO] GlobalVideoSource 读取失败，改用一次性直读兜底：{e}")
-            # 关键兜底：与最小可跑版本一致的直读方式
+            logger.warning(f"[VIDEO] GlobalVideoSource reading failed, using a one-time direct read as a fallback: {e}")
+
             frame = GlobalVideoSource.grab_one_frame_once(DEFAULT_SOURCE, warmup_frames=8, open_timeout_sec=8.0)
 
-        # 跑 YOLO（与最小可跑保持一致：单帧推理）
         annotated, det_json = perceiver.detect_frame(frame)
 
-        # 调试输出来确认到底检测到了没有
         print(f"[DEBUG] det_count={len(det_json.get('detections', []))}, image={det_json.get('image')}")
         cv2.imwrite("/tmp/percep_raw.jpg", frame)
         cv2.imwrite("/tmp/percep_annotated.jpg", annotated)
@@ -507,7 +502,7 @@ def perceive_and_parse(user_instruction: str,
     try:
         parsed = json.loads(llm.extract_json(raw))
     except Exception:
-        parsed = {"raw": raw, "note": "LLM 输出非严格 JSON，已原样返回在 raw 字段中"}
+        parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
 
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
@@ -528,7 +523,7 @@ def normalize_for_scheduler(cmd: dict) -> dict:
             return inner
     return {"robots": {}}
 
-def run_conversation_loop() -> Optional[Dict[str, Any]]:
+def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     while True:
         while True:
@@ -556,7 +551,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         try:
 
-            out = perceive_and_parse(user_input, source=DEFAULT_SOURCE,
+            out = perceive_and_parse(user_input, history, source=DEFAULT_SOURCE,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
@@ -584,6 +579,6 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
 # ================== 示例 ==================
 if __name__ == "__main__":
-    instr = "ok robot 1 i want you follow me as i walk around"
-    out = perceive_and_parse(instr, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
+    instr = "I want robot1 to move forward for 3 seconds and then turn left 90 degrees"
+    out = perceive_and_parse(instr, show_window=True, save_annotated=None)
     print(json.dumps(out, indent=2, ensure_ascii=False))

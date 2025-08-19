@@ -1,9 +1,3 @@
-
-"""
-Simple Perception-Aware LLM with History:
-抓一帧 → YOLO 感知 → 记录历史（感知+对话）→ 注入“当前感知 + 历史感知 + 历史对话” → LLM 返回统一 JSON
-"""
- 
 import os, sys, re, json, time, traceback, threading
 from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
@@ -30,9 +24,10 @@ DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", "yolov8n.pt")
 YOLO_CONF   = float(os.getenv("YOLO_CONF", "0.25"))
 YOLO_IOU    = float(os.getenv("YOLO_IOU", "0.45"))
-YOLO_DEVICE = os.getenv("YOLO_DEVICE", "cpu")
 
-SESSION_ID = os.getenv("SESSION_ID", "default")
+YOLO_DEVICE = os.getenv("YOLO_DEVICE", None)
+
+SESSION_ID = os.getenv("SESSION_ID", "chattinglog")
 MEMORY_DIR = Path("./memory"); MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
  
@@ -224,17 +219,22 @@ class HistoryStore:
     def recent_perception_summaries(self, depth: int) -> List[Dict]:
         snaps = [e["content"] for e in self.events if e.get("type") == "perception"]
         return snaps[-depth:] if depth > 0 else []
+    
+    def clear(self):
+        self.events = []
+        if self.path.exists():
+            self.path.unlink()
 
 # ================== OpenCV 统一视频源（关键修正） ==================
 class GlobalVideoSource:
     def __init__(self, source: Any):
         self.source = source
         if isinstance(source, int):
-            self.backend = cv2.CAP_V4L2              # 本地 /dev/video*（USB/兼容层）
+            self.backend = cv2.CAP_V4L2
         elif isinstance(source, str) and "appsink" in source:
-            self.backend = cv2.CAP_GSTREAMER         # GStreamer 管道
+            self.backend = cv2.CAP_GSTREAMER
         else:
-            self.backend = cv2.CAP_FFMPEG            # 文件/网络/UDP
+            self.backend = cv2.CAP_FFMPEG
         self.cap = None
         self.lock = threading.Lock()
         self.ready = False
@@ -248,8 +248,7 @@ class GlobalVideoSource:
                 except Exception:
                     pass
                 if not self.cap.isOpened():
-                    raise RuntimeError(f"无法打开视频源：{self.source}")
-                # 预热，丢掉起始不完整帧
+                    raise RuntimeError(f"Can't open video source: {self.source}")
                 deadline = time.time() + 5.0
                 ok_cnt = 0
                 while time.time() < deadline and ok_cnt < 10:
@@ -272,15 +271,14 @@ class GlobalVideoSource:
             if not ok or frame is None:
                 time.sleep(0.01)
                 continue
-            # 过滤明显坏帧
             m = float(frame.mean()); v = float(frame.var())
             h, w = frame.shape[:2]
-            if h < 32 or w < 32:      # 尺寸异常
+            if h < 32 or w < 32:
                 continue
-            if m < 1.0 or v < 5.0:    # 黑帧/坏帧
+            if m < 1.0 or v < 5.0:
                 continue
             return frame
-        raise RuntimeError("读取视频帧超时/有效帧未到达")
+        raise RuntimeError("Reading video frame timeout/valid frame not arrived")
     
     @staticmethod
     def grab_one_frame_once(source: Any, warmup_frames: int = 8, open_timeout_sec: float = 8.0) -> np.ndarray:
@@ -294,14 +292,12 @@ class GlobalVideoSource:
 
         t0 = time.time()
 
-        # 等待流真正打开（有的环境 isOpened 也可能 True 但实际没帧）
         while time.time() - t0 < open_timeout_sec:
             ok, _ = cap.read()
             if ok:
                 break
             time.sleep(0.05)
 
-        # 预热：丢掉起始不稳定帧（PPS/SPS）
         got = 0
         for _ in range(warmup_frames):
             ok, _ = cap.read()
@@ -313,7 +309,7 @@ class GlobalVideoSource:
         ok, frame = cap.read()
         cap.release()
         if not ok or frame is None:
-            raise RuntimeError("grab_one_frame_once: 无法读取有效帧")
+            raise RuntimeError("Unable to read valid frame")
         return frame
 
 
@@ -324,17 +320,15 @@ class GlobalVideoSource:
                 self.cap = None
                 self.ready = False
 
-# 全局视频对象（只读一次流，供本文件调用）
-VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 
 # ================== YOLO 感知 ==================
-# ================== YOLO 感知（关键：只接受 np.ndarray） ==================
 class YOLOPerceiver:
     def __init__(self,
                  weights: str = YOLO_WEIGHTS,
                  conf: float = YOLO_CONF,
                  iou: float = YOLO_IOU,
                  device: Optional[str] = YOLO_DEVICE):
+        
         self.model = YOLO(weights)
         self.conf = conf
         self.iou = iou
@@ -343,15 +337,18 @@ class YOLOPerceiver:
     def detect_photo(self, img_path: str) -> Tuple[np.ndarray, Dict]:
         frame = cv2.imread(img_path)
         if frame is None:
-            raise RuntimeError(f"❌ 无法读取图像：{img_path}")
+            raise RuntimeError(f"Unable to read image: {img_path}")
 
         res = self.model.predict(
             source=frame, conf=self.conf, iou=self.iou, device=self.device, verbose=False
         )[0]
+
         annotated = res.plot()
+
         h, w = res.orig_shape
         detections: List[Dict] = []
         names = res.names
+
         for b in getattr(res, "boxes", []):
             x1, y1, x2, y2 = b.xyxy[0].tolist()
             conf = float(b.conf[0])
@@ -366,10 +363,7 @@ class YOLOPerceiver:
                 "center_xy": [cx, cy]
             })
 
-        return annotated, {
-            "image": {"width": int(w), "height": int(h)},
-            "detections": detections
-        }
+        return annotated, {"image": {"width": int(w), "height": int(h)},"detections": detections}
 
 
 
@@ -466,10 +460,11 @@ class PerceptionAwareLLM:
         return resp.choices[0].message.content.strip()
 
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
+VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
-                       source: Any = DEFAULT_SOURCE,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
+    
     store = HistoryStore(MEMORY_PATH)
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
@@ -482,7 +477,6 @@ def perceive_and_parse(user_instruction: str,
     try:
         perceiver = YOLOPerceiver()
 
-        # ✅ 使用 rpicam-still 拍照
         ts = time.strftime("%Y%m%d-%H%M%S")
         img_path = f"/tmp/yolo_parser_frame_{ts}.jpg"
         subprocess.run([
@@ -491,7 +485,6 @@ def perceive_and_parse(user_instruction: str,
             "-o", img_path
         ], check=True)
 
-        # ✅ 用 yolo 检测照片
         annotated, det_json = perceiver.detect_photo(img_path)
 
         print(f"[DEBUG] det_count={len(det_json.get('detections', []))}, image={det_json.get('image')}")
@@ -530,7 +523,7 @@ def perceive_and_parse(user_instruction: str,
     try:
         parsed = json.loads(llm.extract_json(raw))
     except Exception:
-        parsed = {"raw": raw, "note": "LLM 输出非严格 JSON，已原样返回在 raw 字段中"}
+        parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
 
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
@@ -608,6 +601,6 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
 # ================== 示例 ==================
 if __name__ == "__main__":
-    instr = "ok robot 1 i want you follow me as i walk around"
-    out = perceive_and_parse(instr, source=DEFAULT_SOURCE, show_window=False, save_annotated=None)
+    instr = "I want robot1 to move forward for 3 seconds and then turn left 90 degrees."
+    out = perceive_and_parse(instr, show_window=False, save_annotated=None)
     print(json.dumps(out, indent=2, ensure_ascii=False))

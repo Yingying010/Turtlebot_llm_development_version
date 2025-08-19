@@ -14,6 +14,9 @@ from ttsRepo.stream_tts import tts_manager
 from loguru import logger
 from loguru import logger
 import traceback
+import argparse
+from pathlib import Path
+from llmParserRepo.gpt_yolo_localParser import HistoryStore
 
 running = False
 actived = 0
@@ -67,45 +70,72 @@ def _clean(text: str) -> str:
 
 # ✅ 启动入口
 if __name__ == "__main__":
-    if len(sys.argv)<2:
-        print("Usage: python3 main.py <robot_id>")
-        sys.exit(1)
+    import argparse
+    from pathlib import Path
 
-    robot_id = sys.argv[1]
-    config.set(robot_id=robot_id)
-    print(config.get("robot_id"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("robot_id", help="robot name")
+    parser.add_argument("master_id", help="master name")
+    parser.add_argument("--clear-memory", action="store_true",
+                        help="在程序结束后清空memory")
+    args = parser.parse_args()
 
-    startchat()
+    # 本地创建 HistoryStore（不放进 config）
+    memory_path = Path(f"./memory_{args.robot_id}.jsonl")
+    history = HistoryStore(memory_path)
 
-    while True:
+    # 仍然用 config 存“可序列化配置”
+    config.set(robot_id=args.robot_id)
+    config.set(master_id=args.master_id)
+
+    print(config.get("robot_id"))   # robot1
+    # print(config.get("history"))  # ❌ 不再从 config 取
+
+    try:
+        startchat()
+
         while True:
-            try:
-                raw_text = recognize(delay=3).strip()
-            except Exception as e:
-                logger.warning(f"🎙️ recognition failed: {e}")
-                tts_manager.say_sync("Sorry, could not hear you.")
-                continue
-        
-            wakeup_word = _clean(raw_text)
-            if not wakeup_word:
-                continue
+            # 唤醒词监听
+            while True:
+                try:
+                    raw_text = recognize(delay=3).strip()
+                except Exception as e:
+                    logger.warning(f"🎙️ recognition failed: {e}")
+                    tts_manager.say_sync("Sorry, could not hear you.")
+                    continue
+
+                wakeup_word = _clean(raw_text)
+                if not wakeup_word:
+                    continue
+                else:
+                    break
+
+            if "open robot system" in wakeup_word:
+                config.set(chat_or_instruct=False)
+                logger.info("🎮 Switched to CONTROL mode.")
+                tts_manager.say_sync("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
+            elif wakeup_word in {"i want to chat with you", "open chat system"}:
+                config.set(chat_or_instruct=True)
+                logger.info("💬 Switched to CHAT mode.")
+                tts_manager.say_sync("Sure, I'm now in chat mode.")
+            elif wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
+                tts_manager.say_sync("Goodbye!")
+                time.sleep(1)
+                # 建议用 sys.exit(0) 更优雅
+                import sys
+                sys.exit(0)
             else:
-                break
+                continue
 
-        if "open robot system" in wakeup_word:
-            config.set(chat_or_instruct=False)
-            logger.info("🎮 Switched to CONTROL mode.")
-            tts_manager.say_sync("Okay, I'm now in control mode. If you want to exit this mode, just say ending this mode.")
-        elif wakeup_word in {"i want to chat with you", "open chat system"}:
-            config.set(chat_or_instruct=True)
-            logger.info("💬 Switched to CHAT mode.")
-            tts_manager.say_sync("Sure, I'm now in chat mode.")
-        elif wakeup_word in {"ok bye", "okay bye", "ok byebye", "okay byebye","finish system"}:
-            tts_manager.say_sync("Goodbye!")
-            time.sleep(1)
-            os._exit(0)
-        else:
-            continue
+            # ✅ 把同一个 history 传进去（与你之前的函数签名一致）
+            run_conversation_loop(history)
 
-        run_conversation()
+    finally:
+        # ✅ 用本地变量清理
+        if args.clear_memory:
+            try:
+                history.clear()
+                logger.info("🧹 Memory cleared after program exit.")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to clear memory: {e}")
 
