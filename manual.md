@@ -13,5 +13,5 @@ export YOLO_SOURCE="udp://@:8888?fifo_size=1000000&overrun_nonfatal=1&buffer_siz
 
 rpicam-vid -t 0 --width 640 --height 480 --framerate 30 \
   --codec h264 --profile baseline --inline --intra 10 --bitrate 2000000 \
-  -o udp://<你的电脑IP>:8888
+  -o udp://192.168.0.172:8888
 

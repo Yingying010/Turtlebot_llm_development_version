@@ -40,6 +40,9 @@ MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
 MAX_TURNS = int(os.getenv("MAX_TURNS", "8"))
 PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
 
+ROBOT_ID = config.get("robot_id")
+MASTER_NAME = config.get("master_name")
+
 # ——统一输出提示词（在此基础上增加“可选历史输入”说明）——
 SYSTEM_PROMPT = dedent("""
 You are a specialized robot command interpreter that receives natural language input and converts it into a structured JSON object. 
@@ -79,18 +82,15 @@ Output JSON Schema
 ========================
 Perception report rules
 ========================
-- Base it ONLY on CURRENT_PERCEPTION. If IDs are not provided, assign per-class incremental IDs like "cup1","cup2"; if a class appears only once, using "cup" without a number is acceptable.
+- Base it ONLY on CURRENT_PERCEPTION. ...
 - Keep numeric values as valid JSON floats. Include at most 20 objects.
-- Spatial relation inference:
-  * Supported "supporting" classes: {"dining table","table","desk","shelf","counter","bench","floor"}.
-  * Supported "object-on-support" classes: {"bottle","cup","mug","plate","bowl","phone","book","laptop","remote"}.
-  * Infer "on" if an object-on-support has significant horizontal overlap with a supporting object and its bottom_y lies within the vertical extent of the supporting object.
-  * Infer "left_of" / "right_of" if the horizontal distance between centers ≥ 15% of the image width.
-  * Infer "near" if the distance between centers ≤ 25% of the image width and no stronger relation applies.
-  * Do not hallucinate relations; if conditions are not satisfied, omit them.
-- Natural-language response generation:
-  * If the user explicitly asks for a description of the scene, the "response" should summarize both the objects and any inferred relations (e.g., "The bottle is on the dining table").
-  * If no relations are inferred, fall back to a simpler count/position summary.
+- Spatial relations (tiny rules, no hallucination):
+  * Ignore objects with conf < 0.5. Let W,H be image width/height; for each object get (x1,y1,x2,y2,cx,cy,bottom_y,w,h).
+  * left_of / right_of: if cx_a + 0.10*W < cx_b → left_of; if cx_a - 0.10*W > cx_b → right_of.
+  * above / below: if cy_a + 0.10*H < cy_b → above; if cy_a - 0.10*H > cy_b → below.
+  * on: if bottom_y_a ∈ [y1_b - 0.10*H, y2_b] AND horizontal_overlap(a,b) ≥ 0.30*min(w_a, w_b).
+  * near: if distance(center_a, center_b) ≤ 0.25*sqrt(W^2 + H^2) and no stronger relation already chosen.
+  * Priority: on > above/below > left_of/right_of > near. Max 5 relations total.
 
 
 ========================
@@ -421,8 +421,15 @@ class PerceptionAwareLLM:
               perception_context: str,
               chat_history_messages: List[Dict[str, str]],
               perception_history_text: Optional[str]) -> str:
+        
+        post_identity = dedent("""
+        Context variables:
+        Let me first define your identity. You are a highly intelligent indoor robot, and your name is robot1, and your master's name is Lucy. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
+        """).strip()
+        
         messages: List[Dict[str, str]] = [
-            {"role": "system", "content": SYSTEM_PROMPT}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": post_identity}
         ]
         if perception_history_text:
             messages.append({"role": "system", "content": perception_history_text})
@@ -521,7 +528,7 @@ def normalize_for_scheduler(cmd: dict) -> dict:
             return inner
     return {"robots": {}}
 
-def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
+def run_conversation_loop() -> Optional[Dict[str, Any]]:
     logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
     while True:
         while True:
@@ -548,8 +555,8 @@ def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
         logger.info(f"🗣️ You said: {user_input}")
 
         try:
-            pre_settings = f"Your are a robot and your name is {robot_id}."
-            out = perceive_and_parse(pre_settings + user_input, source=DEFAULT_SOURCE,
+
+            out = perceive_and_parse(user_input, source=DEFAULT_SOURCE,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
@@ -577,6 +584,6 @@ def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
 
 # ================== 示例 ==================
 if __name__ == "__main__":
-    instr = "can you describe the scene?"
+    instr = "ok robot 1 i want you follow me as i walk around"
     out = perceive_and_parse(instr, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
     print(json.dumps(out, indent=2, ensure_ascii=False))

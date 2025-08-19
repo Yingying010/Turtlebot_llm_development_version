@@ -7,6 +7,7 @@ from loguru import logger
 params = {
     "robot_id":"robot1",
     "robot_id2":"robot2",
+    "master_name": "Lucy",
     "isConversation": True,
     # 运行状态锁
     "notify_enable": False,

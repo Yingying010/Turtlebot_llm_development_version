@@ -5,7 +5,7 @@ sys.path.append(PROJECT_ROOT)
 from config import config
 from WhisperRepo.whisper_recognizer import conversation_active, recognize
 # from llmParserRepo.qwen3_parser import run_conversation_loop
-from llmParserRepo.gpt_yolo_parse import run_conversation_loop
+from llmParserRepo.gpt_yolo_parser import run_conversation_loop
 # import TinyLlama_Chat
 import time
 import re
@@ -18,7 +18,7 @@ running = False
 actived = 0
 allow_running = True
 
-def run_conversation(robot_id):
+def run_conversation():
     logger.info("🎤 Recording...")
     tts_manager.say_sync("I'm listening.")
 
@@ -29,7 +29,7 @@ def run_conversation(robot_id):
             # response = TinyLlama_Chat.run()
             response = None
         else:
-            response = run_conversation_loop(robot_id)
+            response = run_conversation_loop()
 
     except Exception:
         logger.error(f"🧠 LLM error: \n{traceback.format_exc()}")
@@ -106,5 +106,5 @@ if __name__ == "__main__":
         else:
             continue
 
-        run_conversation(robot_id)
+        run_conversation()
 
