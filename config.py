@@ -33,7 +33,6 @@ class ConfigManager:
                 changed_params[key] = value
             self.params[key] = value
         if changed_params:
-            self.write_to_file(changed_params)
             logger.info(f'✅ Changed_params: {changed_params}')
 
     def get(self, key):

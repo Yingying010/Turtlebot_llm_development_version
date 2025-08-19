@@ -15,3 +15,5 @@ rpicam-vid -t 0 --width 640 --height 480 --framerate 30 \
   --codec h264 --profile baseline --inline --intra 10 --bitrate 2000000 \
   -o udp://192.168.0.172:8888
 
+python3 ai_assistant.py robot1 lucy --clear-memory
+
