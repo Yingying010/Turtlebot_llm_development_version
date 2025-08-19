@@ -24,28 +24,20 @@ semantic_locations = {
 class ConfigManager:
     def __init__(self, params):
         self.params = params
+        self.tracked_params = {"robot_id", "master_id", "chat_or_instruct", "isConversation"}
 
     def set(self, **kwargs):
-        """更新参数值"""
         changed_params = {}
         for key, value in kwargs.items():
-            if key in self.params:
-                if (key in self.tracked_params) and self.params[key] != value:
-                    changed_params[key] = value
-                self.params[key] = value
-            elif key in self.device_params:
-                if key in self.tracked_params and self.device_params[key] != value:
-                    changed_params[key] = value
-                self.device_params[key] = value
-            else:
-                logger.warning(f"⚠️ Unknown config key: {key}")
+            if key in self.tracked_params and self.params.get(key) != value:
+                changed_params[key] = value
+            self.params[key] = value
         if changed_params:
             self.write_to_file(changed_params)
             logger.info(f'✅ Changed_params: {changed_params}')
 
     def get(self, key):
-        """获取参数值"""
-        return self.params.get(key) if key in self.params else self.device_params.get(key, None)
+        return self.params.get(key)
 
 
 # 单例配置对象
