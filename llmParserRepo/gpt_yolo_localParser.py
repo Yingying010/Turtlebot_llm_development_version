@@ -462,7 +462,7 @@ class PerceptionAwareLLM:
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
-                       history,
+                       history: None,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
     
@@ -574,7 +574,7 @@ def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
 
         out = {}
         try:
-            out = perceive_and_parse(user_input, history, source=DEFAULT_SOURCE,
+            out = perceive_and_parse(user_input, history = history,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))

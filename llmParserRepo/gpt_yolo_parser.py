@@ -444,12 +444,12 @@ class PerceptionAwareLLM:
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
-                       history,
+                       history: None,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
     
     store = history or HistoryStore(MEMORY_PATH)
-    
+
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
 
@@ -552,7 +552,7 @@ def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
 
         try:
 
-            out = perceive_and_parse(user_input, history, source=DEFAULT_SOURCE,
+            out = perceive_and_parse(user_input, history = history,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
@@ -581,5 +581,5 @@ def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
 # ================== 示例 ==================
 if __name__ == "__main__":
     instr = "I want robot1 to move forward for 3 seconds and then turn left 90 degrees"
-    out = perceive_and_parse(instr, history, show_window=True, save_annotated=None)
+    out = perceive_and_parse(instr, show_window=True, save_annotated=None)
     print(json.dumps(out, indent=2, ensure_ascii=False))
