@@ -15,7 +15,8 @@ IMG_PATH     = "/tmp/frame.jpg"
 def capture_frame():
     print("📸 Running rpicam-still to capture image...")
     try:
-        subprocess.run(["rpicam-still", "-t", "1000", "-o", IMG_PATH], check=True)
+        subprocess.run(["rpicam-still", "-t", "1000", "--width", "1640", "--height", "1232", "-o", IMG_PATH], check=True)
+
         img = cv2.imread(IMG_PATH)
         if img is None:
             raise RuntimeError("无法读取图像")
