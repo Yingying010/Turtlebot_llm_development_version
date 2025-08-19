@@ -32,8 +32,8 @@ class ConfigManager:
             if key in self.tracked_params and self.params.get(key) != value:
                 changed_params[key] = value
             self.params[key] = value
-        if changed_params:
-            logger.info(f'✅ Changed_params: {changed_params}')
+        # if changed_params:
+        #     logger.info(f'✅ Changed_params: {changed_params}')
 
     def get(self, key):
         return self.params.get(key)
