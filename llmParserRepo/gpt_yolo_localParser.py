@@ -18,6 +18,7 @@ import numpy as np
 from ultralytics import YOLO
 import openai
 from loguru import logger
+import subprocess 
  
 from WhisperRepo.whisper_recognizer import recognize
 from ttsRepo.stream_tts import tts_manager
@@ -326,6 +327,7 @@ class GlobalVideoSource:
 # 全局视频对象（只读一次流，供本文件调用）
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 
+# ================== YOLO 感知 ==================
 # ================== YOLO 感知（关键：只接受 np.ndarray） ==================
 class YOLOPerceiver:
     def __init__(self,
@@ -338,29 +340,38 @@ class YOLOPerceiver:
         self.iou = iou
         self.device = device
 
-    def detect_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict]:
-        # FIX: 只传入 frame，不使用流/URL/生成器
+    def detect_photo(self, img_path: str) -> Tuple[np.ndarray, Dict]:
+        frame = cv2.imread(img_path)
+        if frame is None:
+            raise RuntimeError(f"❌ 无法读取图像：{img_path}")
+
         res = self.model.predict(
             source=frame, conf=self.conf, iou=self.iou, device=self.device, verbose=False
         )[0]
         annotated = res.plot()
         h, w = res.orig_shape
         detections: List[Dict] = []
-        names = res.names  # id -> class name
-        result_boxes = getattr(res, "boxes", None)
-        if result_boxes is not None and len(result_boxes) > 0:
-            for b in result_boxes:
-                x1, y1, x2, y2 = b.xyxy[0].tolist()
-                conf = float(b.conf[0]); cls_id = int(b.cls[0])
-                cx = (x1 + x2) / 2.0; cy = (y1 + y2) / 2.0
-                cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
-                detections.append({
-                    "class": cls_name.lower(),
-                    "conf": round(conf, 4),
-                    "bbox_xyxy": [float(x1), float(y1), float(x2), float(y2)],
-                    "center_xy": [float(cx), float(cy)]
-                })
-        return annotated, {"image": {"width": int(w), "height": int(h)}, "detections": detections}
+        names = res.names
+        for b in getattr(res, "boxes", []):
+            x1, y1, x2, y2 = b.xyxy[0].tolist()
+            conf = float(b.conf[0])
+            cls_id = int(b.cls[0])
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+            cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
+            detections.append({
+                "class": cls_name.lower(),
+                "conf": round(conf, 4),
+                "bbox_xyxy": [x1, y1, x2, y2],
+                "center_xy": [cx, cy]
+            })
+
+        return annotated, {
+            "image": {"width": int(w), "height": int(h)},
+            "detections": detections
+        }
+
+
 
 # ================== 感知上下文构造 ==================
 def _assign_ids(dets: List[Dict], topk: int = 20):
@@ -471,23 +482,19 @@ def perceive_and_parse(user_instruction: str,
     try:
         perceiver = YOLOPerceiver()
 
-        # 选取对应的视频源：如果是默认源就复用全局，否则新建一个本地实例
-        vs = VIDEO if source == DEFAULT_SOURCE else GlobalVideoSource(source)
+        # ✅ 使用 rpicam-still 拍照
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        img_path = f"/tmp/yolo_parser_frame_{ts}.jpg"
+        subprocess.run([
+            "rpicam-still", "-t", "1000",
+            "--width", "1640", "--height", "1232",
+            "-o", img_path
+        ], check=True)
 
-        # 先尝试 GlobalVideoSource（持续流）
-        try:
-            frame = VIDEO.read(drop_n=3, timeout=5.0)  # 放宽参数
-        except Exception as e:
-            logger.warning(f"[VIDEO] GlobalVideoSource 读取失败，改用一次性直读兜底：{e}")
-            # 关键兜底：与最小可跑版本一致的直读方式
-            frame = GlobalVideoSource.grab_one_frame_once(source, warmup_frames=8, open_timeout_sec=8.0)
+        # ✅ 用 yolo 检测照片
+        annotated, det_json = perceiver.detect_photo(img_path)
 
-        # 跑 YOLO（与最小可跑保持一致：单帧推理）
-        annotated, det_json = perceiver.detect_frame(frame)
-
-        # 调试输出来确认到底检测到了没有
         print(f"[DEBUG] det_count={len(det_json.get('detections', []))}, image={det_json.get('image')}")
-        cv2.imwrite("/tmp/percep_raw.jpg", frame)
         cv2.imwrite("/tmp/percep_annotated.jpg", annotated)
 
         if show_window:
