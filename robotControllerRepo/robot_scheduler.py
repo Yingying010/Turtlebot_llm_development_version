@@ -146,6 +146,19 @@ def wait_for_sync_go(sync_group: int, timeout: float = 5.0):
         time.sleep(remain)
     print(f"🚦 GO LATCHED | sg={sync_group} | now={time.time():.3f}")
 
+def build_seq_owner_map(task_data: Dict[str, Any]) -> Dict[int, str]:
+    """
+    为每个全局唯一的 sequence 找到其归属机器人。
+    依赖你已有的 validate_local_plan()，保证 sequence 在全局唯一。
+    """
+    owner = {}
+    for robot, tasks in task_data.get("robots", {}).items():
+        for t in tasks:
+            s = t.get("sequence")
+            if s is not None:
+                owner[int(s)] = robot
+    return owner
+
 # =========================
 # 本地计划校验（仅用 task_data["robots"]）
 # =========================
@@ -308,11 +321,9 @@ def publish_state(robot: str, task_id, sequence, sync_group, status: str):
 # 订阅回调
 # =========================
 def status_callback(msg):
-
     try:
 
         data = json.loads(msg.data)
-
         kind = data.get("kind", "state")
  
         # 1) 接收 barrier：只打印，别入账
@@ -337,35 +348,24 @@ def status_callback(msg):
         if kind != "state":
             return
         
-
- 
         # 3) 入账对方/自己的 state（关键！）
-
         src_robot = data.get("robot")
-
         seq = data.get("sequence")
-
         sg = data.get("sync_group")
 
         if sg is not None:
-
             sg = int(sg)
 
         status = data.get("status")
  
         # （可选）调试输出
-
         print(f"📩 state | {src_robot} → {status} @ (seq={seq}, sg={sg}) tid={data.get('task_id')} ts={data.get('ts')}")
  
         # 入账 + 可能触发事件 + 触发 barrier 快照
-
         _apply_status_and_maybe_signal(src_robot, seq, sg, status)
  
     except Exception:
-
         print(f"⚠️ status_callback error: \n{traceback.format_exc()}")
-
- 
 
 
 # =========================
@@ -399,7 +399,9 @@ def stop_heartbeat():
 # =========================
 # 调度器主逻辑（按数组顺序遍历，遇到依赖插入屏障等待）
 # =========================
-def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], executor):
+def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
+                            executor, prev_stage: Dict[int, Optional[int]],
+                            seq_owner_map: Dict[int, str]):
     print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
 
     is_successful_overall = False
@@ -409,9 +411,6 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
     for t in tasks:
         if t.get("sequence") is not None and t.get("sync_group") is not None:
             raise ValueError(f"Task cannot have both sequence and sync_group: {t}")
-
-    # 构建全局阶段的前驱关系
-    prev_stage = build_prev_stage_map(task_data)
 
     try:
         for task in tasks:
@@ -427,10 +426,16 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any], ex
                 # 有前驱阶段则等待 (prev_seq, None, "finished")
                 p = prev_stage.get(seq)
                 if p is not None:
-                    tts_manager.say_sync(f"i'm waiting for the other robots to finish")
-                    wait_for_all_status((p, None), "finished")
-                    print(f"[{robot_name}] ⏩ Stage {p} finished → start Stage {seq}")
-                    tts_manager.say_sync(f"sequence {p} is finished, i'm going to start the mission")
+                    # 只有“上一个阶段的 owner 不是自己”时，才需要等待 + TTS
+                    prev_owner = seq_owner_map.get(int(p))
+                    if prev_owner is not None and prev_owner != robot_name:
+                        tts_manager.say_sync("i'm waiting for the other robots to finish")
+                        wait_for_all_status((p, None), "finished")
+                        print(f"[{robot_name}] ⏩ Stage {p} finished by {prev_owner} → start Stage {seq}")
+                        tts_manager.say_sync(f"sequence {p} is finished, i'm going to start the mission")
+                    else:
+                        # 上一个阶段是自己（或不存在 owner），无需等待与播报
+                        print(f"[{robot_name}] previous stage {p} is mine → proceed without waiting")
 
                 # 本阶段执行
                 publish_state(robot_name, tid, seq, None, "running")
@@ -561,7 +566,9 @@ def run(task_data: Dict[str, Any]):
 
     try:
         ensure_task_ids(task_data)
-        is_successful = run_scheduler_for_robot(ros_node, robot_id, task_data, executor)
+        prev_stage = build_prev_stage_map(task_data)
+        seq_owner_map = build_seq_owner_map(task_data)
+        is_successful = run_scheduler_for_robot(ros_node, robot_id, task_data, executor, prev_stage, seq_owner_map)
         return is_successful
     except Exception:
         logger.exception(f"⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")

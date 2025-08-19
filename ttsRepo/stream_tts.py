@@ -141,7 +141,7 @@ class TTSManager:
         try:
             for part in chunks:
                 if handle._is_canceled():
-                    logger.info("🔇 TTS canceled before synthesis.")
+                    # logger.info("🔇 TTS canceled before synthesis.")
                     break
 
                 wav_path = None
@@ -164,7 +164,7 @@ class TTSManager:
                         break
 
                     if handle._is_canceled():
-                        logger.info("🔇 TTS canceled after synthesis, before playback.")
+                        # logger.info("🔇 TTS canceled after synthesis, before playback.")
                         break
 
                     # 2) 播放（阻塞到结束）
@@ -173,7 +173,7 @@ class TTSManager:
                         break
 
                     play_cmd = [self._player, wav_path]
-                    logger.info(f"🔊 Speaking ({self.voice}, {self.speed}/{self.pitch}): {part}")
+                    logger.info(f"🔊 {part}")
                     with self._lock:
                         # 双重检查取消/竞争
                         if handle._is_canceled():
@@ -192,7 +192,7 @@ class TTSManager:
                             pass
 
                 if handle._is_canceled():
-                    logger.info("🔇 TTS canceled during playback.")
+                    # logger.info("🔇 TTS canceled during playback.")
                     break
 
         except Exception as e:
