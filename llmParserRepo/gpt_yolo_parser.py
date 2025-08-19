@@ -444,11 +444,10 @@ class PerceptionAwareLLM:
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
-                       history: None,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
     
-    store = history or HistoryStore(MEMORY_PATH)
+    store = HistoryStore(MEMORY_PATH)
 
     chat_hist = store.recent_chat_messages(MAX_TURNS)
     perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
@@ -524,8 +523,7 @@ def normalize_for_scheduler(cmd: dict) -> dict:
             return inner
     return {"robots": {}}
 
-def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
-    logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
+def run_conversation_loop() -> Optional[Dict[str, Any]]:
     while True:
         while True:
             try:
@@ -545,14 +543,14 @@ def run_conversation_loop(history) -> Optional[Dict[str, Any]]:
                          "i want to change the chat mode", "ending of this mode", "ok finish", "ending this mode"]
 
         if any(kw in user_input.lower() for kw in exit_keywords):
-            tts_manager.say_sync("Exiting voice control.")
-            break
+            tts_manager.say_sync("Exiting this system")
+            exit(0)
 
         logger.info(f"🗣️ You said: {user_input}")
 
         try:
 
-            out = perceive_and_parse(user_input, history = history,
+            out = perceive_and_parse(user_input,
                                      show_window=True, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))

@@ -9,7 +9,6 @@ params = {
     "robot_id2":"robot2",
     "master_id": "lucy",
     "isConversation": True,
-    "chat_or_instruct": True,  # 默认聊天模式
 }
 
 semantic_locations = {

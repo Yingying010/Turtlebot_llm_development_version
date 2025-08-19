@@ -21,6 +21,7 @@ SILENCE_THRESHOLD = 20.0
 SILENCE_DURATION  = 1.5
 MAX_DURATION      = 30
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
+MODEL_PATH = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
 
 # === 清理文本 ===
 def _clean(text: str) -> str:
@@ -104,7 +105,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
 # === 调用 whisper-cli 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
-    model_path = os.path.expanduser("~/whisper.cpp/models/ggml-tiny.en.bin")
+    model_path = MODEL_PATH
     cli_path   = os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")
     cmd = [cli_path, "-m", model_path, "-f", wav_path]
 
