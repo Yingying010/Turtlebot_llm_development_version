@@ -169,7 +169,9 @@ class GlobalVideoSource:
 
         backend = backend_for_source(source)
         log(f"[一次性] 打开视频源：{source}  后端={backend_name(backend)}")
+        print("[INFO] Opening GStreamer video source...")
         cap = cv2.VideoCapture(source, backend)
+        print("[INFO] GStreamer source opened:", cap.isOpened())
 
         t0 = time.time()
         attempts = 0
@@ -180,7 +182,7 @@ class GlobalVideoSource:
                 break
             time.sleep(0.05)
         log(f"[一次性] 打开尝试次数：{attempts}")
-
+        print("[INFO] 开始预热视频流...")
         got = 0
         for i in range(warmup_frames):
             ok, _ = cap.read()
@@ -237,7 +239,7 @@ def main():
     # 抓一帧（先一次性直读，失败再持久句柄）
     try:
         print(f"[14:39:23] [一次性] 打开视频源：{source} 后端={backend_for_source(source)}")
-        frame = GlobalVideoSource.grab_one_frame_once(source, warmup_frames=15, open_timeout_sec=12.0)
+        frame = GlobalVideoSource.grab_one_frame_once(source, warmup_frames=15, open_timeout_sec=20.0)
     except Exception as e1:
         log(f"[一次性] 读取失败：{e1}  → 尝试持久句柄")
         try:
