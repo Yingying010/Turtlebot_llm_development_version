@@ -161,4 +161,357 @@ According to the above rules, the following instructions are parsed:
 """).strip()
 
 
- 
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+def _clean(text: str) -> str:
+    return re.sub(r'[^\w\s]', '', text).lower().strip()
+
+# ================== 历史存储 ==================
+class HistoryStore:
+    def __init__(self, path: Path):
+        self.path = path
+        self.events: List[Dict] = []
+        if self.path.exists():
+            with self.path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        self.events.append(obj)
+                    except Exception:
+                        pass
+
+    def append(self, etype: str, content):
+        obj = {"type": etype, "content": content, "time": _now_iso()}
+        self.events.append(obj)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+    def recent_chat_messages(self, max_turns: int) -> List[Dict[str, str]]:
+        msgs: List[Dict[str, str]] = []
+        for e in self.events:
+            if e.get("type") == "user":
+                msgs.append({"role": "user", "content": e.get("content", "")})
+            elif e.get("type") == "assistant":
+                msgs.append({"role": "assistant", "content": e.get("content", "")})
+        return msgs[-max_turns*2:] if max_turns > 0 else []
+
+    def recent_perception_summaries(self, depth: int) -> List[Dict]:
+        snaps = [e["content"] for e in self.events if e.get("type") == "perception"]
+        return snaps[-depth:] if depth > 0 else []
+
+# ================== OpenCV 统一视频源（关键修正） ==================
+class GlobalVideoSource:
+    def __init__(self, source: Any):
+        self.source = source
+        self.backend = cv2.CAP_FFMPEG if isinstance(source, str) else 0
+        self.cap = None
+        self.lock = threading.Lock()
+        self.ready = False
+
+    def open(self):
+        with self.lock:
+            if self.cap is None:
+                self.cap = cv2.VideoCapture(self.source, self.backend)
+                try:
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
+                if not self.cap.isOpened():
+                    raise RuntimeError(f"无法打开视频源：{self.source}")
+                # 预热，丢掉起始不完整帧
+                deadline = time.time() + 5.0
+                ok_cnt = 0
+                while time.time() < deadline and ok_cnt < 10:
+                    ok, _ = self.cap.read()
+                    if ok:
+                        ok_cnt += 1
+                    else:
+                        time.sleep(0.03)
+                self.ready = ok_cnt > 0
+
+    def read(self, drop_n=5, timeout=2.0):
+        if self.cap is None or not self.ready:
+            self.open()
+        for _ in range(max(0, drop_n)):
+            self.cap.read()
+
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            ok, frame = self.cap.read()
+            if not ok or frame is None:
+                time.sleep(0.01)
+                continue
+            # 过滤明显坏帧
+            m = float(frame.mean()); v = float(frame.var())
+            h, w = frame.shape[:2]
+            if h < 32 or w < 32:      # 尺寸异常
+                continue
+            if m < 1.0 or v < 5.0:    # 黑帧/坏帧
+                continue
+            return frame
+        raise RuntimeError("读取视频帧超时/有效帧未到达")
+
+    def release(self):
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+                self.ready = False
+
+# 全局视频对象（只读一次流，供本文件调用）
+VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
+
+# ================== YOLO 感知（关键：只接受 np.ndarray） ==================
+class YOLOPerceiver:
+    def __init__(self,
+                 weights: str = YOLO_WEIGHTS,
+                 conf: float = YOLO_CONF,
+                 iou: float = YOLO_IOU,
+                 device: Optional[str] = YOLO_DEVICE):
+        self.model = YOLO(weights)
+        self.conf = conf
+        self.iou = iou
+        self.device = device
+
+    def detect_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict]:
+        # FIX: 只传入 frame，不使用流/URL/生成器
+        res = self.model.predict(
+            source=frame, conf=self.conf, iou=self.iou, device=self.device, verbose=False
+        )[0]
+        annotated = res.plot()
+        h, w = res.orig_shape
+        detections: List[Dict] = []
+        names = res.names  # id -> class name
+        result_boxes = getattr(res, "boxes", None)
+        if result_boxes is not None and len(result_boxes) > 0:
+            for b in result_boxes:
+                x1, y1, x2, y2 = b.xyxy[0].tolist()
+                conf = float(b.conf[0]); cls_id = int(b.cls[0])
+                cx = (x1 + x2) / 2.0; cy = (y1 + y2) / 2.0
+                cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
+                detections.append({
+                    "class": cls_name.lower(),
+                    "conf": round(conf, 4),
+                    "bbox_xyxy": [float(x1), float(y1), float(x2), float(y2)],
+                    "center_xy": [float(cx), float(cy)]
+                })
+        return annotated, {"image": {"width": int(w), "height": int(h)}, "detections": detections}
+
+# ================== 感知上下文构造 ==================
+def _assign_ids(dets: List[Dict], topk: int = 20):
+    dets = dets[:topk]
+    totals = Counter(d["class"] for d in dets)
+    seen   = Counter()
+    objs = []
+    for d in dets:
+        cls = d["class"]
+        seen[cls] += 1
+        oid = cls if totals[cls] == 1 else f"{cls}{seen[cls]}"
+        objs.append((oid, cls, d))
+    return objs
+
+def build_perception_context(det_json: Dict, topk: int = 20) -> str:
+    assigned = _assign_ids(det_json.get("detections", []), topk)
+    objs = [{
+        "id": oid,
+        "class": cls,
+        "center_xy": [round(float(d["center_xy"][0]), 1), round(float(d["center_xy"][1]), 1)],
+        "bbox_xyxy": [round(float(v), 1) for v in d["bbox_xyxy"]],
+        "conf": d["conf"],
+    } for (oid, cls, d) in assigned]
+    ctx = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "objects": objs}
+    return "CURRENT_PERCEPTION:\n" + json.dumps(ctx, ensure_ascii=False)
+
+def build_perception_summary(det_json: Dict, topk: int = 20) -> Dict:
+    assigned = _assign_ids(det_json.get("detections", []), topk)
+    objs = [{
+        "id": oid,
+        "class": cls,
+        "center_xy": [float(d["center_xy"][0]), float(d["center_xy"][1])],
+        "bbox_xyxy": [float(v) for v in d["bbox_xyxy"]],
+        "conf": float(d["conf"]),
+    } for (oid, cls, d) in assigned]
+    summary: Dict[str, int] = {}
+    for _, cls, _ in assigned:
+        summary[cls] = summary.get(cls, 0) + 1
+    return {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "summary": summary, "objects": objs}
+
+def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
+    if not summaries:
+        return None
+    return "PERCEPTION_HISTORY:\n" + json.dumps(summaries, ensure_ascii=False)
+
+# ================== LLM 解析 ==================
+class PerceptionAwareLLM:
+    def __init__(self, model: str = DEFAULT_MODEL):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY no settings")
+        self.client = openai.OpenAI(api_key=api_key)
+        self.model = model
+
+    @staticmethod
+    def extract_json(text: str) -> str:
+        t = text.strip()
+        if t.startswith("```"):
+            lines = t.splitlines()
+            if lines and lines[0].startswith("```"): lines = lines[1:]
+            if lines and lines[-1].startswith("```"): lines = lines[:-1]
+            t = "\n".join(lines).strip()
+        return t
+
+    def parse(self,
+              user_text: str,
+              perception_context: str,
+              chat_history_messages: List[Dict[str, str]],
+              perception_history_text: Optional[str]) -> str:
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
+        if perception_history_text:
+            messages.append({"role": "system", "content": perception_history_text})
+        messages.append({"role": "system", "content": perception_context})
+        messages.extend(chat_history_messages[-MAX_TURNS*2:])
+        messages.append({"role": "user", "content": user_text})
+
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=512
+        )
+        return resp.choices[0].message.content.strip()
+
+# ================== 一次性：感知 + 解析 + 历史写入 ==================
+def perceive_and_parse(user_instruction: str,
+                       source: Any = DEFAULT_SOURCE,
+                       show_window: bool = False,
+                       save_annotated: Optional[str] = None) -> Dict:
+    store = HistoryStore(MEMORY_PATH)
+    chat_hist = store.recent_chat_messages(MAX_TURNS)
+    perception_hist_summaries = store.recent_perception_summaries(PERCEPTION_HISTORY_DEPTH)
+
+    det_json = {"detections": [], "image": {}}
+    perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
+        {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False
+    )
+
+    try:
+        perceiver = YOLOPerceiver()
+        # FIX: 使用 OpenCV 持续读帧 → 单帧推理（与最小可跑版本一致）
+        frame = VIDEO.read(drop_n=5, timeout=2.0)
+        annotated, det_json = perceiver.detect_frame(frame)
+
+        if show_window:
+            cv2.imshow("Perception", annotated)
+            cv2.waitKey(800)
+            cv2.destroyAllWindows()
+        if save_annotated:
+            cv2.imwrite(save_annotated, annotated)
+
+        perception_ctx = build_perception_context(det_json)
+
+    except Exception as e:
+        logger.warning(f"⚠️ Camera or YOLO unavailable: {e}")
+        det_json = {"detections": [], "image": {}}
+        perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
+            {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False
+        )
+
+    perception_hist_text = build_perception_history_text(perception_hist_summaries)
+
+    llm = PerceptionAwareLLM()
+    raw = llm.parse(
+        user_text=user_instruction,
+        perception_context=perception_ctx,
+        chat_history_messages=chat_hist,
+        perception_history_text=perception_hist_text
+    )
+
+    try:
+        parsed = json.loads(llm.extract_json(raw))
+    except Exception:
+        parsed = {"raw": raw, "note": "LLM 输出非严格 JSON，已原样返回在 raw 字段中"}
+
+    store.append("perception", build_perception_summary(det_json))
+    store.append("user", user_instruction)
+    store.append("assistant", json.dumps(parsed, ensure_ascii=False))
+
+    return {"command": parsed}
+
+def normalize_for_scheduler(cmd: dict) -> dict:
+    if not isinstance(cmd, dict):
+        return {"robots": {}}
+    if "robots" in cmd and isinstance(cmd["robots"], dict):
+        return cmd
+    if all(isinstance(v, list) for v in cmd.values()):
+        return {"robots": cmd}
+    if "command" in cmd and isinstance(cmd["command"], dict):
+        inner = cmd["command"]
+        if "robots" in inner and isinstance(inner["robots"], dict):
+            return inner
+    return {"robots": {}}
+
+def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
+    logger.info(f"💡 Mode: {'Chat' if config.get('chat_or_instruct') else 'Control'}")
+    while True:
+        while True:
+            try:
+                raw_text = recognize(delay=3).strip()
+            except Exception as e:
+                logger.warning(f"🎙️ recognition failed: {e}")
+                tts_manager.say_sync("Sorry, could not hear you.")
+                continue
+
+            user_input = _clean(raw_text)
+            if not user_input or user_input == "blank_audio":
+                continue
+            else:
+                break
+
+        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up",
+                         "i want to change the chat mode", "ending of this mode", "ok finish", "ending this mode"]
+
+        if any(kw in user_input.lower() for kw in exit_keywords):
+            tts_manager.say_sync("Exiting voice control.")
+            break
+
+        logger.info(f"🗣️ You said: {user_input}")
+
+        try:
+            pre_settings = f"Your are a robot and your name is {robot_id}."
+            out = perceive_and_parse(pre_settings + user_input, source=DEFAULT_SOURCE,
+                                     show_window=True, save_annotated=None)
+
+            print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
+
+            if out:
+                resp = out.get("command", {}).get("response")
+                print(resp or "i can't give you any response")
+                tts_manager.say_sync(resp)
+            else:
+                tts_manager.say_sync("Could not understand the command.")
+
+        except Exception:
+            logger.warning(f"⚠️ Error during LLM or parsing: \n{traceback.format_exc()}")
+            tts_manager.say_sync("Something went wrong.")
+
+        execution_payload = normalize_for_scheduler(out.get("command", {}))
+        if execution_payload["robots"]:
+            isSchedule = robot_scheduler.run(execution_payload)
+            if isSchedule is True:
+                logger.info("✅ Command(s) executed successfully.")
+                tts_manager.say_sync("Command executed.")
+            else:
+                logger.warning("⚠️ Failed")
+                tts_manager.say_sync("Command execution failed, please re-give the command.")
+
+# ================== 示例 ==================
+if __name__ == "__main__":
+    instr = "firstly car 1 and Robot 2 start simultaneously: car 1 navigates to x is 1, y is 2 and robot 2 turns right 90 degrees secondly car 1 waits for 5 seconds"
+    out = perceive_and_parse(instr, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
