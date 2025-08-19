@@ -76,6 +76,9 @@ Output JSON Schema
 Perception report rules:
 - Base it ONLY on CURRENT_PERCEPTION. If IDs are not provided, assign per-class incremental IDs like "cup1","cup2"; if a class appears only once, using "cup" without a number is acceptable.
 - Keep numeric values as valid JSON floats. Include at most 20 objects.
+- If the user explicitly requests a scene description (e.g., "describe the scene", "what's in front of me"), 
+  then in the "response" field, generate a short natural-language summary of the perception. 
+  The description should include object categories, counts, and rough relative positions (e.g., front, left, right, near, far).
 
 
 A task_object has the following structure:
@@ -560,6 +563,6 @@ def run_conversation_loop(robot_id) -> Optional[Dict[str, Any]]:
 
 # ================== 示例 ==================
 if __name__ == "__main__":
-    instr = "firstly car 1 and Robot 2 start simultaneously: car 1 navigates to x is 1, y is 2 and robot 2 turns right 90 degrees secondly car 1 waits for 5 seconds"
+    instr = "can you describe the scene?"
     out = perceive_and_parse(instr, source=DEFAULT_SOURCE, show_window=True, save_annotated=None)
     print(json.dumps(out, indent=2, ensure_ascii=False))
