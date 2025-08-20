@@ -485,7 +485,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                 
                 # 领导者发布一个“未来时刻”的 GO；其他成员等待 GO
                 if robot_name == leader:
-                    publish_sync_go(sg, delay=1)  # 你也可以把 0.3 调成 0.1~0.5 之间
+                    publish_sync_go(sg, delay=0.3)  # 你也可以把 0.3 调成 0.1~0.5 之间
                 else:
                     print(f"⏳ waiting GO from leader={leader} @ sg={sg}")
                 
