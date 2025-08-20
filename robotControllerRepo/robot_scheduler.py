@@ -492,7 +492,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
 
                 # 发 GO 或等待 GO
                 if robot_name == leader:
-                    publish_sync_go(sg, delay=0.3)
+                    publish_sync_go(sg, delay=1)
                 else:
                     print(f"⏳ waiting GO from leader={leader} @ sg={sg}")
 
