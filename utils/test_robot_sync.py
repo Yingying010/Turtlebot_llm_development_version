@@ -1,89 +1,83 @@
-#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-import threading
 import json
+import sys
 import time
+import threading
+from collections import defaultdict
 
-class SyncTestNode(Node):
-    def __init__(self, robot_name):
-        super().__init__(f"sync_tester_{robot_name}")
-        self.robot_name = robot_name
+# === 状态缓存 ===
+status_cache = defaultdict(dict)  # (sg) -> {robot_name: status}
+target_counts = {}  # (sg) -> need count
+cache_lock = threading.Lock()
+
+class BarrierTester(Node):
+    def __init__(self, robot_name: str, sync_group: int):
+        super().__init__('barrier_tester_' + robot_name)
+        self.robot = robot_name
+        self.sg = sync_group
         self.pub = self.create_publisher(String, '/robot_status', 10)
         self.sub = self.create_subscription(String, '/robot_status', self.status_callback, 10)
-        self.status_cache = {}  # {robot_name: status}
-        self.event_ready = threading.Event()
-        self.sync_group = 0  # 固定使用 sg=0
-        self.has_started = False
+        self.timer = self.create_timer(1.0, self.publish_ready)
 
-        self.timer = self.create_timer(0.5, self.broadcast_ready_until_synced)
+        # 初始化目标计数（简单起见：认为是2台机器）
+        target_counts[self.sg] = 2
 
-    def broadcast_ready_until_synced(self):
-        self.publish_status("ready")
-        self.get_logger().info("📤 Re-sent 'ready'")
+        print(f"[INIT] Robot `{self.robot}` in sync_group={self.sg}, target=2")
 
-        if self.event_ready.is_set() and not self.has_started:
-            self.has_started = True
-            self.timer.cancel()
-            threading.Thread(target=self.wait_and_run, daemon=True).start()
-
+    def publish_ready(self):
+        msg = {
+            "kind": "state",
+            "robot": self.robot,
+            "status": "ready",
+            "sync_group": self.sg,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"[PUBLISH] {self.robot} → ready")
 
     def status_callback(self, msg):
         try:
             data = json.loads(msg.data)
             if data.get("kind") != "state":
                 return
+
             robot = data.get("robot")
-            status = data.get("status")
             sg = data.get("sync_group")
-            if sg != self.sync_group or robot == self.robot_name:
+            status = data.get("status")
+
+            if sg != self.sg:
                 return
-            self.status_cache[robot] = status
-            self.get_logger().info(f"📥 Got status: {robot} → {status}")
-            if status == "ready":
-                self.event_ready.set()
+
+            with cache_lock:
+                status_cache[sg][robot] = status
+                need = target_counts.get(sg, 0)
+                ready = sum(1 for s in status_cache[sg].values() if s == "ready")
+                remaining = max(need - ready, 0)
+
+            print(f"📊 sg={sg} → need={need}, ready={ready}, remaining={remaining}")
+
         except Exception as e:
-            self.get_logger().warn(f"Parse failed: {e}")
-
-    def wait_and_run(self):
-        self.get_logger().info("⏳ Waiting for other robot to be 'ready'...")
-        ok = self.event_ready.wait(timeout=20)
-        if not ok:
-            self.get_logger().warn("⚠️ Timeout waiting for other robot")
-        else:
-            self.get_logger().info("✅ Both robots are ready")
-
-        self.publish_status("running")
-        self.get_logger().info("🚀 Running task...")
-        time.sleep(1.0)
-        self.publish_status("finished")
-        self.get_logger().info("✅ Finished task.")
-
-    def publish_status(self, status):
-        msg = {
-            "kind": "state",
-            "robot": self.robot_name,
-            "sync_group": self.sync_group,
-            "status": status,
-            "ts": time.time()
-        }
-        out = String()
-        out.data = json.dumps(msg)
-        self.pub.publish(out)
+            print(f"[ERROR] {e}")
 
 def main():
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python3 test_robot_sync.py <robot_name>")
+    if len(sys.argv) < 3:
+        print("Usage: python3 test_barrier_minimal.py <robot_name> <sync_group>")
         return
 
     robot_name = sys.argv[1]
-    rclpy.init()
-    node = SyncTestNode(robot_name)
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    sync_group = int(sys.argv[2])
 
-if __name__ == "__main__":
+    rclpy.init()
+    node = BarrierTester(robot_name, sync_group)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("[EXIT] Shutting down")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
     main()
