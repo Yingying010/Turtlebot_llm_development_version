@@ -644,18 +644,18 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                         # 上一个阶段是自己（或不存在 owner），无需等待与播报
                         print(f"[{robot_name}] previous stage {p} is mine → proceed without waiting")
 
-            # 本阶段执行
-            publish_state(robot_name, tid, seq, None, "running")
-            ok = execute_action(node, executor, task)
-            is_successful_overall = ok or is_successful_overall
+                # 本阶段执行
+                publish_state(robot_name, tid, seq, None, "running")
+                ok = execute_action(node, executor, task)
+                is_successful_overall = ok or is_successful_overall
 
-            # 广播本阶段完成并启动 ACK 确认管理器
-            publish_state(robot_name, tid, seq, None, "finished")
-            seq_mgr = RobotSequenceManager(node, robot_name, seq)
-            ack_ok = seq_mgr.wait_for_acks()
-            if not ack_ok:
-                print(f"[{robot_name}] ⚠️ Timeout waiting for ACKs in sequence {seq}.")
-                continue
+                # 广播本阶段完成并启动 ACK 确认管理器
+                publish_state(robot_name, tid, seq, None, "finished")
+                seq_mgr = RobotSequenceManager(node, robot_name, seq)
+                ack_ok = seq_mgr.wait_for_acks()
+                if not ack_ok:
+                    print(f"[{robot_name}] ⚠️ Timeout waiting for ACKs in sequence {seq}.")
+                    continue
 
             # B) 跨机器人同步（只有 sync_group）
             if sg is not None and seq is None:
