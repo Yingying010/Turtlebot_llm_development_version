@@ -505,6 +505,103 @@ class RobotSyncManager:
         self.sync_complete_event.wait()
         return len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count
 
+# =========================
+# Sequential
+# =========================
+class RobotSequenceManager:
+    def __init__(self, node: Node, robot_name: str, sequence: int, timeout: float = 60.0):
+        self.node = node
+        self.robot_name = robot_name
+        self.sequence = sequence
+        self.timeout = timeout
+
+        self.finished_set: Set[str] = set()
+        self.ack_set: Set[str] = set()
+        self.prev_finished_set: Set[str] = set()
+
+        self.pub = node.create_publisher(String, '/robot_status', 10)
+        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, 10)
+
+        self.finished_timer = node.create_timer(1.0, self.publish_finished)
+        self.sync_start_time = time.time()
+        self.sync_timeout_timer = node.create_timer(0.5, self.check_timeout)
+
+        self.sync_complete_event = threading.Event()
+        print(f"{now()} | {robot_name} waiting for all ack_finished for seq={sequence}...")
+
+    def publish_finished(self):
+        msg = {
+            "kind": "finished",
+            "robot": self.robot_name,
+            "sequence": self.sequence,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | 📤 PUBLISH {self.robot_name} → finished (seq={self.sequence})")
+
+    def publish_ack(self, to_robot):
+        msg = {
+            "kind": "ack_finished",
+            "robot": self.robot_name,
+            "to": to_robot,
+            "sequence": self.sequence,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | {self.robot_name} send ack_finished to {to_robot} (seq={self.sequence})")
+
+    def status_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get("sequence") != self.sequence:
+                return
+            kind = data.get("kind")
+            robot = data.get("robot")
+
+            if kind == "finished":
+                if robot not in self.finished_set:
+                    self.finished_set.add(robot)
+                    self.publish_ack(robot)
+            elif kind == "ack_finished" and data.get("to") == self.robot_name:
+                if robot not in self.ack_set:
+                    self.ack_set.add(robot)
+
+            self.print_finished_set()
+            self.check_sync_complete()
+
+        except Exception as e:
+            self.node.get_logger().warn(f"Parse error: {e}")
+
+    def print_finished_set(self):
+        if self.finished_set != self.prev_finished_set:
+            print(f"{now()} | {self.robot_name} sees finished_set = {sorted(self.finished_set)}")
+            self.prev_finished_set = set(self.finished_set)
+
+    def check_sync_complete(self):
+        if len(self.finished_set) >= 1 and len(self.ack_set) >= 1:
+            if not self.sync_complete_event.is_set():
+                print(f"{now()} | ✅ Stage {self.sequence} confirmed done by all. {self.robot_name} can proceed.")
+                self.sync_complete_event.set()
+                self.finished_timer.cancel()
+                self.sync_timeout_timer.cancel()
+
+    def check_timeout(self):
+        if self.sync_complete_event.is_set():
+            return
+        elapsed = time.time() - self.sync_start_time
+        if elapsed > self.timeout:
+            print(f"{now()} | ⏱️ Timeout! {self.robot_name} did not receive all acks for seq={self.sequence}.")
+            self.node.get_logger().warn(f"Timeout waiting for ack_finished for seq={self.sequence}")
+            self.finished_timer.cancel()
+            self.sync_timeout_timer.cancel()
+            self.sync_complete_event.set()
+
+    def wait_for_acks(self):
+        self.sync_complete_event.wait()
+        return len(self.finished_set) >= 1 and len(self.ack_set) >= 1
+
+
+
 
 # =========================
 # 调度器主逻辑（按数组顺序遍历，遇到依赖插入屏障等待）
@@ -547,13 +644,17 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                         # 上一个阶段是自己（或不存在 owner），无需等待与播报
                         print(f"[{robot_name}] previous stage {p} is mine → proceed without waiting")
 
-                # 本阶段执行
-                publish_state(robot_name, tid, seq, None, "running")
-                ok = execute_action(node, executor, task)
-                is_successful_overall = ok or is_successful_overall
+            # 本阶段执行
+            publish_state(robot_name, tid, seq, None, "running")
+            ok = execute_action(node, executor, task)
+            is_successful_overall = ok or is_successful_overall
 
-                # 广播本阶段完成
-                publish_state(robot_name, tid, seq, None, "finished")
+            # 广播本阶段完成并启动 ACK 确认管理器
+            publish_state(robot_name, tid, seq, None, "finished")
+            seq_mgr = RobotSequenceManager(node, robot_name, seq)
+            ack_ok = seq_mgr.wait_for_acks()
+            if not ack_ok:
+                print(f"[{robot_name}] ⚠️ Timeout waiting for ACKs in sequence {seq}.")
                 continue
 
             # B) 跨机器人同步（只有 sync_group）
@@ -578,7 +679,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                 publish_state(robot_name, tid, None, sg, "finished")
                 print(f"sync_group={sg} | Task completed.")
                 continue
-            
+
             # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
             ok = execute_action(node, executor, task)
             is_successful_overall = ok or is_successful_overall
