@@ -61,7 +61,7 @@ if __name__ == "__main__":
     config.set(master_id=master_id)
 
     ROBOT_ID = config.get("robot_id")
-    MASTER_NAME = config.get("master_name")
+    MASTER_NAME = config.get("master_id")
 
     print(ROBOT_ID, MASTER_NAME)
 
