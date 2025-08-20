@@ -5,6 +5,11 @@ from std_msgs.msg import String
 import json, time, threading
 from typing import Dict
 
+import datetime
+
+def now():
+    return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
 class FullSyncNode(Node):
     def __init__(self, robot_name, sync_group, target_count):
         super().__init__(f"sync_task_{robot_name}")
@@ -53,7 +58,7 @@ class FullSyncNode(Node):
     def check_sync_status(self):
         ready_count = sum(1 for s in self.status_cache.values() if s == "ready")
         remaining = self.target_count - ready_count
-        print(f"📊 sg={self.sync_group} → need={self.target_count}, ready={ready_count}, remaining={remaining}")
+        print(f"sync_group_id={self.sync_group} [ need={self.target_count}, ready={ready_count}, remaining={remaining} ]")
 
         if ready_count >= self.target_count and not self.sync_event.is_set():
             self.sync_event.set()
@@ -62,11 +67,11 @@ class FullSyncNode(Node):
 
 
     def run_task(self):
-        print(f"🚦 All robots ready. {self.robot_name} starting task...")
+        print(f"{now()} | 🚀 All robots ready. {self.robot_name} starting task...")
         self.publish_status("running")
         time.sleep(3)  # 模拟执行耗时
         self.publish_status("finished")
-        print(f"✅ {self.robot_name} finished task.")
+        print(f"{now()} | ✅ {self.robot_name} finished task.")
 
 def main():
     import sys
