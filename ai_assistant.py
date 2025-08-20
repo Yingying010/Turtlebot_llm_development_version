@@ -5,8 +5,8 @@ sys.path.append(PROJECT_ROOT)
 from config import config
 from WhisperRepo.whisper_recognizer import conversation_active, recognize
 # from llmParserRepo.qwen3_parser import run_conversation_loop
-from llmParserRepo.gpt_yolo_parser import run_conversation_loop
-# from llmParserRepo.gpt_yolo_localParser import run_conversation_loop
+# from llmParserRepo.gpt_yolo_parser import run_conversation_loop
+from llmParserRepo.gpt_yolo_localParser import run_conversation_loop
 # import TinyLlama_Chat
 import time
 import re
