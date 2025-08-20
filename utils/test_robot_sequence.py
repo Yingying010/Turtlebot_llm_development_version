@@ -23,6 +23,7 @@ class RobotSequenceNode(Node):
         self.sub = self.create_subscription(String, '/robot_status', self.status_callback, 10)
 
         self.finished_ack: Dict[int, Set[str]] = {}
+        self.ack_ack_received: Dict[int, Set[str]] = {}
         self.waiting_ack_from: Dict[int, Set[str]] = {}
         self.running = True
 
@@ -42,54 +43,56 @@ class RobotSequenceNode(Node):
 
             # 执行当前任务
             print(f"{now()} | ✅ {self.robot_name} ➔ Stage {stage} ➔ running")
-            time.sleep(2)  # 模拟执行任务
+            time.sleep(2)  # 模拟任务
             print(f"{now()} | ✅ {self.robot_name} ➔ Stage {stage} ➔ finished")
 
-            # 广播完成，并等待所有下一个阶段的执行者确认 ack_finished
+            # 三次握手目标
             next_robots = {r for s, r in self.stage_owners.items() if s == stage + 1}
             self.waiting_ack_from[stage] = set(next_robots)
             self.finished_ack[stage] = set()
+            self.ack_ack_received[stage] = set()
 
+            # 广播完成
             self.broadcast_finished_until_ack(stage, next_robots)
+
+            # 等待 ack_ack_finished
+            self.wait_for_ack_ack(stage, next_robots)
+
             self.current_stage_idx += 1
 
         print(f"{now()} | 🚀 {self.robot_name} completed all assigned stages.")
         self.running = False
 
     def wait_for_stage(self, stage: int, from_robot: str):
-        # 等待某阶段完成
         done = threading.Event()
-
-        def check():
-            while not done.is_set():
-                time.sleep(0.1)
-
-        self.waiting_ack_from.setdefault(stage, set()).add(self.robot_name)
-        self.finished_ack.setdefault(stage, set())
-
         def watcher():
-            while self.robot_name not in self.finished_ack[stage]:
+            while self.robot_name not in self.finished_ack.get(stage, set()):
                 time.sleep(0.1)
             done.set()
-
         threading.Thread(target=watcher, daemon=True).start()
-        check()
+        done.wait()
+
+    def wait_for_ack_ack(self, stage: int, targets: Set[str]):
+        done = threading.Event()
+        def watcher():
+            while self.ack_ack_received.get(stage, set()) != targets:
+                time.sleep(0.1)
+            done.set()
+        threading.Thread(target=watcher, daemon=True).start()
+        done.wait()
 
     def broadcast_finished_until_ack(self, stage: int, target_robots: Set[str]):
         start_time = time.time()
-
         def loop():
             while self.running:
                 elapsed = time.time() - start_time
                 if elapsed > 60:
-                    print(f"{now()} | ⏱️ Timeout: {self.robot_name} stage {stage} ack not received in time. Exiting.")
+                    print(f"{now()} | ⏱️ Timeout: {self.robot_name} stage {stage} ack not received. Exiting.")
                     rclpy.shutdown()
                     return
-
-                pending = self.waiting_ack_from.get(stage, set()) - self.finished_ack.get(stage, set())
+                pending = self.waiting_ack_from[stage] - self.finished_ack[stage]
                 if not pending:
                     break
-
                 msg = {
                     "kind": "finished",
                     "robot": self.robot_name,
@@ -99,7 +102,6 @@ class RobotSequenceNode(Node):
                 self.pub.publish(String(data=json.dumps(msg)))
                 print(f"{now()} | {self.robot_name} broadcast stage {stage} ➔ finished to {pending}")
                 time.sleep(1.0)
-
         threading.Thread(target=loop, daemon=True).start()
 
     def status_callback(self, msg):
@@ -108,10 +110,11 @@ class RobotSequenceNode(Node):
             kind = data.get("kind")
             from_robot = data.get("robot")
             stage = data.get("stage")
+            to_robot = data.get("to")
 
             if kind == "finished":
                 if stage + 1 in self.stages and self.stage_owners.get(stage) == from_robot:
-                    # 对方完成了我依赖的阶段，回复 ack_finished
+                    # 对方完成了我依赖的阶段 → 回应 ack_finished
                     ack = {
                         "kind": "ack_finished",
                         "robot": self.robot_name,
@@ -121,12 +124,26 @@ class RobotSequenceNode(Node):
                     }
                     self.pub.publish(String(data=json.dumps(ack)))
                     print(f"{now()} | {self.robot_name} ✉️ send ack_finished to {from_robot} for stage {stage}")
-                    # 标记我已经知道他完成了
+                    # 标记自己知道他完成了
                     self.finished_ack.setdefault(stage, set()).add(self.robot_name)
 
-            elif kind == "ack_finished" and data.get("to") == self.robot_name:
+            elif kind == "ack_finished" and to_robot == self.robot_name:
+                # 收到别人的 ack → 发 ack_ack
                 self.finished_ack.setdefault(stage, set()).add(from_robot)
                 print(f"{now()} | {self.robot_name} received ack_finished from {from_robot} for stage {stage}")
+                ack_ack = {
+                    "kind": "ack_ack_finished",
+                    "robot": self.robot_name,
+                    "to": from_robot,
+                    "stage": stage,
+                    "ts": time.time()
+                }
+                self.pub.publish(String(data=json.dumps(ack_ack)))
+                print(f"{now()} | {self.robot_name} ✉️ send ack_ack_finished to {from_robot} for stage {stage}")
+
+            elif kind == "ack_ack_finished" and to_robot == self.robot_name:
+                self.ack_ack_received.setdefault(stage, set()).add(from_robot)
+                print(f"{now()} | {self.robot_name} ✅ received ack_ack_finished from {from_robot} for stage {stage}")
 
         except Exception as e:
             self.get_logger().warn(f"[ParseError] {e}")
