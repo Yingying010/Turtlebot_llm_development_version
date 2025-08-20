@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import json, time, threading
-from typing import Dict, Set
+from typing import Set
 import datetime
 
 def now():
@@ -27,8 +27,26 @@ class FullSyncNode(Node):
         self.sync_event = threading.Event()
         self.task_thread_started = False
 
+        # ✅ 添加 timeout 机制
+        self.sync_timeout = 10.0  # 单位：秒
+        self.sync_start_time = time.time()
+        self.sync_timeout_timer = self.create_timer(0.5, self.check_timeout)
+
         self.get_logger().info(f"[INIT] Robot `{robot_name}` in sync_group={sync_group}, target={target_count}")
         print(f"{now()} | {robot_name} waiting for ALL ack_ready...")
+
+    def check_timeout(self):
+        if self.sync_event.is_set():
+            return  # 如果已经同步完成就不再检查
+
+        elapsed = time.time() - self.sync_start_time
+        if elapsed > self.sync_timeout:
+            print(f"{now()} | ⏱️ Timeout! {self.robot_name} failed to sync in time.")
+            self.get_logger().warn(f"Sync timeout: not all robots are ready in {self.sync_timeout} seconds.")
+            self.ready_timer.cancel()
+            self.sync_timeout_timer.cancel()
+            self.publish_status("timeout")
+            rclpy.shutdown()
 
     def publish_ready(self):
         msg = {
@@ -51,6 +69,16 @@ class FullSyncNode(Node):
         self.pub.publish(String(data=json.dumps(msg)))
         print(f"{now()} | {self.robot_name} send ack_ready to {to_robot}")
 
+    def publish_status(self, status_str: str):
+        msg = {
+            "kind": status_str,
+            "robot": self.robot_name,
+            "sync_group": self.sync_group,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | 📣 PUBLISH {self.robot_name} → {status_str}")
+
     def status_callback(self, msg):
         try:
             data = json.loads(msg.data)
@@ -68,6 +96,9 @@ class FullSyncNode(Node):
                 if robot not in self.ack_set:
                     self.ack_set.add(robot)
 
+            elif kind == "timeout":
+                print(f"{now()} | ⚠️ Received timeout from {robot}")
+
             self.print_ready_set()
             self.check_sync_complete()
 
@@ -82,6 +113,9 @@ class FullSyncNode(Node):
     def check_sync_complete(self):
         if len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count and not self.task_thread_started:
             self.task_thread_started = True
+            self.sync_event.set()
+            self.ready_timer.cancel()
+            self.sync_timeout_timer.cancel()
             print(f"{now()} | ✅ All robots OK! {self.robot_name} starting task...")
             threading.Thread(target=self.run_task, daemon=True).start()
 
