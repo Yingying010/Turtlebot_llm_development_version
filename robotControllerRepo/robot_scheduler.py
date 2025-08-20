@@ -333,52 +333,39 @@ def publish_state(robot: str, task_id, sequence, sync_group, status: str):
 # =========================
 # 订阅回调
 # =========================
-def status_callback(msg):
+def status_callback(self, msg):
     try:
-
         data = json.loads(msg.data)
-        kind = data.get("kind", "state")
- 
-        # 1) 接收 barrier：只打印，别入账
+        kind = data.get("kind")
+        from_robot = data.get("robot")
+        to_robot = data.get("to")
+        stage = data.get("stage")
 
-        if kind == "barrier":
-            sg = data.get("sync_group")
-            need = int(data.get("need", 0))
-            ready = int(data.get("ready", 0))
-            remaining = int(data.get("remaining", max(need - ready, 0)))
-            print(f"barrier | sync_group={sg} | need={need}, ready={ready}, remaining={remaining} | ts={data.get('ts')}")
-            return
-        
-        if kind == "go":
-            sg = int(data.get("sync_group"))
-            start_at = float(data.get("start_at", time.time()))
-            sync_go_times[sg] = start_at
-            sync_go_events[sg].set()
-            print(f"📨 recv GO | sg={sg} | start_at={start_at:.3f} | ts={data.get('ts')}")
-            return
- 
-        # 2) 非 state/barrier 一律忽略（心跳等）
-        if kind != "state":
-            return
-        
-        # 3) 入账对方/自己的 state（关键！）
-        src_robot = data.get("robot")
-        seq = data.get("sequence")
-        sg = data.get("sync_group")
+        if kind == "finished":
+            # Step 2：如果我正好负责下一个 stage，就回复 ack_finished
+            if stage + 1 in self.stages and self.stage_owners.get(stage) == from_robot:
+                ack = {
+                    "kind": "ack_finished",
+                    "robot": self.robot_name,
+                    "to": from_robot,
+                    "stage": stage,
+                    "ts": time.time()
+                }
+                self.pub.publish(String(data=json.dumps(ack)))
+                print(f"{now()} | {self.robot_name} ✉️ send ack_finished to {from_robot} for stage {stage}")
 
-        if sg is not None:
-            sg = int(sg)
+                # 本地记录：我已经确认他完成了（避免 wait_for_stage 卡住）
+                self.finished_ack.setdefault(stage, set()).add(self.robot_name)
 
-        status = data.get("status")
- 
-        # （可选）调试输出
-        print(f"📩 state | {src_robot} → {status} @ (seq={seq}, sg={sg}) tid={data.get('task_id')} ts={data.get('ts')}")
- 
-        # 入账 + 可能触发事件 + 触发 barrier 快照
-        _apply_status_and_maybe_signal(src_robot, seq, sg, status)
- 
-    except Exception:
-        print(f"⚠️ status_callback error: \n{traceback.format_exc()}")
+        elif kind == "ack_finished" and to_robot == self.robot_name:
+            # Step 3：我作为 sender 收到 ack_finished
+            self.finished_ack.setdefault(stage, set()).add(from_robot)
+            print(f"{now()} | {self.robot_name} received ack_finished from {from_robot} for stage {stage}")
+
+    except Exception as e:
+        self.get_logger().warn(f"[ParseError] {e}")
+
+
 
 
 # =========================
