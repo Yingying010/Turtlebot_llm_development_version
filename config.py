@@ -12,11 +12,10 @@ params = {
 }
 
 semantic_locations = {
-    "lucy": {"x": 500, "y": 500},
-    "amy": {"x": 100, "y": 100, "heading":180},
-    "table": {"x": 0, "y": -1500},
-    "robot2": {"x": 0, "y": 0},  # 可选 heading
-    "corner": {"x": 0, "y": 0},
+    "lucy": {"x": 800, "y": 800},
+    "table": {"x": 0, "y": 0},
+    "robot2": {"x": 0, "y": 500},  # 可选 heading
+    "corner": {"x": 500, "y": -500},
     "shelf": {"x": -1000, "y": -1000}
 }
 
