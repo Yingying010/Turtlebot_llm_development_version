@@ -45,7 +45,7 @@ class SyncTestNode(Node):
 
     def wait_and_run(self):
         self.get_logger().info("⏳ Waiting for other robot to be 'ready'...")
-        ok = self.event_ready.wait(timeout=5)
+        ok = self.event_ready.wait(timeout=20)
         if not ok:
             self.get_logger().warn("⚠️ Timeout waiting for other robot")
         else:
