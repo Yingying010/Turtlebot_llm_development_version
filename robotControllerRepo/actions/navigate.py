@@ -12,8 +12,10 @@ from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
 import json
 from phasespace.rigid_tracker import RigidTracker
-from config import semantic_locations
+import config
 from ttsRepo.stream_tts import tts_manager
+
+semantic_locations = config.get("semantic_locations")
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}

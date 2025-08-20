@@ -11,11 +11,13 @@ from typing import Dict, List, Tuple, Optional
 from geometry_msgs.msg import Twist
 import threading
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from config import semantic_locations
+import config
 from ttsRepo.stream_tts import tts_manager
 from phasespace.rigid_tracker import RigidTracker
 from rclpy.executors import MultiThreadedExecutor
 from robotControllerRepo.actions.navigate import navigate_to_target
+
+semantic_locations = config.get("semantic_locations")
 
 # === 执行 deliver 行为 ===
 def deliver_item(node: Node, robot_name: str, item: str, target, executor):

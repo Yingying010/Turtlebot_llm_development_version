@@ -8,12 +8,14 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
 from typing import Dict
-from config import semantic_locations
+import config
 from phasespace.rigid_tracker import RigidTracker
 from ttsRepo.stream_tts import tts_manager
 from typing import Dict, Optional, Tuple
 from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
+
+semantic_locations = config.get("semantic_locations")
  
 # === 全局缓存 + 锁 ===
 robot_position_cache: Dict[str, Dict[str, float]] = {}

@@ -4,12 +4,19 @@ from pathlib import Path
 
 CONFIG_PATH = Path("config.json")
 
-# 默认参数（首次生成时使用）
 DEFAULT_CONFIG = {
     "robot_id": "robot1",
     "master_id": "lucy",
     "isConversation": True,
-    "chat_or_instruct": False
+    "chat_or_instruct": False,
+    "semantic_locations": {
+        "lucy": {"x": 500, "y": 500},
+        "amy": {"x": 100, "y": 100, "heading": 180},
+        "table": {"x": 0, "y": -1500},
+        "robot2": {"x": 0, "y": 0},
+        "corner": {"x": 0, "y": 0},
+        "shelf": {"x": -1000, "y": -1000}
+    }
 }
 
 def load_config():
@@ -30,3 +37,22 @@ def set(**kwargs):
     cfg = load_config()
     cfg.update(kwargs)
     save_config(cfg)
+
+def update_nested(parent_key: str, subkey: str, value: dict):
+    """
+    用于更新嵌套字段，例如 semantic_locations["robot3"] = {x: ..., y: ...}
+    """
+    cfg = load_config()
+    if parent_key not in cfg or not isinstance(cfg[parent_key], dict):
+        cfg[parent_key] = {}
+    cfg[parent_key][subkey] = value
+    save_config(cfg)
+
+def delete_nested(parent_key: str, subkey: str):
+    cfg = load_config()
+    if parent_key in cfg and subkey in cfg[parent_key]:
+        del cfg[parent_key][subkey]
+        save_config(cfg)
+
+def reset_to_default():
+    save_config(DEFAULT_CONFIG)

@@ -12,13 +12,15 @@ from geometry_msgs.msg import Twist
 import threading
 # 添加项目根路径
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from config import semantic_locations
+import config
 from ttsRepo.stream_tts import tts_manager
 from phasespace.rigid_tracker import RigidTracker
 from rclpy.executors import MultiThreadedExecutor
 from robotControllerRepo.actions.navigate import navigate_to_target
- 
- # === 执行 collect 行为 ===
+
+semantic_locations = config.get("semantic_locations")
+
+# === 执行 collect 行为 ===
 def collect_item(node: Node, robot_name: str, item: str, target, executor):
     # === 阶段 1：导航到目标位置 ===
     is_successful = navigate_to_target(node, executor, robot_name, target)
