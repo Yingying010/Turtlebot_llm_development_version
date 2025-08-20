@@ -17,7 +17,7 @@ from textwrap import dedent
 
 # === 你项目里的依赖 ===
 from robotControllerRepo.robot_controller import execute_action
-from config import config
+import config
 
 # =========================
 # 全局状态

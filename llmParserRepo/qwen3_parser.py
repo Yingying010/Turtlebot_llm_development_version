@@ -8,7 +8,7 @@ from typing import Any, Dict, Tuple, Optional
 from WhisperRepo.whisper_recognizer import recognize
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
-from config import config
+import config
 from llama_cpp import Llama
 import robotControllerRepo.robot_scheduler as robot_scheduler
 import traceback
