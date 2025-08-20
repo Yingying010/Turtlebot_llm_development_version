@@ -450,6 +450,7 @@ class PerceptionAwareLLM:
         
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": "You must only respond with valid JSON. Do not include any markdown, code block, or extra explanation."},
             {"role": "system", "content": post_identity}
         ]
         if perception_history_text:
@@ -531,7 +532,16 @@ def perceive_and_parse(user_instruction: str,
     try:
         parsed = json.loads(llm.extract_json(raw))
     except Exception:
-        parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
+        try:
+            # 有些情况下 LLM 输出是 {"raw": "<stringified_json>"}，尝试解析 raw
+            fallback = json.loads(raw)
+            if isinstance(fallback, dict):
+                parsed = fallback
+            else:
+                parsed = {"raw": raw, "note": "LLM output fallback is not a dict"}
+        except Exception:
+            parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
+
 
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
