@@ -15,15 +15,19 @@ class SyncTestNode(Node):
         self.status_cache = {}  # {robot_name: status}
         self.event_ready = threading.Event()
         self.sync_group = 0  # 固定使用 sg=0
+        self.has_started = False
 
         self.timer = self.create_timer(0.5, self.broadcast_ready_until_synced)
 
     def broadcast_ready_until_synced(self):
         self.publish_status("ready")
         self.get_logger().info("📤 Re-sent 'ready'")
-        if self.event_ready.is_set():  # 一旦对方也 ready，就停止广播 + 执行任务
+
+        if self.event_ready.is_set() and not self.has_started:
+            self.has_started = True
             self.timer.cancel()
             threading.Thread(target=self.wait_and_run, daemon=True).start()
+
 
     def status_callback(self, msg):
         try:
