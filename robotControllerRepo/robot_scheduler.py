@@ -14,10 +14,16 @@ from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from loguru import logger
 from textwrap import dedent
+from typing import Set
 
 # === 你项目里的依赖 ===
 from robotControllerRepo.robot_controller import execute_action
 import config
+
+import datetime
+
+def now():
+    return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 # =========================
 # 全局状态
@@ -404,6 +410,103 @@ def stop_heartbeat():
 
 
 # =========================
+# Synchronous
+# =========================
+class RobotSyncManager:
+    def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 10.0):
+        self.node = node
+        self.robot_name = robot_name
+        self.sync_group = sync_group
+        self.target_count = target_count
+        self.timeout = timeout
+
+        self.ready_set: Set[str] = set()
+        self.ack_set: Set[str] = set()
+        self.prev_ready_set: Set[str] = set()
+
+        self.pub = node.create_publisher(String, '/robot_status', 10)
+        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, 10)
+
+        self.ready_timer = node.create_timer(1.0, self.publish_ready)
+        self.sync_start_time = time.time()
+        self.sync_timeout_timer = node.create_timer(0.5, self.check_timeout)
+
+        self.sync_complete_event = threading.Event()
+        print(f"{now()} | {robot_name} waiting for ALL ack_ready...")
+
+    def publish_ready(self):
+        msg = {
+            "kind": "ready",
+            "robot": self.robot_name,
+            "sync_group": self.sync_group,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | PUBLISH {self.robot_name} → ready")
+
+    def publish_ack(self, to_robot):
+        msg = {
+            "kind": "ack_ready",
+            "robot": self.robot_name,
+            "to": to_robot,
+            "sync_group": self.sync_group,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | {self.robot_name} send ack_ready to {to_robot}")
+
+    def status_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get("sync_group") != self.sync_group:
+                return
+            kind = data.get("kind")
+            robot = data.get("robot")
+
+            if kind == "ready":
+                if robot not in self.ready_set:
+                    self.ready_set.add(robot)
+                    self.publish_ack(robot)
+            elif kind == "ack_ready" and data.get("to") == self.robot_name:
+                if robot not in self.ack_set:
+                    self.ack_set.add(robot)
+
+            self.print_ready_set()
+            self.check_sync_complete()
+
+        except Exception as e:
+            self.node.get_logger().warn(f"Parse error: {e}")
+
+    def print_ready_set(self):
+        if self.ready_set != self.prev_ready_set:
+            print(f"{now()} | {self.robot_name} sees ready_set = {sorted(self.ready_set)}")
+            self.prev_ready_set = set(self.ready_set)
+
+    def check_sync_complete(self):
+        if len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count:
+            if not self.sync_complete_event.is_set():
+                print(f"{now()} | ✅ All robots OK! {self.robot_name} can proceed.")
+                self.sync_complete_event.set()
+                self.ready_timer.cancel()
+                self.sync_timeout_timer.cancel()
+
+    def check_timeout(self):
+        if self.sync_complete_event.is_set():
+            return
+        elapsed = time.time() - self.sync_start_time
+        if elapsed > self.timeout:
+            print(f"{now()} | ⏱️ Timeout! {self.robot_name} failed to sync in time.")
+            self.node.get_logger().warn(f"Sync timeout: not all robots are ready in {self.timeout} seconds.")
+            self.ready_timer.cancel()
+            self.sync_timeout_timer.cancel()
+            self.sync_complete_event.set()
+
+    def wait_for_sync(self):
+        self.sync_complete_event.wait()
+        return len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count
+
+
+# =========================
 # 调度器主逻辑（按数组顺序遍历，遇到依赖插入屏障等待）
 # =========================
 def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
@@ -455,68 +558,27 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
 
             # B) 跨机器人同步（只有 sync_group）
             if sg is not None and seq is None:
-                key = (None, sg)
+                # 启动同步管理器
+                sync_group = sg
+                target_count = target_counts.get(sync_group, 2)  # 默认2台，如果没设定
+                sync_mgr = RobotSyncManager(node, robot_name, sync_group, target_count)
 
-                # —— 启动线程：定时广播自己的 ready 状态，防止对方没收到 ——
-                def _repeat_ready():
-                    while not sync_go_events[sg].is_set():
-                        publish_state(robot_name, tid, None, sg, "ready")
-                        time.sleep(0.5)
+                # 等待同步完成（含timeout保护）
+                ok = sync_mgr.wait_for_sync()
+                if not ok:
+                    print(f"[{robot_name}] ❌ Sync failed or timed out. Skipping task {tid}.")
+                    tts_manager.say_sync("synchronisation failed or timeout, skipping this task")
+                    continue
 
-                ready_thread = threading.Thread(target=_repeat_ready, daemon=True)
-                ready_thread.start()
-
-                # 初始快照（需要在发 ready 前先知道需要多少台机器）
-                publish_barrier_snapshot(sg)
-
-                print(f"[{robot_name}] 🔄 Ready broadcast thread started for sync_group={sg}")
-
-                # 语音播报：估算等待人数
-                need, ready, _, _ = _counts_for_key(key)
-                waiting = max(need - ready, 0)
-                if waiting > 0:
-                    tts_manager.say_sync(f"i'm waiting for {waiting} robot{'s' if waiting > 1 else ''} to synchronise with me")
-
-                # 等待 ready 齐活（同步组人数）
-                try:
-                    wait_for_all_status(key, "ready", timeout=160)
-                except TimeoutError:
-                    print(f"[{robot_name}] ⏳ Timeout while waiting for ready in sync_group={sg}. Proceeding anyway.")
-
-                print(f"sync_group={sg} | All robots are ready (or timeout reached)")
-
-                # 判断谁是 leader（发 GO）
-                with cache_lock:
-                    participants = list(status_cache[key].keys())  # 报过 ready 的机器人
-                leader = min(participants) if participants else robot_name
-
-                # 发 GO 或等待 GO
-                if robot_name == leader:
-                    publish_sync_go(sg, delay=1)
-                else:
-                    print(f"⏳ waiting GO from leader={leader} @ sg={sg}")
-
-                # 等待 GO 时间到达（+线程中断标志）
-                try:
-                    wait_for_sync_go(sg, timeout=5.0)
-                except TimeoutError:
-                    print(f"[{robot_name}] ⚠️ GO timeout, forcing local start")
-                    sync_go_times[sg] = time.time() + 0.1
-                    sync_go_events[sg].set()
-
-                # ⛔ 停止 ready 广播线程
-                ready_thread.join(timeout=1)
-
-                # 同步起跑
+                print(f"[{robot_name}] ✅ Sync success → now executing task {tid}")
                 publish_state(robot_name, tid, None, sg, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
 
                 publish_state(robot_name, tid, None, sg, "finished")
-                print(f"sync_group={sg} | All robots are finished")
+                print(f"sync_group={sg} | Task completed.")
                 continue
-
-
+            
             # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
             ok = execute_action(node, executor, task)
             is_successful_overall = ok or is_successful_overall
