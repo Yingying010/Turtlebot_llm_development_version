@@ -38,7 +38,7 @@ class FullSyncNode(Node):
             "ts": time.time()
         }
         self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | 📤 PUBLISH {self.robot_name} → ready")
+        print(f"{now()} | PUBLISH {self.robot_name} → ready")
 
     def publish_ack(self, to_robot):
         msg = {
@@ -49,7 +49,7 @@ class FullSyncNode(Node):
             "ts": time.time()
         }
         self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | 📤 {self.robot_name} send ack_ready to {to_robot}")
+        print(f"{now()} | {self.robot_name} send ack_ready to {to_robot}")
 
     def status_callback(self, msg):
         try:
