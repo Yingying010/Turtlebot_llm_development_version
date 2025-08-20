@@ -457,49 +457,65 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
             if sg is not None and seq is None:
                 key = (None, sg)
 
-                # —— 首次进入该同步组时，先发初始快照（如 need=2, ready=0, remaining=2）——
+                # —— 启动线程：定时广播自己的 ready 状态，防止对方没收到 ——
+                def _repeat_ready():
+                    while not sync_go_events[sg].is_set():
+                        publish_state(robot_name, tid, None, sg, "ready")
+                        time.sleep(0.5)
+
+                ready_thread = threading.Thread(target=_repeat_ready, daemon=True)
+                ready_thread.start()
+
+                # 初始快照（需要在发 ready 前先知道需要多少台机器）
                 publish_barrier_snapshot(sg)
 
-                # 发布 ready 并等待齐活
-                publish_state(robot_name, tid, None, sg, "ready")
-                print(f"publish_state: {robot_name}")
+                print(f"[{robot_name}] 🔄 Ready broadcast thread started for sync_group={sg}")
 
-                publish_barrier_snapshot(sg)
-
-
-                # 语音：若未齐活则报“还在等待X个”
+                # 语音播报：估算等待人数
                 need, ready, _, _ = _counts_for_key(key)
                 waiting = max(need - ready, 0)
-
                 if waiting > 0:
-                    tts_manager.say_sync(f"i'm waiting for {waiting} robots to synchronise with me")
+                    tts_manager.say_sync(f"i'm waiting for {waiting} robot{'s' if waiting > 1 else ''} to synchronise with me")
 
-                # 等待 ready 齐活
-                wait_for_all_status(key, "ready")
-                time.sleep(0.5) 
-                print(f"sync_group={sg} | All robots are ready")
-                
+                # 等待 ready 齐活（同步组人数）
+                try:
+                    wait_for_all_status(key, "ready", timeout=10)
+                except TimeoutError:
+                    print(f"[{robot_name}] ⏳ Timeout while waiting for ready in sync_group={sg}. Proceeding anyway.")
+
+                print(f"sync_group={sg} | All robots are ready (or timeout reached)")
+
+                # 判断谁是 leader（发 GO）
                 with cache_lock:
-                    participants = list(status_cache[key].keys())  # 已在该组报过 ready 的机器人
+                    participants = list(status_cache[key].keys())  # 报过 ready 的机器人
                 leader = min(participants) if participants else robot_name
-                
-                # 领导者发布一个“未来时刻”的 GO；其他成员等待 GO
+
+                # 发 GO 或等待 GO
                 if robot_name == leader:
-                    publish_sync_go(sg, delay=0.3)  # 你也可以把 0.3 调成 0.1~0.5 之间
+                    publish_sync_go(sg, delay=0.3)
                 else:
                     print(f"⏳ waiting GO from leader={leader} @ sg={sg}")
-                
-                # 所有人：等到 GO 的 timepoint 再起跑
-                wait_for_sync_go(sg)
-                
-                # 同步起跑（此刻基本同时）
+
+                # 等待 GO 时间到达（+线程中断标志）
+                try:
+                    wait_for_sync_go(sg, timeout=5.0)
+                except TimeoutError:
+                    print(f"[{robot_name}] ⚠️ GO timeout, forcing local start")
+                    sync_go_times[sg] = time.time() + 0.1
+                    sync_go_events[sg].set()
+
+                # ⛔ 停止 ready 广播线程
+                ready_thread.join(timeout=1)
+
+                # 同步起跑
                 publish_state(robot_name, tid, None, sg, "running")
                 ok = execute_action(node, executor, task)
                 is_successful_overall = ok or is_successful_overall
-                
+
                 publish_state(robot_name, tid, None, sg, "finished")
                 print(f"sync_group={sg} | All robots are finished")
                 continue
+
 
             # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
             ok = execute_action(node, executor, task)
@@ -569,6 +585,7 @@ def run(task_data: Dict[str, Any]):
     # 6) spin + 心跳
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
+
     start_heartbeat(robot_id)
 
     try:
