@@ -118,7 +118,13 @@ def publish_barrier_snapshot(sync_group: int):
     print(f"📊 Barrier snapshot sg={sync_group} → need={need}, ready={ready}, remaining={remaining}")
 
 def publish_sync_go(sync_group: int, delay: float = 0.3):
-    """领导者发布统一起跑时间（当前时间+delay），所有人等到这个时间再运行。"""
+    """领导者发布统一起跑时间（当前时间+delay），所有人等到这个时间再运行。
+    该函数具有防重复机制，即 sg 对应的 GO 若已发布，不再重复发布。
+    """
+    if sync_group in sync_go_times:
+        print(f"🚫 GO already published for sync_group={sync_group}, skipping.")
+        return  # 已经发布过，防止重复
+
     start_at = time.time() + delay
     payload = {
         "kind": "go",
@@ -126,12 +132,13 @@ def publish_sync_go(sync_group: int, delay: float = 0.3):
         "start_at": start_at,
         "ts": time.time(),
     }
+
     # 先本地记一份，避免领导者还要等自己发的消息回环
     sync_go_times[sync_group] = start_at
     sync_go_events[sync_group].set()
     _safe_publish(payload)
     print(f"🚦 publish GO | sg={sync_group} | start_at={start_at:.3f} (delay={delay}s)")
- 
+
  
 def wait_for_sync_go(sync_group: int, timeout: float = 5.0):
     """等待收到 GO，并在指定 start_at 时刻同步起跑。"""
@@ -469,9 +476,9 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
 
                 # 等待 ready 齐活
                 wait_for_all_status(key, "ready")
+                time.sleep(0.5) 
                 print(f"sync_group={sg} | All robots are ready")
                 
-                # —— 选举“领导者”（统一且可重复：按机器人名最小）——
                 with cache_lock:
                     participants = list(status_cache[key].keys())  # 已在该组报过 ready 的机器人
                 leader = min(participants) if participants else robot_name
