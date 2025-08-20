@@ -413,7 +413,7 @@ def stop_heartbeat():
 # Synchronous
 # =========================
 class RobotSyncManager:
-    def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 10.0):
+    def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 60.0):
         self.node = node
         self.robot_name = robot_name
         self.sync_group = sync_group
