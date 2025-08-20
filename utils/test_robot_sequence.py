@@ -124,11 +124,11 @@ class RobotSequenceNode(Node):
                     }
                     self.pub.publish(String(data=json.dumps(ack)))
                     print(f"{now()} | {self.robot_name} ✉️ send ack_finished to {from_robot} for stage {stage}")
-                    # 标记自己知道他完成了
+                    # 标记我知道他完成了（用于自己等待）
                     self.finished_ack.setdefault(stage, set()).add(self.robot_name)
 
             elif kind == "ack_finished" and to_robot == self.robot_name:
-                # 收到别人的 ack → 发 ack_ack
+                # 收到 ack_finished → 发 ack_ack_finished
                 self.finished_ack.setdefault(stage, set()).add(from_robot)
                 print(f"{now()} | {self.robot_name} received ack_finished from {from_robot} for stage {stage}")
                 ack_ack = {
@@ -144,6 +144,8 @@ class RobotSequenceNode(Node):
             elif kind == "ack_ack_finished" and to_robot == self.robot_name:
                 self.ack_ack_received.setdefault(stage, set()).add(from_robot)
                 print(f"{now()} | {self.robot_name} ✅ received ack_ack_finished from {from_robot} for stage {stage}")
+                # ✅ 修复关键：解除 wait_for_stage() 的阻塞
+                self.finished_ack.setdefault(stage, set()).add(self.robot_name)
 
         except Exception as e:
             self.get_logger().warn(f"[ParseError] {e}")
