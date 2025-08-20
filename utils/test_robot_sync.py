@@ -52,15 +52,14 @@ class FullSyncNode(Node):
 
     def check_sync_status(self):
         ready_count = sum(1 for s in self.status_cache.values() if s == "ready")
-        self.status_cache[self.robot_name] = "ready"
-        total_ready = ready_count + 1
-        remaining = self.target_count - total_ready
-        print(f"📊 sg={self.sync_group} → need={self.target_count}, ready={total_ready}, remaining={remaining}")
+        remaining = self.target_count - ready_count
+        print(f"📊 sg={self.sync_group} → need={self.target_count}, ready={ready_count}, remaining={remaining}")
 
-        if total_ready >= self.target_count and not self.sync_event.is_set():
+        if ready_count >= self.target_count and not self.sync_event.is_set():
             self.sync_event.set()
             self.ready_timer.cancel()
             threading.Thread(target=self.run_task, daemon=True).start()
+
 
     def run_task(self):
         print(f"🚦 All robots ready. {self.robot_name} starting task...")
