@@ -404,7 +404,7 @@ def _assign_ids(dets: List[Dict], topk: int = 20):
         objs.append((oid, cls, d))
     return objs
 
-def build_perception_context(det_json: Dict, topk: int = 20) -> str:
+def build_perception_context(det_json: Dict, topk: int = 5) -> str:
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,
