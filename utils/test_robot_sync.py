@@ -4,7 +4,6 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import json, time, threading
 from typing import Dict
-
 import datetime
 
 def now():
@@ -19,9 +18,12 @@ class FullSyncNode(Node):
         self.status_cache: Dict[str, str] = {}  # {robot: status}
         self.pub = self.create_publisher(String, '/robot_status', 10)
         self.sub = self.create_subscription(String, '/robot_status', self.status_callback, 10)
+        self.go_sub = self.create_subscription(String, '/robot_go', self.go_callback, 10)
 
         self.ready_timer = self.create_timer(1.0, self.publish_ready)
         self.sync_event = threading.Event()
+        self.go_event = threading.Event()
+        self.start_at = None  # 时间戳
 
         self.get_logger().info(f"[INIT] Robot `{robot_name}` in sync_group={sync_group}, target={target_count}")
 
@@ -38,7 +40,7 @@ class FullSyncNode(Node):
             "ts": time.time()
         }
         self.pub.publish(String(data=json.dumps(msg)))
-        print(f"📤 PUBLISH {self.robot_name} → {status}")
+        print(f"{now()} | 📤 PUBLISH {self.robot_name} → {status}")
 
     def status_callback(self, msg):
         try:
@@ -58,16 +60,45 @@ class FullSyncNode(Node):
     def check_sync_status(self):
         ready_count = sum(1 for s in self.status_cache.values() if s == "ready")
         remaining = self.target_count - ready_count
-        print(f"sync_group_id={self.sync_group} [ need={self.target_count}, ready={ready_count}, remaining={remaining} ]")
+        print(f"{now()} | sync_group_id={self.sync_group} [ need={self.target_count}, ready={ready_count}, remaining={remaining} ]")
 
         if ready_count >= self.target_count and not self.sync_event.is_set():
             self.sync_event.set()
             self.ready_timer.cancel()
-            threading.Thread(target=self.run_task, daemon=True).start()
+            if self.robot_name == "robot1":
+                self.publish_sync_go()
 
+    def publish_sync_go(self, delay=0.3):
+        self.start_at = time.time() + delay
+        msg = {
+            "kind": "go",
+            "sync_group": self.sync_group,
+            "start_at": self.start_at,
+            "ts": time.time()
+        }
+        self.pub.publish(String(data=json.dumps(msg)))
+        print(f"{now()} | 🚦 {self.robot_name} publish GO: start_at = {self.start_at:.3f}")
+
+    def go_callback(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if data.get("kind") != "go":
+                return
+            sg = data["sync_group"]
+            if sg != self.sync_group:
+                return
+            self.start_at = data["start_at"]
+            self.go_event.set()
+        except Exception as e:
+            self.get_logger().warn(f"Parse go error: {e}")
 
     def run_task(self):
-        print(f"{now()} | 🚀 All robots ready. {self.robot_name} starting task...")
+        print(f"{now()} | ⏳ {self.robot_name} waiting for GO...")
+        self.go_event.wait()
+        delay = self.start_at - time.time()
+        if delay > 0:
+            time.sleep(delay)
+        print(f"{now()} | 🚀 All robots GO! {self.robot_name} starting task...")
         self.publish_status("running")
         time.sleep(3)  # 模拟执行耗时
         self.publish_status("finished")
