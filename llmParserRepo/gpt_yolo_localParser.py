@@ -573,7 +573,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
         out = {}
         try:
             out = perceive_and_parse(user_input,
-                                     show_window=True, save_annotated=None)
+                                     show_window=False, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
 
