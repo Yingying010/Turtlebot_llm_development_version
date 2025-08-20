@@ -600,12 +600,28 @@ class RobotSequenceManager:
         self.sync_complete_event.wait()
         return len(self.finished_set) >= 1 and len(self.ack_set) >= 1
 
+# =========================
+# 节点生命周期
+# =========================
+def shutdown_node(node: Node) -> bool:
+    if node is None or not rclpy.ok():
+        return False
+    try:
+        node.get_logger().info("🛑 Safe shutdown")
+        node.destroy_node()
+        return True
+    except Exception:
+        node.get_logger().exception(f"❌ Node destruction failed: \n{traceback.format_exc()}")
+        return False
+
+
 
 
 
 # =========================
 # 调度器主逻辑（按数组顺序遍历，遇到依赖插入屏障等待）
 # =========================
+
 def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                             executor, prev_stage: Dict[int, Optional[int]],
                             seq_owner_map: Dict[int, str]):
@@ -622,7 +638,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
     try:
         for task in tasks:
             task["robot"] = robot_name
-            tid   = task.get("task_id")
+            tid = task.get("task_id")
             seq = task.get("sequence")
             sg = task.get("sync_group")
             if sg is not None:
@@ -641,7 +657,6 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                         print(f"[{robot_name}] ⏩ Stage {p} finished by {prev_owner} → start Stage {seq}")
                         tts_manager.say_sync(f"sequence {p} is finished, i'm going to start the mission")
                     else:
-                        # 上一个阶段是自己（或不存在 owner），无需等待与播报
                         print(f"[{robot_name}] previous stage {p} is mine → proceed without waiting")
 
                 # 本阶段执行
@@ -655,16 +670,14 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                 ack_ok = seq_mgr.wait_for_acks()
                 if not ack_ok:
                     print(f"[{robot_name}] ⚠️ Timeout waiting for ACKs in sequence {seq}.")
-                    continue
+                continue  # ✅ 避免重复执行
 
             # B) 跨机器人同步（只有 sync_group）
             if sg is not None and seq is None:
-                # 启动同步管理器
                 sync_group = sg
-                target_count = target_counts.get(sync_group, 2)  # 默认2台，如果没设定
+                target_count = target_counts.get(sync_group, 2)
                 sync_mgr = RobotSyncManager(node, robot_name, sync_group, target_count)
 
-                # 等待同步完成（含timeout保护）
                 ok = sync_mgr.wait_for_sync()
                 if not ok:
                     print(f"[{robot_name}] ❌ Sync failed or timed out. Skipping task {tid}.")
@@ -678,11 +691,12 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
 
                 publish_state(robot_name, tid, None, sg, "finished")
                 print(f"sync_group={sg} | Task completed.")
-                continue
+                continue  # ✅ 避免重复执行
 
-            # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
-            ok = execute_action(node, executor, task)
-            is_successful_overall = ok or is_successful_overall
+            # C) 无依赖（本地默认顺序）
+            if seq is None and sg is None:
+                ok = execute_action(node, executor, task)
+                is_successful_overall = ok or is_successful_overall
 
         if is_successful_overall:
             print(f"🎯 All tasks completed for `{robot_name}`!")
@@ -693,19 +707,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
         return False
 
 
-# =========================
-# 节点生命周期
-# =========================
-def shutdown_node(node: Node) -> bool:
-    if node is None or not rclpy.ok():
-        return False
-    try:
-        node.get_logger().info("🛑 Safe shutdown")
-        node.destroy_node()
-        return True
-    except Exception:
-        node.get_logger().exception(f"❌ Node destruction failed: \n{traceback.format_exc()}")
-        return False
+
 
 
 # =========================
