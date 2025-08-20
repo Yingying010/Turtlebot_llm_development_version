@@ -28,7 +28,7 @@ class FullSyncNode(Node):
         self.task_thread_started = False
 
         # ✅ 添加 timeout 机制
-        self.sync_timeout = 10.0  # 单位：秒
+        self.sync_timeout = 60.0  # 单位：秒
         self.sync_start_time = time.time()
         self.sync_timeout_timer = self.create_timer(0.5, self.check_timeout)
 
