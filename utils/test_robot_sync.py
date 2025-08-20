@@ -16,15 +16,14 @@ class SyncTestNode(Node):
         self.event_ready = threading.Event()
         self.sync_group = 0  # 固定使用 sg=0
 
-        self.timer = self.create_timer(0.5, self.send_ready_once)
+        self.timer = self.create_timer(0.5, self.broadcast_ready_until_synced)
 
-    def send_ready_once(self):
+    def broadcast_ready_until_synced(self):
         self.publish_status("ready")
-        self.timer.cancel()  # 只发一次 ready
-        self.get_logger().info("📤 Sent 'ready'")
-
-        # 等对方 ready
-        threading.Thread(target=self.wait_and_run, daemon=True).start()
+        self.get_logger().info("📤 Re-sent 'ready'")
+        if self.event_ready.is_set():  # 一旦对方也 ready，就停止广播 + 执行任务
+            self.timer.cancel()
+            threading.Thread(target=self.wait_and_run, daemon=True).start()
 
     def status_callback(self, msg):
         try:
