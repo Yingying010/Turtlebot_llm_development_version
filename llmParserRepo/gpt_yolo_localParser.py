@@ -16,7 +16,7 @@ import subprocess
  
 from WhisperRepo.whisper_recognizer import recognize
 from ttsRepo.stream_tts import tts_manager
-from config import config
+import config
 import robotControllerRepo.robot_scheduler as robot_scheduler
  
 # ================== 配置 ==================

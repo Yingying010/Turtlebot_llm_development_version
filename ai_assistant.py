@@ -49,21 +49,18 @@ def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
 
-# ✅ 启动入口
+# 启动入口
 if __name__ == "__main__":
-    if len(sys.argv)<2:
+    if len(sys.argv) < 3:
         print("Usage: python3 main.py <robot_id> <master_id>")
         sys.exit(1)
- 
+
     robot_id = sys.argv[1]
     master_id = sys.argv[2]
-    config.set(robot_id=robot_id)
-    config.set(master_id=master_id)
 
-    ROBOT_ID = config.get("robot_id")
-    MASTER_NAME = config.get("master_id")
+    config.set(robot_id=robot_id, master_id=master_id)
 
-    print(ROBOT_ID, MASTER_NAME)
+    print(f"obot_id: {config.get('robot_id')}, master_id: {config.get('master_id')}")
 
     startchat()
 
