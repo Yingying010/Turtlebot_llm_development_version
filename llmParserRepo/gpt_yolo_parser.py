@@ -33,9 +33,6 @@ MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
 MAX_TURNS = int(os.getenv("MAX_TURNS", "8"))
 PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
 
-ROBOT_ID = config.get("robot_id")
-MASTER_NAME = config.get("master_name")
-
 DEFAULT_SOURCE = "udp://@:8888?fifo_size=1000000&overrun_nonfatal=1&buffer_size=1000000&probesize=32&analyzeduration=0"
 
 # ——统一输出提示词（在此基础上增加“可选历史输入”说明）——
@@ -178,6 +175,13 @@ def _now_iso() -> str:
 
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
+
+
+def get_robot_id():
+    return config.get("robot_id")
+
+def get_master_name():
+    return config.get("master_id")
 
 # ================== 历史存储 ==================
 class HistoryStore:
@@ -420,7 +424,7 @@ class PerceptionAwareLLM:
         
         post_identity = dedent(f"""
         Context variables:
-        Let me first define your identity. You are a highly intelligent indoor robot, and your name is {ROBOT_ID}, and your master's name is {MASTER_NAME}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
+        Let me first define your identity. You are a highly intelligent indoor robot, and your name is {get_robot_id()}, and your master's name is {get_master_name()}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
         """).strip()
         
         messages: List[Dict[str, str]] = [
