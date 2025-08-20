@@ -60,6 +60,11 @@ if __name__ == "__main__":
     config.set(robot_id=robot_id)
     config.set(master_id=master_id)
 
+    ROBOT_ID = config.get("robot_id")
+    MASTER_NAME = config.get("master_name")
+
+    print(ROBOT_ID, MASTER_NAME)
+
     startchat()
 
     while True:
