@@ -479,7 +479,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
 
                 # 等待 ready 齐活（同步组人数）
                 try:
-                    wait_for_all_status(key, "ready", timeout=10)
+                    wait_for_all_status(key, "ready", timeout=160)
                 except TimeoutError:
                     print(f"[{robot_name}] ⏳ Timeout while waiting for ready in sync_group={sg}. Proceeding anyway.")
 
