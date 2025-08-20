@@ -329,45 +329,6 @@ def publish_state(robot: str, task_id, sequence, sync_group, status: str):
     _safe_publish(payload)
     print(f"[{robot}] 📣 State: {status} @ ({sequence}, {sync_group})")
 
-
-# =========================
-# 订阅回调
-# =========================
-def status_callback(self, msg):
-    try:
-        data = json.loads(msg.data)
-        kind = data.get("kind")
-        from_robot = data.get("robot")
-        to_robot = data.get("to")
-        stage = data.get("stage")
-
-        if kind == "finished":
-            # Step 2：如果我正好负责下一个 stage，就回复 ack_finished
-            if stage + 1 in self.stages and self.stage_owners.get(stage) == from_robot:
-                ack = {
-                    "kind": "ack_finished",
-                    "robot": self.robot_name,
-                    "to": from_robot,
-                    "stage": stage,
-                    "ts": time.time()
-                }
-                self.pub.publish(String(data=json.dumps(ack)))
-                print(f"{now()} | {self.robot_name} ✉️ send ack_finished to {from_robot} for stage {stage}")
-
-                # 本地记录：我已经确认他完成了（避免 wait_for_stage 卡住）
-                self.finished_ack.setdefault(stage, set()).add(self.robot_name)
-
-        elif kind == "ack_finished" and to_robot == self.robot_name:
-            # Step 3：我作为 sender 收到 ack_finished
-            self.finished_ack.setdefault(stage, set()).add(from_robot)
-            print(f"{now()} | {self.robot_name} received ack_finished from {from_robot} for stage {stage}")
-
-    except Exception as e:
-        self.get_logger().warn(f"[ParseError] {e}")
-
-
-
-
 # =========================
 # 心跳
 # =========================
@@ -654,6 +615,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                 # 广播本阶段完成并启动 ACK 确认管理器
                 publish_state(robot_name, tid, seq, None, "finished")
                 seq_mgr = RobotSequenceManager(node, robot_name, seq)
+                node.create_subscription(String, "/robot_status", seq_mgr.status_callback, 10)
                 ack_ok = seq_mgr.wait_for_acks()
                 
                 if not ack_ok:
@@ -668,6 +630,7 @@ def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
                 sync_group = sg
                 target_count = target_counts.get(sync_group, 2)  # 默认2台，如果没设定
                 sync_mgr = RobotSyncManager(node, robot_name, sync_group, target_count)
+                node.create_subscription(String, "/robot_status", sync_mgr.status_callback, 10)
 
                 # 等待同步完成（含timeout保护）
                 ok = sync_mgr.wait_for_sync()
@@ -732,7 +695,6 @@ def run(task_data: Dict[str, Any]):
     # 5) pub/sub
     global status_pub
     status_pub = ros_node.create_publisher(String, "/robot_status", qos)
-    ros_node.create_subscription(String, "/robot_status", status_callback, qos)
 
     # 6) spin + 心跳
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
