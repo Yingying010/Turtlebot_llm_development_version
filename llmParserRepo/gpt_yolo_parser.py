@@ -183,6 +183,44 @@ def get_robot_id():
 def get_master_name():
     return config.get("master_id")
 
+import json
+import re
+
+def safe_json_parse(raw_str: str) -> dict:
+    """尝试从 raw_str 中恢复出合法 JSON"""
+    try:
+        return json.loads(raw_str)
+    except Exception:
+        pass
+
+    # 尝试去除 markdown ```json ``` 包裹
+    raw_str = re.sub(r"^```(?:json)?\n?", "", raw_str.strip())
+    raw_str = re.sub(r"\n?```$", "", raw_str.strip())
+
+    # 尝试找出第一个和最后一个 { } 的位置，截取中间部分
+    start = raw_str.find("{")
+    end = raw_str.rfind("}")
+    if start != -1 and end != -1:
+        trimmed = raw_str[start:end+1]
+        try:
+            return json.loads(trimmed)
+        except Exception:
+            pass
+
+    # 尝试补一个 }
+    try:
+        fixed = raw_str + "}"
+        return json.loads(fixed)
+    except Exception:
+        pass
+
+    # 最后失败就返回包装
+    return {
+        "raw": raw_str,
+        "note": "Failed to parse as strict JSON. Original output preserved in raw."
+    }
+
+
 # ================== 历史存储 ==================
 class HistoryStore:
     def __init__(self, path: Path):
@@ -507,15 +545,8 @@ def perceive_and_parse(user_instruction: str,
     try:
         parsed = json.loads(llm.extract_json(raw))
     except Exception:
-        try:
-            # 有些情况下 LLM 输出是 {"raw": "<stringified_json>"}，尝试解析 raw
-            fallback = json.loads(raw)
-            if isinstance(fallback, dict):
-                parsed = fallback
-            else:
-                parsed = {"raw": raw, "note": "LLM output fallback is not a dict"}
-        except Exception:
-            parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
+        parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
+
 
 
     store.append("perception", build_perception_summary(det_json))
