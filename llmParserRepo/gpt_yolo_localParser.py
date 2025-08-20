@@ -35,7 +35,7 @@ MAX_TURNS = int(os.getenv("MAX_TURNS", "8"))
 PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
 
 ROBOT_ID = config.get("robot_id")
-MASTER_NAME = config.get("master_name")
+MASTER_NAME = config.get("master_id")
 
 _video_env = os.getenv("VIDEO_SOURCE", "0")   # 树莓派默认用本地相机
 if _video_env.isdigit():
@@ -440,6 +440,8 @@ class PerceptionAwareLLM:
         Context variables:
         Let me first define your identity. You are a highly intelligent indoor robot, and your name is {ROBOT_ID}, and your master's name is {MASTER_NAME}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
         """).strip()
+
+        print(post_identity)
         
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
