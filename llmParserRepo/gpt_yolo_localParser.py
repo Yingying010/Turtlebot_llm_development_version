@@ -174,8 +174,8 @@ Rules for Cross-Robot Dependencies
    - **Key rule**: Different temporal phases require different sync_group values
    
    **Example**: "robot1 and robot2 collect books at the same time, then deliver them together"
-   - Phase 1 (collect): sync_group: 0, sequence: 0  
-   - Phase 2 (deliver): sync_group: 1, sequence: 1
+   - Phase 1 (collect): sync_group: 0
+   - Phase 2 (deliver): sync_group: 1
 
 ========================
 Response
