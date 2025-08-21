@@ -42,7 +42,7 @@ if _video_env.isdigit():
 else:
     DEFAULT_SOURCE: Any = _video_env
 
-# ——统一输出提示词（在此基础上增加“可选历史输入”说明）——
+# ——统一输出提示词（在此基础上增加"可选历史输入"说明）——
 SYSTEM_PROMPT = dedent("""
 You are a specialized robot command interpreter that receives natural language input and converts it into a structured JSON object. 
 Your primary responsibility is to identify only the executor robots and to determine their number, and parse the complete task list for each robot. 
@@ -162,7 +162,7 @@ Rules for Cross-Robot Dependencies
 1. Parallel execution:
 If no dependencies are specified, the robot will execute its tasks in parallel, do not add any sequence and sync_group fields.
 2. Sequential execution (sequence):
-If the user instruction explicitly specifies the temporal relationship between tasks, the dependency label sequence must be used. sequence is a globally incrementing number starting from 0, used to indicate the execution order of tasks. Don't ignore the “sequence”: 0
+If the user instruction explicitly specifies the temporal relationship between tasks, the dependency label sequence must be used. sequence is a globally incrementing number starting from 0, used to indicate the execution order of tasks. Don't ignore the "sequence": 0
 3. Synchronous execution (sync_group):
 If the user explicitly uses synchronization keywords or implicitly indicates synchronization through semantics or context, synchronization dependencies must be applied. All tasks that must be executed simultaneously by multiple robots must be assigned the same sync_group ID.
 sync_group is a globally incrementing number starting from 0. Tasks with the same sync_group value must start execution at the same time.
@@ -193,7 +193,7 @@ import json
 import re
 
 def safe_json_parse(raw_str: str) -> dict:
-    """尝试从 raw_str 中恢复出合法 JSON"""
+    """增强版JSON解析器，处理各种格式问题"""
     try:
         return json.loads(raw_str)
     except Exception:
@@ -206,25 +206,110 @@ def safe_json_parse(raw_str: str) -> dict:
     # 尝试找出第一个和最后一个 { } 的位置，截取中间部分
     start = raw_str.find("{")
     end = raw_str.rfind("}")
-    if start != -1 and end != -1:
+    if start != -1 and end != -1 and start < end:
         trimmed = raw_str[start:end+1]
         try:
-            return json.loads(trimmed)
+            parsed = json.loads(trimmed)
+            # 验证基本结构
+            if _validate_json_structure(parsed):
+                return parsed
         except Exception:
             pass
 
-    # 尝试补一个 }
+    # 尝试修复常见的JSON错误
     try:
-        fixed = raw_str + "}"
-        return json.loads(fixed)
+        fixed_json = _fix_json_errors(raw_str)
+        parsed = json.loads(fixed_json)
+        if _validate_json_structure(parsed):
+            return parsed
     except Exception:
         pass
 
-    # 最后失败就返回包装
+    # 尝试修复截断的JSON
+    try:
+        repaired = _repair_truncated_json(raw_str)
+        parsed = json.loads(repaired)
+        if _validate_json_structure(parsed):
+            return parsed
+    except Exception:
+        pass
+
+    # 最后失败就返回包装，但确保有基本结构
     return {
+        "perception_report": {
+            "timestamp": _now_iso(),
+            "summary": {},
+            "objects": [],
+            "relations": []
+        },
+        "robots": {},
+        "response": "Sorry, I couldn't process that command properly.",
         "raw": raw_str,
-        "note": "Failed to parse as strict JSON. Original output preserved in raw."
+        "note": "Enhanced parser attempted multiple fixes but failed. Basic structure provided."
     }
+
+def _validate_json_structure(parsed: dict) -> bool:
+    """验证解析结果的基本结构"""
+    if not isinstance(parsed, dict):
+        return False
+    
+    # 检查是否有主要字段
+    main_fields = ["perception_report", "robots", "response"]
+    has_main_structure = any(field in parsed for field in main_fields)
+    
+    return has_main_structure
+
+def _fix_json_errors(json_str: str) -> str:
+    """修复常见的JSON格式错误"""
+    # 移除多余的逗号
+    json_str = re.sub(r',\s*}', '}', json_str)
+    json_str = re.sub(r',\s*]', ']', json_str)
+    
+    # 修复未闭合的字符串
+    lines = json_str.split('\n')
+    fixed_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped and ':' in stripped:
+            # 检查是否有未闭合的引号
+            if stripped.count('"') % 2 == 1 and not stripped.endswith(('"', ',', '}', ']')):
+                # 尝试在合适的位置添加引号
+                if not stripped.endswith('"'):
+                    stripped += '"'
+        fixed_lines.append(stripped)
+    
+    return '\n'.join(fixed_lines)
+
+def _repair_truncated_json(json_str: str) -> str:
+    """修复被截断的JSON"""
+    # 查找未闭合的括号并添加
+    brace_count = json_str.count('{') - json_str.count('}')
+    bracket_count = json_str.count('[') - json_str.count(']')
+    
+    if brace_count > 0:
+        json_str += '}' * brace_count
+    if bracket_count > 0:
+        json_str += ']' * bracket_count
+    
+    # 特殊处理：如果response字段被截断
+    if '"response"' in json_str and not json_str.strip().endswith(('}', '"')):
+        # 查找response字段的位置并修复
+        response_match = re.search(r'"response":\s*"([^"]*?)(?:"|\s*$)', json_str)
+        if response_match and not response_match.group(0).endswith('"'):
+            # 修复未闭合的response字段
+            before_response = json_str[:response_match.start()]
+            response_content = response_match.group(1)
+            after_response = json_str[response_match.end():]
+            
+            # 重构JSON
+            json_str = before_response + f'"response": "{response_content}"' + after_response
+            
+            # 确保JSON正确闭合
+            if not json_str.strip().endswith('}'):
+                json_str += '}'
+    
+    return json_str
 
 
 # ================== 历史存储 ==================
@@ -497,13 +582,58 @@ class PerceptionAwareLLM:
         messages.extend(chat_history_messages[-MAX_TURNS*2:])
         messages.append({"role": "user", "content": user_text})
 
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0.1,
-            max_tokens=512
-        )
-        return resp.choices[0].message.content.strip()
+        # 增加重试机制和更大的token限制
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                # 根据尝试次数调整参数
+                if attempt == 0:
+                    max_tokens = 1000  # 增加token限制
+                    temperature = 0.1
+                elif attempt == 1:
+                    max_tokens = 1200
+                    temperature = 0.15
+                else:
+                    max_tokens = 1500
+                    temperature = 0.2
+
+                resp = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                
+                raw_output = resp.choices[0].message.content.strip()
+                logger.info(f"🔄 Attempt {attempt + 1} - Raw output length: {len(raw_output)}")
+                
+                # 验证输出不为空且不是错误
+                if not raw_output or "error" in raw_output.lower()[:100]:
+                    if attempt < max_attempts - 1:
+                        logger.warning(f"⚠️ Attempt {attempt + 1} produced invalid output, retrying...")
+                        continue
+                
+                return raw_output
+                
+            except Exception as e:
+                logger.error(f"❌ Attempt {attempt + 1} failed: {e}")
+                if attempt == max_attempts - 1:
+                    # 所有尝试都失败，返回基本的JSON结构
+                    fallback_response = {
+                        "perception_report": {
+                            "timestamp": _now_iso(),
+                            "summary": {},
+                            "objects": [],
+                            "relations": []
+                        },
+                        "robots": {},
+                        "response": "Sorry, I encountered an error processing your command.",
+                        "error": f"LLM call failed after {max_attempts} attempts: {str(e)}"
+                    }
+                    return json.dumps(fallback_response, ensure_ascii=False)
+        
+        # 理论上不应该到达这里
+        return "{}"
 
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
 VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
@@ -567,20 +697,77 @@ def perceive_and_parse(user_instruction: str,
         perception_history_text=perception_hist_text
     )
 
+    # 使用增强的JSON解析器
     try:
-        parsed = json.loads(llm.extract_json(raw))
-    except Exception:
-        parsed = {"raw": raw, "note": "LLM output is not strict JSON and is returned as is in the raw field"}
+        extracted = llm.extract_json(raw)
+        parsed = safe_json_parse(extracted)
+        
+        # 验证解析结果的完整性
+        if not _validate_parsed_result(parsed):
+            logger.warning("⚠️ Parsed result validation failed, using fallback structure")
+            parsed = _create_fallback_structure(raw, user_instruction)
+            
+    except Exception as e:
+        logger.error(f"❌ JSON parsing failed completely: {e}")
+        parsed = _create_fallback_structure(raw, user_instruction)
 
-
-
+    # 记录历史
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
     store.append("assistant", json.dumps(parsed, ensure_ascii=False))
 
     return {"command": parsed}
 
+def _validate_parsed_result(parsed: dict) -> bool:
+    """验证解析结果是否包含所需的基本结构"""
+    if not isinstance(parsed, dict):
+        return False
+    
+    # 检查是否有错误标记
+    if "error" in parsed and "failed after" in str(parsed.get("error", "")):
+        return False
+    
+    # 检查基本结构
+    required_fields = ["perception_report", "robots", "response"]
+    missing_fields = [field for field in required_fields if field not in parsed]
+    
+    if len(missing_fields) > 1:  # 允许缺少一个字段
+        return False
+    
+    # 检查robots字段格式
+    if "robots" in parsed:
+        robots = parsed["robots"]
+        if not isinstance(robots, dict):
+            return False
+        
+        # 检查每个机器人的任务格式
+        for robot_id, tasks in robots.items():
+            if not isinstance(tasks, list):
+                return False
+            for task in tasks:
+                if not isinstance(task, dict) or "action" not in task:
+                    return False
+    
+    return True
+
+def _create_fallback_structure(raw_output: str, user_instruction: str) -> dict:
+    """创建备用的JSON结构"""
+    return {
+        "perception_report": {
+            "timestamp": _now_iso(),
+            "summary": {},
+            "objects": [],
+            "relations": []
+        },
+        "robots": {},
+        "response": "I'm sorry, I had trouble understanding that command. Could you please rephrase it?",
+        "raw": raw_output,
+        "note": "Fallback structure created due to parsing failure",
+        "original_input": user_instruction
+    }
+
 def normalize_for_scheduler(cmd: dict) -> dict:
+    """标准化调度器的输入格式"""
     if not isinstance(cmd, dict):
         return {"robots": {}}
     if "robots" in cmd and isinstance(cmd["robots"], dict):
@@ -594,21 +781,36 @@ def normalize_for_scheduler(cmd: dict) -> dict:
     return {"robots": {}}
 
 def run_conversation_loop() -> Optional[Dict[str, Any]]:
+    """主对话循环，增加了更好的错误处理和状态管理"""
+    logger.info("🎯 Starting enhanced conversation loop")
+    
+    consecutive_failures = 0
+    max_consecutive_failures = 3
+    
     while True:
+        # 语音识别循环
         while True:
             try:
                 raw_text = recognize(delay=3).strip()
-            except Exception as e:
-                logger.warning(f"🎙️ recognition failed: {e}")
-                tts_manager.say_sync("Sorry, could not hear you.")
-                continue
-
-            user_input = _clean(raw_text)
-            if not user_input or user_input == "blank_audio":
-                continue
-            else:
+                consecutive_failures = 0  # 重置失败计数
                 break
+            except Exception as e:
+                consecutive_failures += 1
+                logger.warning(f"🎙️ Recognition failed (attempt {consecutive_failures}): {e}")
+                
+                if consecutive_failures >= max_consecutive_failures:
+                    tts_manager.say_sync("I'm having trouble hearing you. Please check the microphone.")
+                    time.sleep(2)
+                    consecutive_failures = 0  # 重置计数
+                else:
+                    tts_manager.say_sync("Sorry, could not hear you.")
+                continue
 
+        user_input = _clean(raw_text)
+        if not user_input or user_input == "blank_audio":
+            continue
+
+        # 检查退出关键词
         exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up",
                          "i want to change the chat mode", "ending of this mode", "ok finish", "ending this mode"]
 
@@ -618,37 +820,72 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         logger.info(f"🗣️ You said: {user_input}")
 
+        # 解析和执行
         out = {}
         try:
-            out = perceive_and_parse(user_input,
-                                     show_window=False, save_annotated=None)
+            out = perceive_and_parse(user_input, show_window=False, save_annotated=None)
 
             print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
 
-            if out:
-                resp = out.get("command", {}).get("response")
-                print(resp or "i can't give you any response")
-                tts_manager.say_sync(resp)
+            if out and "command" in out:
+                cmd = out["command"]
+                resp = cmd.get("response", "")
+                
+                # 检查是否有有效的response
+                if resp and resp != "i can't give you any response":
+                    print(f"🤖 Response: {resp}")
+                    tts_manager.say_sync(resp)
+                else:
+                    print("🤖 Response: Processing your command...")
+                    tts_manager.say_sync("Processing your command.")
+                
+                # 尝试执行命令
+                execution_payload = normalize_for_scheduler(cmd)
+                if execution_payload.get("robots"):
+                    try:
+                        isSchedule = robot_scheduler.run(execution_payload)
+                        if isSchedule is True:
+                            logger.info("✅ Command(s) executed successfully.")
+                            tts_manager.say_sync("Command executed successfully.")
+                        else:
+                            logger.warning("⚠️ Command execution failed")
+                            tts_manager.say_sync("Command execution failed. Please try again.")
+                    except Exception as exec_error:
+                        logger.error(f"❌ Scheduler error: {exec_error}")
+                        tts_manager.say_sync("Sorry, there was an error executing the command.")
+                else:
+                    # 没有机器人命令，可能是聊天
+                    if resp:
+                        logger.info("💬 Chat mode - no robot commands detected")
+                    else:
+                        tts_manager.say_sync("I didn't detect any robot commands in your request.")
             else:
                 tts_manager.say_sync("Could not understand the command.")
 
-        except Exception:
-            logger.warning(f"⚠️ Error during LLM or parsing: \n{traceback.format_exc()}")
-            tts_manager.say_sync("Something went wrong.")
+        except Exception as e:
+            logger.error(f"⚠️ Error during processing: \n{traceback.format_exc()}")
+            tts_manager.say_sync("Something went wrong while processing your request.")
             out = {}
 
-        execution_payload = normalize_for_scheduler(out.get("command", {}))
-        if execution_payload["robots"]:
-            isSchedule = robot_scheduler.run(execution_payload)
-            if isSchedule is True:
-                logger.info("✅ Command(s) executed successfully.")
-                tts_manager.say_sync("Command executed.")
-            else:
-                logger.warning("⚠️ Failed")
-                tts_manager.say_sync("Command execution failed, please re-give the command.")
+        # 添加小延迟以防止过于频繁的循环
+        time.sleep(0.5)
 
 # ================== 示例 ==================
 if __name__ == "__main__":
-    instr = "I want robot1 to move forward for 3 seconds and then turn left 90 degrees."
-    out = perceive_and_parse(instr, show_window=False, save_annotated=None)
-    print(json.dumps(out, indent=2, ensure_ascii=False))
+    # 测试用例
+    test_instructions = [
+        "I want robot1 to move forward for 3 seconds and then turn left 90 degrees.",
+        "robot1 and robot2 move forward simultaneously",
+        "describe what you see"
+    ]
+    
+    for instr in test_instructions:
+        print(f"\n{'='*50}")
+        print(f"Testing: {instr}")
+        print('='*50)
+        try:
+            out = perceive_and_parse(instr, show_window=False, save_annotated=None)
+            print(json.dumps(out, indent=2, ensure_ascii=False))
+        except Exception as e:
+            print(f"Test failed: {e}")
+            traceback.print_exc()
