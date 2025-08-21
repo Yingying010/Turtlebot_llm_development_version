@@ -3,152 +3,116 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
 import numpy as np
-import time
-import os
-import math
 
-class LidarDebugger(Node):
+class ObstacleAvoidanceTest(Node):
     def __init__(self, robot_name="robot1"):
-        super().__init__('lidar_debugger')
+        super().__init__('obstacle_avoidance_test')
         
         self.robot_name = robot_name
         
-        # 订阅雷达数据
+        # 订阅雷达数据 - 使用传感器QoS
+        from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+        
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        
         self.laser_sub = self.create_subscription(
             LaserScan,
             f'/{robot_name}/scan',
             self.laser_callback,
+            sensor_qos
+        )
+        
+        # 发布速度命令
+        self.cmd_pub = self.create_publisher(
+            Twist,
+            f'/{robot_name}/cmd_vel',
             10
         )
         
-        self.last_print_time = time.time()
-        self.print_interval = 1.0  # 每秒打印一次
+        # 避障参数
+        self.obstacle_threshold = 0.5  # 50cm
+        self.emergency_stop = 0.3      # 30cm紧急停止
         
-        print(f"=== 雷达调试工具启动 - 机器人: {robot_name} ===")
-        print("实时显示雷达数据，按 Ctrl+C 停止")
-        print("-" * 60)
+        self.get_logger().info(f'避障测试节点启动 - 机器人: {robot_name}')
 
     def laser_callback(self, msg: LaserScan):
-        """处理并显示雷达数据"""
+        """处理雷达数据并进行避障"""
         
-        current_time = time.time()
-        if current_time - self.last_print_time < self.print_interval:
-            return
-        self.last_print_time = current_time
-        
-        # 清屏（可选）
-        os.system('clear' if os.name == 'posix' else 'cls')
-        
-        print(f"=== 雷达数据调试 - {self.robot_name} ===")
-        print(f"时间戳: {current_time:.2f}")
-        print(f"Frame ID: {msg.header.frame_id}")
-        print("-" * 50)
-        
-        # 基本信息
-        print(f"角度范围: {math.degrees(msg.angle_min):.1f}° 到 {math.degrees(msg.angle_max):.1f}°")
-        print(f"角度增量: {math.degrees(msg.angle_increment):.2f}°")
-        print(f"距离范围: {msg.range_min:.2f}m 到 {msg.range_max:.2f}m")
-        print(f"数据点数: {len(msg.ranges)}")
-        print("-" * 50)
-        
-        # 转换为numpy数组方便处理
+        # 获取有效的距离数据
         ranges = np.array(msg.ranges)
+        valid_ranges = ranges[(ranges >= msg.range_min) & (ranges <= msg.range_max)]
         
-        # 统计有效数据
-        valid_mask = (ranges >= msg.range_min) & (ranges <= msg.range_max) & np.isfinite(ranges)
-        valid_ranges = ranges[valid_mask]
-        
-        print(f"有效数据点: {len(valid_ranges)}/{len(ranges)} ({len(valid_ranges)/len(ranges)*100:.1f}%)")
-        
-        if len(valid_ranges) > 0:
-            print(f"最近距离: {np.min(valid_ranges):.3f}m")
-            print(f"最远距离: {np.max(valid_ranges):.3f}m")
-            print(f"平均距离: {np.mean(valid_ranges):.3f}m")
-        else:
-            print("❌ 没有有效的距离数据！")
+        if len(valid_ranges) == 0:
+            self.get_logger().warn("没有有效的雷达数据")
             return
         
-        print("-" * 50)
-        
-        # 分区域分析（前方、左侧、右侧、后方）
+        # 检查前方区域（前方90度范围）
         total_points = len(ranges)
+        front_start = total_points * 3 // 8  # 前方45度左侧
+        front_end = total_points * 5 // 8    # 前方45度右侧
+        front_ranges = ranges[front_start:front_end]
         
-        # 定义区域（以机器人为中心，前方为0度）
-        regions = {
-            "前方": (total_points * 7//16, total_points * 9//16),    # 前方 45度范围
-            "右前": (total_points * 5//16, total_points * 7//16),    # 右前
-            "右侧": (total_points * 3//16, total_points * 5//16),    # 右侧
-            "右后": (total_points * 1//16, total_points * 3//16),    # 右后
-            "后方": (0, total_points * 1//16),                       # 后方
-            "左后": (total_points * 15//16, total_points),           # 左后
-            "左侧": (total_points * 13//16, total_points * 15//16),  # 左侧
-            "左前": (total_points * 11//16, total_points * 13//16),  # 左前
-        }
+        # 过滤无效值
+        front_valid = front_ranges[(front_ranges >= msg.range_min) & (front_ranges <= msg.range_max)]
         
-        for region_name, (start, end) in regions.items():
-            region_ranges = ranges[start:end]
-            region_valid = region_ranges[
-                (region_ranges >= msg.range_min) & 
-                (region_ranges <= msg.range_max) & 
-                np.isfinite(region_ranges)
-            ]
+        if len(front_valid) == 0:
+            self.get_logger().warn("前方没有有效雷达数据")
+            return
+        
+        # 找到最近的障碍物
+        min_distance = np.min(front_valid)
+        
+        # 创建速度命令
+        twist = Twist()
+        
+        if min_distance < self.emergency_stop:
+            # 紧急停止
+            twist.linear.x = 0.0
+            twist.angular.z = 0.0
+            self.get_logger().warn(f"紧急停止！前方障碍物距离: {min_distance:.2f}m")
             
-            if len(region_valid) > 0:
-                min_dist = np.min(region_valid)
-                avg_dist = np.mean(region_valid)
-                
-                # 用颜色和符号表示距离
-                if min_dist < 0.3:
-                    status = "🔴 危险"
-                elif min_dist < 0.5:
-                    status = "🟡 注意"
-                elif min_dist < 1.0:
-                    status = "🟢 安全"
-                else:
-                    status = "⚪ 远距"
-                
-                print(f"{region_name}: 最近{min_dist:.2f}m, 平均{avg_dist:.2f}m {status}")
-            else:
-                print(f"{region_name}: 无有效数据")
+        elif min_distance < self.obstacle_threshold:
+            # 避障 - 停止前进，开始转向
+            twist.linear.x = 0.0
+            twist.angular.z = 0.3  # 左转
+            self.get_logger().info(f"避障中... 障碍物距离: {min_distance:.2f}m，正在转向")
+            
+        else:
+            # 安全区域 - 直行
+            twist.linear.x = 0.1  # 慢速前进
+            twist.angular.z = 0.0
+            self.get_logger().info(f"前方安全，距离: {min_distance:.2f}m，继续前进")
         
-        print("-" * 50)
-        
-        # 简单的障碍物警告
-        front_ranges = ranges[total_points * 7//16:total_points * 9//16]
-        front_valid = front_ranges[
-            (front_ranges >= msg.range_min) & 
-            (front_ranges <= msg.range_max) & 
-            np.isfinite(front_ranges)
-        ]
-        
-        if len(front_valid) > 0:
-            front_min = np.min(front_valid)
-            if front_min < 0.3:
-                print("⚠️  前方有紧急障碍物！建议立即停止！")
-            elif front_min < 0.5:
-                print("⚠️  前方有障碍物，建议避让")
-            else:
-                print("✅ 前方安全")
-        
-        print("=" * 60)
+        # 发布速度命令
+        self.cmd_pub.publish(twist)
 
 def main():
-    import math
-    
     rclpy.init()
     
     # 可以通过命令行参数指定机器人名称
     import sys
     robot_name = sys.argv[1] if len(sys.argv) > 1 else "robot1"
     
-    node = LidarDebugger(robot_name)
+    node = ObstacleAvoidanceTest(robot_name)
+    
+    print(f"开始测试 {robot_name} 的避障功能...")
+    print("机器人会自动前进，遇到障碍物时会停止并转向")
+    print("按 Ctrl+C 停止测试")
     
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print("\n调试结束")
+        print("测试结束")
     finally:
+        # 停止机器人
+        twist = Twist()
+        node.cmd_pub.publish(twist)
         node.destroy_node()
         rclpy.shutdown()
 
