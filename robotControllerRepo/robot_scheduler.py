@@ -245,8 +245,9 @@ class ImprovedSequentialManager:
             
         return success
 
-    def execute_sequence_with_handshake(self, task: Dict[str, Any], executor) -> bool:
-        """Execute sequential task with three-way handshake confirmation protocol"""
+    def execute_sequence_with_handshake(self, task: Dict[str, Any], executor, 
+                                        next_sequence_owner: Optional[str] = None) -> bool:
+        """Execute sequential task with conditional handshake protocol"""
         sequence = task.get("sequence")
         task_id = task.get("task_id")
         action = task.get("action")
@@ -261,25 +262,58 @@ class ImprovedSequentialManager:
         
         if success:
             logger.info(f"[EXECUTION] {self.robot_name}: Task execution completed successfully (duration: {execution_time:.2f}s)")
-            logger.info(f"[EXECUTION] {self.robot_name}: Initiating three-way handshake for sequence={sequence}")
             
-            # Initiate handshake protocol
-            self.handshake_mgr.announce_finished(sequence)
-            
-            # Wait for handshake completion
-            handshake_start = time.time()
-            handshake_success = self.handshake_mgr.wait_for_sequence_completion(sequence, timeout=10.0)
-            handshake_time = time.time() - handshake_start
-            
-            if handshake_success:
-                logger.info(f"[EXECUTION] {self.robot_name}: Handshake protocol completed successfully for sequence={sequence} (duration: {handshake_time:.2f}s)")
+            # 🔍 关键优化：只在跨机器人sequential任务时进行握手
+            if next_sequence_owner and next_sequence_owner != self.robot_name:
+                logger.info(f"[EXECUTION] {self.robot_name}: Next sequence owner is {next_sequence_owner}, initiating handshake")
+                
+                # Initiate handshake protocol
+                self.handshake_mgr.announce_finished(sequence)
+                
+                # Wait for handshake completion
+                handshake_start = time.time()
+                handshake_success = self.handshake_mgr.wait_for_sequence_completion(sequence, timeout=10.0)
+                handshake_time = time.time() - handshake_start
+                
+                if handshake_success:
+                    logger.info(f"[EXECUTION] {self.robot_name}: Handshake protocol completed successfully for sequence={sequence} (duration: {handshake_time:.2f}s)")
+                else:
+                    logger.warning(f"[EXECUTION] {self.robot_name}: Handshake protocol timeout for sequence={sequence}")
+                    
             else:
-                logger.warning(f"[EXECUTION] {self.robot_name}: Handshake protocol timeout for sequence={sequence}")
+                logger.info(f"[EXECUTION] {self.robot_name}: Next sequence is local or final, skipping handshake")
                 
         else:
             logger.error(f"[EXECUTION] {self.robot_name}: Task execution failed for sequence={sequence}")
             
         return success
+    
+
+    def build_next_sequence_owner_map(task_data: Dict[str, Any]) -> Dict[int, Optional[str]]:
+        """Build mapping of next sequence ownership for handshake optimization"""
+        sequences = sorted({
+            task["sequence"]
+            for tasks in task_data.get("robots", {}).values()
+            for task in tasks
+            if task.get("sequence") is not None
+        })
+        
+        # Build sequence to owner mapping
+        seq_to_owner = {}
+        for robot, tasks in task_data.get("robots", {}).items():
+            for task in tasks:
+                sequence = task.get("sequence")
+                if sequence is not None:
+                    seq_to_owner[sequence] = robot
+        
+        # Build next owner mapping
+        next_owner_map = {}
+        for i, seq in enumerate(sequences):
+            next_seq = sequences[i + 1] if i + 1 < len(sequences) else None
+            next_owner_map[seq] = seq_to_owner.get(next_seq) if next_seq is not None else None
+        
+        logger.debug(f"[ANALYSIS] Next sequence owner map: {next_owner_map}")
+        return next_owner_map
 
 # =========================
 # Synchronous Coordination Manager
@@ -552,6 +586,8 @@ def run_improved_scheduler_for_robot(node: Node, robot_name: str, task_data: Dic
     logger.debug("[SCHEDULER] Waiting for ROS communication initialization")
     time.sleep(2.0)
 
+    next_owner_map = ImprovedSequentialManager.build_next_sequence_owner_map(task_data)
+
     try:
         for task_idx, task in enumerate(tasks):
             task["robot"] = robot_name
@@ -586,7 +622,10 @@ def run_improved_scheduler_for_robot(node: Node, robot_name: str, task_data: Dic
                             continue
 
                 # Execute with handshake confirmation
-                task_success = sequential_manager.execute_sequence_with_handshake(task, executor)
+                next_owner = next_owner_map.get(sequence)
+                task_success = sequential_manager.execute_sequence_with_handshake(
+                    task, executor, next_owner
+                )
                 if not task_success:
                     logger.error(f"[SCHEDULER] Sequential task execution failed: {task_id}")
                     execution_success = False
