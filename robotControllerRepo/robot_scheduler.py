@@ -643,7 +643,7 @@ def run_improved_scheduler_for_robot(node: Node, robot_name: str, task_data: Dic
                     logger.error(f"[SCHEDULER] Synchronization failed for group {sync_group}")
                     tts_manager.say_sync("Synchronization protocol failed or timeout occurred")
                     execution_success = False
-                    continue
+                    return False
 
                 logger.info(f"[SCHEDULER] Synchronization successful, executing task: {task_id}")
                 task_success = execute_action(node, executor, task)
