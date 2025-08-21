@@ -53,7 +53,12 @@ def main():
         node.start_moving("robot1", "forward", 0.01)
         node.start_moving("robot2", "backward", 0.01)
         print("🚀 Both robots are moving. Press Ctrl+C to stop.")
-        rclpy.spin(node)
+
+        # ✅ 使用多线程 executor（关键！）
+        from rclpy.executors import MultiThreadedExecutor
+        executor = MultiThreadedExecutor()
+        executor.add_node(node)
+        executor.spin()
 
     except KeyboardInterrupt:
         print("\n🛑 KeyboardInterrupt detected. Stopping robots...")
@@ -62,6 +67,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
