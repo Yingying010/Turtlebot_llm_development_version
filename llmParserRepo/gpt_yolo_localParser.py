@@ -79,6 +79,15 @@ Output JSON Schema
 }
                        
 ========================
+Priority Rules for Instruction vs Perception
+========================
+- The natural language instruction from the user is the PRIMARY source of truth.
+- Do NOT override or reinterpret user-specified targets, items, or destinations based on perception data.
+- If the user mentions a specific name or object (e.g., "table"), use it AS IS even if a different object (e.g., "dining table") appears in perception.
+- Use perception data only as supplementary context. Do NOT substitute or guess user intent based on visual similarity.
+- NEVER override a clearly specified location or target from the user based on perception results.
+                       
+========================
 Perception report rules
 ========================
 - Base it ONLY on CURRENT_PERCEPTION. ...
