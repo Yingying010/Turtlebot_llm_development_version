@@ -6,7 +6,7 @@ cmd_robot1 = [
     "ros2", "topic", "pub",
     "/robot1/cmd_vel",
     "geometry_msgs/msg/Twist",
-    "{linear: {x: 0.01}}",
+    "{linear: {x: 0.02}}",
     "-r", "10"
 ]
 
