@@ -1,4 +1,3 @@
-# continuous_multi_robot_move.py
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -8,12 +7,12 @@ import time
 class ContinuousMover(Node):
     def __init__(self):
         super().__init__('continuous_mover')
-        self.publishers = {}
+        self.robot_publishers = {}   # ✅ 改名，避免冲突
         self.stop_flags = {}
 
     def start_moving(self, robot_id, direction, speed):
         pub = self.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
-        self.publishers[robot_id] = pub
+        self.robot_publishers[robot_id] = pub
         self.stop_flags[robot_id] = False
 
         twist = Twist()
@@ -27,7 +26,7 @@ class ContinuousMover(Node):
 
         def move_loop():
             self.get_logger().info(f"🚗 {robot_id} starts moving {direction} at {speed} m/s")
-            time.sleep(0.2)  # wait for pub init
+            time.sleep(0.2)  # 等待publisher建立
             while not self.stop_flags[robot_id]:
                 pub.publish(twist)
                 time.sleep(0.1)  # 10Hz
@@ -41,7 +40,8 @@ class ContinuousMover(Node):
     def stop_all(self):
         for robot_id in self.stop_flags:
             self.stop_flags[robot_id] = True
-        time.sleep(0.5)  # 让最后一个 Twist() 生效
+        time.sleep(0.5)  # 确保最后一帧停止消息发出
+
 
 def main():
     rclpy.init()
@@ -51,7 +51,7 @@ def main():
         node.start_moving("robot1", "forward", 0.01)
         node.start_moving("robot2", "backward", 0.01)
         print("🚀 Both robots are moving. Press Ctrl+C to stop.")
-        rclpy.spin(node)  # 保持节点运行
+        rclpy.spin(node)  # 保持运行
 
     except KeyboardInterrupt:
         print("\n🛑 KeyboardInterrupt detected. Stopping robots...")
