@@ -6,6 +6,7 @@ import platform
 import subprocess
 from typing import Optional, List
 from loguru import logger
+import shutil
 from gtts import gTTS
 
 def _split_text(text: str, max_len: int = 180) -> List[str]:
