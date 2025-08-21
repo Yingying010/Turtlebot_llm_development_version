@@ -1,19 +1,22 @@
-# multi_robot_move.py
+# continuous_multi_robot_move.py
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 import threading
 import time
 
-class MultiRobotController(Node):
+class ContinuousMover(Node):
     def __init__(self):
-        super().__init__('multi_robot_controller')
+        super().__init__('continuous_mover')
+        self.publishers = {}
+        self.stop_flags = {}
 
-    def move(self, robot_id, direction, speed, duration_sec):
-        publisher = self.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
+    def start_moving(self, robot_id, direction, speed):
+        pub = self.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
+        self.publishers[robot_id] = pub
+        self.stop_flags[robot_id] = False
+
         twist = Twist()
-
-        # 设置方向
         if direction == "forward":
             twist.linear.x = abs(speed)
         elif direction == "backward":
@@ -22,36 +25,41 @@ class MultiRobotController(Node):
             self.get_logger().error(f"Unknown direction: {direction}")
             return
 
-        time.sleep(0.2)  # 等待 publisher 初始化
+        def move_loop():
+            self.get_logger().info(f"🚗 {robot_id} starts moving {direction} at {speed} m/s")
+            time.sleep(0.2)  # wait for pub init
+            while not self.stop_flags[robot_id]:
+                pub.publish(twist)
+                time.sleep(0.1)  # 10Hz
+            # 停车
+            pub.publish(Twist())
+            self.get_logger().info(f"🛑 {robot_id} stopped.")
 
-        start = time.time()
-        while time.time() - start < duration_sec:
-            publisher.publish(twist)
-            time.sleep(0.1)  # 相当于 -r 10
+        thread = threading.Thread(target=move_loop)
+        thread.start()
 
-        publisher.publish(Twist())  # 停止
-        self.get_logger().info(f"{robot_id} finished moving {direction}.")
+    def stop_all(self):
+        for robot_id in self.stop_flags:
+            self.stop_flags[robot_id] = True
+        time.sleep(0.5)  # 让最后一个 Twist() 生效
 
 def main():
     rclpy.init()
-    node = MultiRobotController()
+    node = ContinuousMover()
 
-    # 设置移动参数
-    duration = 3  # 秒
-    speed = 0.01  # m/s
+    try:
+        node.start_moving("robot1", "forward", 0.01)
+        node.start_moving("robot2", "backward", 0.01)
+        print("🚀 Both robots are moving. Press Ctrl+C to stop.")
+        rclpy.spin(node)  # 保持节点运行
 
-    # 启动两个线程控制两个机器人
-    t1 = threading.Thread(target=node.move, args=("robot1", "forward", speed, duration))
-    t2 = threading.Thread(target=node.move, args=("robot2", "backward", speed, duration))
+    except KeyboardInterrupt:
+        print("\n🛑 KeyboardInterrupt detected. Stopping robots...")
+        node.stop_all()
 
-    t1.start()
-    t2.start()
-
-    t1.join()
-    t2.join()
-
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
