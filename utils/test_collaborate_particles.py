@@ -1,52 +1,57 @@
-#!/usr/bin/env python3
+# multi_robot_move.py
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
+import threading
+import time
 
-class VelocityPublisher(Node):
+class MultiRobotController(Node):
     def __init__(self):
-        super().__init__('multi_robot_velocity_publisher')
+        super().__init__('multi_robot_controller')
 
-        # 创建两个publisher
-        self.publisher_robot1 = self.create_publisher(
-            Twist,
-            '/robot1/cmd_vel',
-            10
-        )
-        self.publisher_robot2 = self.create_publisher(
-            Twist,
-            '/robot2/cmd_vel',
-            10
-        )
+    def move(self, robot_id, direction, speed, duration_sec):
+        publisher = self.create_publisher(Twist, f'/{robot_id}/cmd_vel', 10)
+        twist = Twist()
 
-        # 设置定时器，每0.1秒发布一次
-        self.timer = self.create_timer(0.1, self.publish_velocity)
+        # 设置方向
+        if direction == "forward":
+            twist.linear.x = abs(speed)
+        elif direction == "backward":
+            twist.linear.x = -abs(speed)
+        else:
+            self.get_logger().error(f"Unknown direction: {direction}")
+            return
 
-    def publish_velocity(self):
-        # Robot1: forward
-        twist1 = Twist()
-        twist1.linear.x = 0.01
-        twist1.angular.z = 0.0
+        time.sleep(0.2)  # 等待 publisher 初始化
 
-        # Robot2: backward
-        twist2 = Twist()
-        twist2.linear.x = -0.01
-        twist2.angular.z = 0.0
+        start = time.time()
+        while time.time() - start < duration_sec:
+            publisher.publish(twist)
+            time.sleep(0.1)  # 相当于 -r 10
 
-        self.publisher_robot1.publish(twist1)
-        self.publisher_robot2.publish(twist2)
+        publisher.publish(Twist())  # 停止
+        self.get_logger().info(f"{robot_id} finished moving {direction}.")
 
-        self.get_logger().info('Published to robot1: forward 0.01 m/s')
-        self.get_logger().info('Published to robot2: backward 0.01 m/s')
+def main():
+    rclpy.init()
+    node = MultiRobotController()
 
+    # 设置移动参数
+    duration = 3  # 秒
+    speed = 0.01  # m/s
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = VelocityPublisher()
-    rclpy.spin(node)
+    # 启动两个线程控制两个机器人
+    t1 = threading.Thread(target=node.move, args=("robot1", "forward", speed, duration))
+    t2 = threading.Thread(target=node.move, args=("robot2", "backward", speed, duration))
+
+    t1.start()
+    t2.start()
+
+    t1.join()
+    t2.join()
+
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
