@@ -7,7 +7,7 @@ import time
 class ContinuousMover(Node):
     def __init__(self):
         super().__init__('continuous_mover')
-        self.robot_publishers = {}   # 避免冲突
+        self.robot_publishers = {}
         self.stop_flags = {}
 
     def start_moving(self, robot_id, direction, speed):
@@ -26,16 +26,15 @@ class ContinuousMover(Node):
 
         def move_loop():
             self.get_logger().info(f"🚗 {robot_id} starts moving {direction} at {speed} m/s")
-            time.sleep(0.2)  # 等待 publisher 初始化
+            time.sleep(0.2)  # 给 publisher 建立时间
 
             while not self.stop_flags[robot_id]:
                 pub.publish(twist)
-                rclpy.spin_once(self, timeout_sec=0)  # ✅ 确保 ROS 事件处理
                 time.sleep(0.1)  # 10Hz
 
-            # 停车
+            # 停止
             pub.publish(Twist())
-            rclpy.spin_once(self, timeout_sec=0)  # ✅ 确保最后一次停止指令发出
+            time.sleep(0.1)
             self.get_logger().info(f"🛑 {robot_id} stopped.")
 
         thread = threading.Thread(target=move_loop)
@@ -44,7 +43,7 @@ class ContinuousMover(Node):
     def stop_all(self):
         for robot_id in self.stop_flags:
             self.stop_flags[robot_id] = True
-        time.sleep(0.5)  # 给足时间发出 Twist(0)
+        time.sleep(0.5)
 
 def main():
     rclpy.init()
@@ -54,7 +53,7 @@ def main():
         node.start_moving("robot1", "forward", 0.01)
         node.start_moving("robot2", "backward", 0.01)
         print("🚀 Both robots are moving. Press Ctrl+C to stop.")
-        rclpy.spin(node)  # 维持 ROS 事件循环运行
+        rclpy.spin(node)
 
     except KeyboardInterrupt:
         print("\n🛑 KeyboardInterrupt detected. Stopping robots...")
