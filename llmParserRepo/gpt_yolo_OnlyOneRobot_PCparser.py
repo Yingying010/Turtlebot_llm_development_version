@@ -392,7 +392,7 @@ class YOLOPerceiver:
         return annotated, {"image": {"width": int(w), "height": int(h)}, "detections": detections}
 
 # ================== 感知上下文构造 ==================
-def _assign_ids(dets: List[Dict], topk: int = 20):
+def _assign_ids(dets: List[Dict], topk: int = 3):
     dets = dets[:topk]
     totals = Counter(d["class"] for d in dets)
     seen   = Counter()
@@ -416,7 +416,7 @@ def build_perception_context(det_json: Dict, topk: int = 3) -> str:
     ctx = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "objects": objs}
     return "CURRENT_PERCEPTION:\n" + json.dumps(ctx, ensure_ascii=False)
 
-def build_perception_summary(det_json: Dict, topk: int = 20) -> Dict:
+def build_perception_summary(det_json: Dict, topk: int = 3) -> Dict:
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,

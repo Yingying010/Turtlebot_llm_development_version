@@ -18,28 +18,6 @@ import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
-# def move_linear(robot_id, direction, value, unit):
-#     print(f"🚗 {robot_id} moving {direction} for {value} {unit}")
-
-# def rotate(robot_id, direction, value, unit, target="self"):
-#     print(f"🔁 {robot_id} turning {direction} {value}{unit} around {target}")
-
-# def navigate_to_target(robot_id, target):
-#     print(f"🧭 {robot_id} navigating to {target}")
-
-# def follow_target(robot_id, target, robot_position_cache):
-#     print(f"👣 {robot_id} following {target}")
-
-# def face_to_target(robot_id, target, robot_position_cache):
-#     print(f"🧍 {robot_id} facing {target}")
-
-# def imitate_robot(robot_id, target_robot_id):
-#     print(f"🎭 {robot_id} imitating {target_robot_id}")
-
-
-
-
-
 def execute_action(node, executor, task: Dict):
     is_successful = False
     print(node)
@@ -103,6 +81,7 @@ def execute_action(node, executor, task: Dict):
     elif action == "wait":
         print(f"  → Waiting for {params['duration_sec']} seconds")
         time.sleep(params["duration_sec"])
+        is_successful = True
 
 
     else:
