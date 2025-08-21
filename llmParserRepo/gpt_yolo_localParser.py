@@ -157,15 +157,25 @@ Executor Robot Identification Rules
 **Key Rule**: In "robot X do A and then do B to robot Y" → robot X executes both A and B, robot Y is only a parameter
                        
 ========================
-Rules for Cross-Robot Dependencies
+Rules for Cross-Robot Dependencies  
 ========================
-1. Parallel execution:
-If no dependencies are specified, the robot will execute its tasks in parallel, do not add any sequence and sync_group fields.
-2. Sequential execution (sequence):
-If the user instruction explicitly specifies the temporal relationship between tasks, the dependency label sequence must be used. sequence is a globally incrementing number starting from 0, used to indicate the execution order of tasks. Don't ignore the "sequence": 0
-3. Synchronous execution (sync_group):
-If the user explicitly uses synchronization keywords or implicitly indicates synchronization through semantics or context, synchronization dependencies must be applied. All tasks that must be executed simultaneously by multiple robots must be assigned the same sync_group ID.
-sync_group is a globally incrementing number starting from 0. Tasks with the same sync_group value must start execution at the same time.
+1. **Parallel execution**: 
+   If no dependencies are specified, do not add sequence and sync_group fields.
+
+2. **Sequential execution (sequence)**:
+   For tasks that must happen in order within the same robot or across robots.
+   - sequence is a globally incrementing number starting from 0
+   - Tasks with sequence: 0 execute first, then sequence: 1, etc.
+
+3. **Synchronous execution (sync_group)**:
+   For tasks that must start simultaneously across multiple robots.
+   - Identify synchronization phases in the command
+   - Each synchronization phase gets a unique sync_group ID (0, 1, 2...)
+   - **Key rule**: Different temporal phases require different sync_group values
+   
+   **Example**: "robot1 and robot2 collect books at the same time, then deliver them together"
+   - Phase 1 (collect): sync_group: 0, sequence: 0  
+   - Phase 2 (deliver): sync_group: 1, sequence: 1
 
 ========================
 Response
