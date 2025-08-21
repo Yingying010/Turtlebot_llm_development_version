@@ -29,7 +29,7 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
     # === 阶段 2：收集 ===
     print(f"🗣️ Speaking: I am collecting {item}")
     tts_manager.say(f"I am collecting {item}")
-    time.sleep(3)  # 模拟收集时间
+    time.sleep(10)  # 模拟收集时间
     tts_manager.say(f"{item} collected successfully")
 
     return is_successful

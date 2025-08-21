@@ -28,7 +28,7 @@ def deliver_item(node: Node, robot_name: str, item: str, target, executor):
     # === 阶段 2：送达 ===
     print(f"🗣️ Speaking: I am delivering {item}")
     tts_manager.say(f"I am delivering {item}")
-    time.sleep(3)  # 模拟送达时间
+    time.sleep(10)  # 模拟送达时间
     tts_manager.say(f"{item} delivered successfully")
     return is_successful
  

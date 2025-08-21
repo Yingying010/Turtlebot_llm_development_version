@@ -39,7 +39,7 @@ while True:
         cls = model.names[int(box.cls)]
         conf = float(box.conf)
         # 你想筛掉置信度低的可以 if conf < 0.25: continue
-        print(f"检测到 {cls}，置信度 {conf:.2f}")
+        print(f"Detect: {cls}，Confidence: {conf:.2f}")
  
     # 可视化（Ultralytics自带绘制）
     annotated = r.plot()  # 返回带框的BGR图
