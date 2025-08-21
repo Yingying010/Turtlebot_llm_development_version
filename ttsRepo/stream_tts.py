@@ -123,7 +123,7 @@ class TTSManager:
                         break
 
                     # 播放 mp3
-                    play_cmd = [self._player, mp3_path] if "mpg123" in self._player else [self._player, "-nodisp", "-autoexit", mp3_path]
+                    play_cmd = [self._player,"-q", mp3_path] if "mpg123" in self._player else [self._player, "-nodisp", "-autoexit", mp3_path]
                     logger.info(f"🔊 {part}")
                     with self._lock:
                         self._current_process = subprocess.Popen(play_cmd)
