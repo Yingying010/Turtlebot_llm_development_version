@@ -5,7 +5,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
 import json, time, threading, traceback
 from collections import defaultdict
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 from ttsRepo.stream_tts import tts_manager
 import rclpy
 from rclpy.node import Node
@@ -14,7 +14,6 @@ from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from loguru import logger
 from textwrap import dedent
-from typing import Set
 
 # === 你项目里的依赖 ===
 from robotControllerRepo.robot_controller import execute_action
@@ -26,339 +25,225 @@ def now():
     return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 # =========================
-# 全局状态
+# 三次握手管理器
 # =========================
-ros_node: Optional[Node] = None
-status_pub = None
-sync_group_id = None
-need_count = None
-ready_count = None
-remaining_count = None
-ts = None
-# 全局状态（添加）
-sync_go_events = defaultdict(threading.Event)  # sg -> Event
-sync_go_times: Dict[int, float] = {}           # sg -> start_at(Unix time)
-
-global_barrier = {
-    "kind": "barrier", 
-    "sync_group": sync_group_id, 
-    "need": need_count, 
-    "ready": ready_count, 
-    "remaining": remaining_count, 
-    "ts": ts
-}
-
-# 状态缓存：key 为 (seq, sync_group) 二元组
-# - 跨机器人串行阶段：使用 (seq, None)，只统计 finished
-# - 跨机器人同步：使用 (None, sg)，统计 ready / finished
-status_cache = defaultdict(lambda: defaultdict(str))  # {(seq, sg): {robot: status}}
-
-# 目标计数：屏障需要达到的数量
-# - (seq, None) → 1（因为序号全局唯一）
-# - (None, sg)  → 该同步组中的机器人数量
-target_counts: Dict[tuple, int] = {}
-
-# 事件（屏障）
-status_events = defaultdict(threading.Event)
-
-# 锁
-cache_lock = threading.Lock()
-
-data = {}
-
-# 心跳
-HEARTBEAT_INTERVAL = 2.0
-_heartbeat_stop = threading.Event()
-_heartbeat_thread: threading.Thread | None = None
-
-
-# =========================
-# 工具函数
-# =========================
-def status_rank(s: str) -> int:
-    return {"ready": 1, "running": 2, "finished": 3}.get(s, 0)
-
-
-def _safe_publish(payload: dict):
-    """安全发布到 /robot_status。"""
-    if status_pub is None or not rclpy.ok():
-        return
-    try:
-        status_pub.publish(String(data=json.dumps(payload)))
-    except Exception:
-        logger.exception("publish failed")
-
-
-def wait_for_all_status(sync_key: tuple, expected: str, timeout=60):
-    """等待某个键的某个状态达到 target_counts 要求。"""
-    ev = status_events[(sync_key, expected)]
-    ok = ev.wait(timeout)
-    if not ok:
-        raise TimeoutError(f"{sync_key} 等待 {expected} 超时")
-    ev.clear()
-
-def _counts_for_key(key: tuple):
-    with cache_lock:
-        need = target_counts.get(key, 0)
-        # ✅ 精确匹配，避免各种比较歧义
-        ready = sum(1 for s in status_cache[key].values() if s == "ready")
-        finished = sum(1 for s in status_cache[key].values() if s == "finished")
-    remaining = max(need - finished, 0)
-    return need, ready, finished, remaining
-
-
-def publish_barrier_snapshot(sync_group: int):
-    """将同步组的聚合状态发布到 /robot_status（kind=barrier）"""
-    key = (None, sync_group)
-    need, ready, finished, remaining = _counts_for_key(key)
-    payload = {
-        "kind": "barrier",
-        "sync_group": sync_group,
-        "need": need,
-        "ready": ready,
-        "remaining": remaining,
-        "ts": time.time(),
-    }
-    # global_barrier = payload
-    _safe_publish(payload)
-    print(f"📊 Barrier snapshot sg={sync_group} → need={need}, ready={ready}, remaining={remaining}")
-
-def publish_sync_go(sync_group: int, delay: float = 0.3):
-    """领导者发布统一起跑时间（当前时间+delay），所有人等到这个时间再运行。
-    该函数具有防重复机制，即 sg 对应的 GO 若已发布，不再重复发布。
-    """
-    if sync_group in sync_go_times:
-        print(f"🚫 GO already published for sync_group={sync_group}, skipping.")
-        return  # 已经发布过，防止重复
-
-    start_at = time.time() + delay
-    payload = {
-        "kind": "go",
-        "sync_group": sync_group,
-        "start_at": start_at,
-        "ts": time.time(),
-    }
-
-    # 先本地记一份，避免领导者还要等自己发的消息回环
-    sync_go_times[sync_group] = start_at
-    sync_go_events[sync_group].set()
-    _safe_publish(payload)
-    print(f"🚦 publish GO | sg={sync_group} | start_at={start_at:.3f} (delay={delay}s)")
-
- 
-def wait_for_sync_go(sync_group: int, timeout: float = 5.0):
-    """等待收到 GO，并在指定 start_at 时刻同步起跑。"""
-    ev = sync_go_events[sync_group]
-    ok = ev.wait(timeout)
-    if not ok:
-        raise TimeoutError(f"sync_group={sync_group} 等待 GO 超时")
-    start_at = sync_go_times[sync_group]
-    now = time.time()
-    remain = start_at - now
-    if remain > 0:
-        time.sleep(remain)
-    print(f"🚦 GO LATCHED | sg={sync_group} | now={time.time():.3f}")
-
-def build_seq_owner_map(task_data: Dict[str, Any]) -> Dict[int, str]:
-    """
-    为每个全局唯一的 sequence 找到其归属机器人。
-    依赖你已有的 validate_local_plan()，保证 sequence 在全局唯一。
-    """
-    owner = {}
-    for robot, tasks in task_data.get("robots", {}).items():
-        for t in tasks:
-            s = t.get("sequence")
-            if s is not None:
-                owner[int(s)] = robot
-    return owner
-
-# =========================
-# 本地计划校验（仅用 task_data["robots"]）
-# =========================
-def validate_local_plan(task_data: Dict[str, Any]):
-    """
-    1) 校验单任务互斥：不能同时出现 sequence 和 sync_group
-    2) 全局 sequence 唯一：同一个 sequence 只能出现在一个机器人的一条任务上
-    """
-    seen_seq_owner: Dict[int, str] = {}
-    for robot, tasks in task_data.get("robots", {}).items():
-        # 额外：统计该机器人内的 sequence 是否重复
-        seen_seq_in_robot = set()
-
-        for t in tasks:
-            s = t.get("sequence")
-            sg = t.get("sync_group")
-
-            if s is not None and sg is not None:
-                raise ValueError(f"Task cannot have both sequence and sync_group: {t}")
-
-            if s is not None:
-                # 同一机器人内不得重复 sequence
-                if s in seen_seq_in_robot:
-                    raise ValueError(f"Duplicate sequence={s} in robot '{robot}'")
-                seen_seq_in_robot.add(s)
-
-                # 同一 sequence 不能出现在不同机器人
-                if s in seen_seq_owner and seen_seq_owner[s] != robot:
-                    raise ValueError(
-                        f"Duplicate global sequence={s} found on '{seen_seq_owner[s]}' and '{robot}'"
-                    )
-                seen_seq_owner[s] = robot
-
-
-
-def build_prev_stage_map(task_data: Dict[str, Any]) -> Dict[int, Optional[int]]:
-    """
-    构建全局阶段的前驱映射：
-    - 收集所有 sequence 值
-    - 按升序排序
-    - 对每个阶段给出它的前一阶段（第一个为 None）
-    """
-    stages = sorted({
-        t["sequence"]
-        for tasks in task_data.get("robots", {}).values()
-        for t in tasks
-        if t.get("sequence") is not None
-    })
-    prev = {}
-    for i, s in enumerate(stages):
-        prev[s] = stages[i - 1] if i > 0 else None
-    return prev
-
-
-def count_robots_per_sync_key(task_data: Dict[str, Any]) -> Dict[tuple, int]:
-    """
-    计算屏障需要的目标数量：
-    - (seq, None) → 1  （序列号全局唯一、且每个阶段只有一个执行者）
-    - (None, sg)  → 同步组中机器人数量
-    """
-    out: Dict[tuple, int] = {}
-
-    # 序列阶段：固定需要 1
-    seqs = {
-        t["sequence"]
-        for tasks in task_data.get("robots", {}).values()
-        for t in tasks
-        if t.get("sequence") is not None
-    }
-    for s in seqs:
-        out[(s, None)] = 1
-
-    # 同步组：统计参与机器人数量
-    sg_map = defaultdict(set)
-    for robot, tasks in task_data.get("robots", {}).items():
-        for t in tasks:
-            sg = t.get("sync_group")
-            if sg is not None:
-                sg = int(sg)
-                sg_map[(None, sg)].add(robot)
-    out.update({k: len(v) for k, v in sg_map.items()})
-    return out
-
-
-# =========================
-# 状态入账 & 广播
-# =========================
-def _apply_status_and_maybe_signal(robot: str, seq, sync_group, status: str):
-    """
-    - 同步：key = (None, sg)，使用 ready / finished 阈值
-    - 阶段：key = (seq, None)，只使用 finished 阈值
-    - 无依赖：key = (None, None)，不触发任何屏障
-    """
-    if seq is not None and sync_group is None:
-        key = (seq, None)
-    elif sync_group is not None and seq is None:
-        key = (None, sync_group)
-    else:
-        key = (None, None)
-
-    print(f"DEBUG apply_status: robot={robot}, status={status}, key={key}, type={type(key[1])}")
-
-    with cache_lock:
-        status_cache[key][robot] = status
-        need = target_counts.get(key, 0)
-
-        reached_ready = sum(status_rank(s) >= status_rank("ready") for s in status_cache[key].values())
-        reached_finished = sum(status_rank(s) >= status_rank("finished") for s in status_cache[key].values())
-
-        # 同步屏障：ready / finished
-        if key[0] is None and key[1] is not None and need > 0:
-            if reached_ready >= need:
-                status_events[(key, "ready")].set()
-            if reached_finished >= need:
-                status_events[(key, "finished")].set()
-
-        # 阶段屏障：只有 finished
-        if key[0] is not None and key[1] is None and need > 0:
-            if reached_finished >= need:
-                status_events[(key, "finished")].set()
+class ThreeWayHandshakeManager:
+    """管理sequential任务的三次握手确认机制"""
+    def __init__(self, robot_name: str, publisher):
+        self.robot_name = robot_name
+        self.publisher = publisher
         
-    # —— 在任何状态变化后，如果是同步组，发布一次聚合快照 —— 
-    if key[0] is None and key[1] is not None:
-        publish_barrier_snapshot(key[1])
-
-    print(f"(local) {robot} → {status} @ {key} (need={need}, ready={reached_ready}, fin={reached_finished})")
-
-
-
-
-def ensure_task_ids(task_data: Dict[str, Any]):
-    for robot, tasks in task_data.get("robots", {}).items():
-        for i, t in enumerate(tasks):
-            # 生成一个可复现的ID：robot-序号或组-索引-动作
-            seq = t.get("sequence")
-            sg  = t.get("sync_group")
-            tag = f"seq{seq}" if seq is not None else (f"sg{sg}" if sg is not None else "local")
-            t["task_id"] = f"{robot}-{tag}-{i}"
-
-
-def publish_state(robot: str, task_id, sequence, sync_group, status: str):
-    """
-    统一的状态发布
-    """
-    _apply_status_and_maybe_signal(robot, sequence, sync_group, status)
-    payload = {
-        "kind": "state",
-        "robot": robot,
-        "task_id": task_id,
-        "sequence": sequence,
-        "sync_group": sync_group,
-        "status": status,
-        "ts": time.time(),
-    }
-    _safe_publish(payload)
-    print(f"[{robot}] 📣 State: {status} @ ({sequence}, {sync_group})")
+        # 握手状态跟踪
+        self.sent_finished: Dict[int, float] = {}  # seq -> timestamp
+        self.received_acks: Dict[int, Set[str]] = {}  # seq -> {robot_names}
+        self.sent_ack_acks: Dict[int, Set[str]] = {}  # seq -> {robot_names}
+        self.completed_sequences: Set[int] = set()  # 已完成握手的sequences
+        
+        # 锁保护
+        self.lock = threading.Lock()
+        
+    def announce_finished(self, sequence: int):
+        """第一步：宣布完成 (SYN)"""
+        with self.lock:
+            self.sent_finished[sequence] = time.time()
+            
+        msg = {
+            "kind": "finished",
+            "robot": self.robot_name,
+            "sequence": sequence,
+            "ts": time.time()
+        }
+        self.publisher.publish(String(data=json.dumps(msg)))
+        logger.info(f"📤 {self.robot_name} → SYN: finished seq={sequence}")
+        
+    def send_ack(self, to_robot: str, sequence: int):
+        """第二步：发送确认 (ACK)"""
+        msg = {
+            "kind": "ack_finished",
+            "robot": self.robot_name,
+            "to": to_robot,
+            "sequence": sequence,
+            "ts": time.time()
+        }
+        self.publisher.publish(String(data=json.dumps(msg)))
+        logger.info(f"🤝 {self.robot_name} → ACK: to {to_robot} seq={sequence}")
+        
+    def send_ack_ack(self, to_robot: str, sequence: int):
+        """第三步：确认收到确认 (ACK-ACK)"""
+        with self.lock:
+            if sequence not in self.sent_ack_acks:
+                self.sent_ack_acks[sequence] = set()
+            self.sent_ack_acks[sequence].add(to_robot)
+            
+        msg = {
+            "kind": "ack_ack_finished",
+            "robot": self.robot_name,
+            "to": to_robot,
+            "sequence": sequence,
+            "ts": time.time()
+        }
+        self.publisher.publish(String(data=json.dumps(msg)))
+        logger.info(f"✅ {self.robot_name} → ACK-ACK: to {to_robot} seq={sequence}")
+        
+    def handle_received_finished(self, from_robot: str, sequence: int):
+        """处理收到的finished消息，自动发送ACK"""
+        logger.info(f"📨 {self.robot_name} received SYN: {from_robot} finished seq={sequence}")
+        self.send_ack(from_robot, sequence)
+        
+        # 对于其他机器人完成的sequence，收到SYN即可认为该sequence完成
+        with self.lock:
+            self.completed_sequences.add(sequence)
+        
+    def handle_received_ack(self, from_robot: str, sequence: int) -> bool:
+        """处理收到的ACK，自动发送ACK-ACK，返回握手是否完成"""
+        logger.info(f"📨 {self.robot_name} received ACK from {from_robot} seq={sequence}")
+        
+        with self.lock:
+            if sequence not in self.received_acks:
+                self.received_acks[sequence] = set()
+            self.received_acks[sequence].add(from_robot)
+            
+        # 自动发送ACK-ACK
+        self.send_ack_ack(from_robot, sequence)
+        
+        # 检查握手是否完成（简化：收到至少一个ACK就认为完成）
+        with self.lock:
+            if len(self.received_acks[sequence]) >= 1:
+                self.completed_sequences.add(sequence)
+                return True
+        return False
+        
+    def handle_received_ack_ack(self, from_robot: str, sequence: int):
+        """处理收到的ACK-ACK"""
+        logger.info(f"📨 {self.robot_name} received ACK-ACK from {from_robot} seq={sequence}")
+        
+    def is_sequence_complete(self, sequence: int) -> bool:
+        """检查指定sequence是否已完成握手"""
+        with self.lock:
+            return sequence in self.completed_sequences
+        
+    def wait_for_sequence_completion(self, sequence: int, timeout: float = 30.0) -> bool:
+        """等待指定sequence完成握手"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.is_sequence_complete(sequence):
+                return True
+            time.sleep(0.1)
+        return False
 
 # =========================
-# 心跳
+# 改进的Sequential管理器
 # =========================
-def start_heartbeat(robot: str):
-    global _heartbeat_thread, _heartbeat_stop
-    if _heartbeat_thread and _heartbeat_thread.is_alive():
-        return
-    _heartbeat_stop.clear()
+class ImprovedSequentialManager:
+    def __init__(self, node: Node, robot_name: str, all_robots: Set[str]):
+        self.node = node
+        self.robot_name = robot_name
+        self.all_robots = all_robots
+        
+        # QoS设置
+        qos_profile = QoSProfile(depth=50)
+        qos_profile.reliability = ReliabilityPolicy.RELIABLE
+        qos_profile.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        
+        # 发布器和订阅器
+        self.pub = node.create_publisher(String, '/robot_status', qos_profile)
+        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, qos_profile)
+        
+        # 三次握手管理器
+        self.handshake_mgr = ThreeWayHandshakeManager(robot_name, self.pub)
+        
+        # 序列等待事件
+        self.sequence_events: Dict[int, threading.Event] = {}
+        
+        logger.info(f"🤖 ImprovedSequentialManager initialized for {robot_name}")
+        
+    def status_callback(self, msg):
+        """处理收到的状态消息"""
+        try:
+            data = json.loads(msg.data)
+            kind = data.get("kind")
+            robot = data.get("robot")
+            sequence = data.get("sequence")
+            to_robot = data.get("to")
 
-    def loop():
-        while not _heartbeat_stop.is_set():
-            _safe_publish({
-                "kind": "heartbeat",
-                "robot": robot,
-                "ts": time.time()
-            })
-            time.sleep(HEARTBEAT_INTERVAL)
+            # 忽略自己的消息
+            if robot == self.robot_name:
+                return
+                
+            if kind == "finished" and sequence is not None:
+                self.handshake_mgr.handle_received_finished(robot, sequence)
+                # 触发等待该sequence的事件
+                if sequence in self.sequence_events:
+                    logger.info(f"🚦 {self.robot_name} signaling completion for seq={sequence}")
+                    self.sequence_events[sequence].set()
+                
+            elif kind == "ack_finished" and to_robot == self.robot_name and sequence is not None:
+                is_complete = self.handshake_mgr.handle_received_ack(robot, sequence)
+                if is_complete and sequence in self.sequence_events:
+                    logger.info(f"🎊 {self.robot_name} handshake complete for seq={sequence}")
+                    self.sequence_events[sequence].set()
+                
+            elif kind == "ack_ack_finished" and to_robot == self.robot_name and sequence is not None:
+                self.handshake_mgr.handle_received_ack_ack(robot, sequence)
 
-    _heartbeat_thread = threading.Thread(target=loop, daemon=True)
-    _heartbeat_thread.start()
+        except Exception as e:
+            logger.warning(f"Parse error in status_callback: {e}")
 
+    def wait_for_previous_sequence(self, sequence: int, prev_sequence: int, prev_owner: str, timeout: float = 60.0) -> bool:
+        """等待前序sequence完成"""
+        if prev_owner == self.robot_name:
+            logger.info(f"📝 {self.robot_name}: Previous seq={prev_sequence} is mine, no waiting needed")
+            return True
+            
+        # 检查是否已经完成
+        if self.handshake_mgr.is_sequence_complete(prev_sequence):
+            logger.info(f"✅ {self.robot_name}: Previous seq={prev_sequence} already completed")
+            return True
+            
+        logger.info(f"⏳ {self.robot_name} waiting for seq={prev_sequence} from {prev_owner}")
+        
+        # 创建等待事件
+        if prev_sequence not in self.sequence_events:
+            self.sequence_events[prev_sequence] = threading.Event()
+        
+        # 等待完成
+        success = self.sequence_events[prev_sequence].wait(timeout)
+        
+        if success:
+            logger.info(f"🎉 {self.robot_name}: seq={prev_sequence} completed, can start seq={sequence}")
+        else:
+            logger.warning(f"❌ {self.robot_name}: Timeout waiting for seq={prev_sequence}")
+            
+        return success
 
-def stop_heartbeat():
-    _heartbeat_stop.set()
-    if _heartbeat_thread:
-        _heartbeat_thread.join(timeout=1)
-
+    def execute_sequence_with_handshake(self, task: Dict[str, Any], executor) -> bool:
+        """执行sequence任务并进行三次握手"""
+        sequence = task.get("sequence")
+        task_id = task.get("task_id")
+        
+        logger.info(f"🎬 {self.robot_name} starting sequence {sequence}")
+        
+        # 执行任务
+        success = execute_action(self.node, executor, task)
+        
+        if success:
+            logger.info(f"✅ {self.robot_name} completed execution for seq={sequence}")
+            
+            # 启动三次握手
+            self.handshake_mgr.announce_finished(sequence)
+            
+            # 等待握手完成
+            handshake_success = self.handshake_mgr.wait_for_sequence_completion(sequence, timeout=10.0)
+            
+            if handshake_success:
+                logger.info(f"🎊 {self.robot_name} handshake confirmed for seq={sequence}")
+            else:
+                logger.warning(f"⚠️ {self.robot_name} handshake timeout for seq={sequence}")
+                
+        return success
 
 # =========================
-# Synchronous
+# 同步管理器（保持原有实现）
 # =========================
 class RobotSyncManager:
     def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 60.0):
@@ -372,15 +257,18 @@ class RobotSyncManager:
         self.ack_set: Set[str] = set()
         self.prev_ready_set: Set[str] = set()
 
-        self.pub = node.create_publisher(String, '/robot_status', 10)
-        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, 10)
+        qos_profile = QoSProfile(depth=10)
+        qos_profile.reliability = ReliabilityPolicy.RELIABLE
+        
+        self.pub = node.create_publisher(String, '/robot_status', qos_profile)
+        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, qos_profile)
 
         self.ready_timer = node.create_timer(1.0, self.publish_ready)
         self.sync_start_time = time.time()
         self.sync_timeout_timer = node.create_timer(0.5, self.check_timeout)
 
         self.sync_complete_event = threading.Event()
-        print(f"{now()} | {robot_name} waiting for ALL ack_ready...")
+        logger.info(f"{self.robot_name} waiting for ALL ack_ready...")
 
     def publish_ready(self):
         msg = {
@@ -390,7 +278,7 @@ class RobotSyncManager:
             "ts": time.time()
         }
         self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | PUBLISH {self.robot_name} → ready")
+        logger.info(f"PUBLISH {self.robot_name} → ready")
 
     def publish_ack(self, to_robot):
         msg = {
@@ -401,7 +289,7 @@ class RobotSyncManager:
             "ts": time.time()
         }
         self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | {self.robot_name} send ack_ready to {to_robot}")
+        logger.info(f"{self.robot_name} send ack_ready to {to_robot}")
 
     def status_callback(self, msg):
         try:
@@ -423,17 +311,17 @@ class RobotSyncManager:
             self.check_sync_complete()
 
         except Exception as e:
-            self.node.get_logger().warn(f"Parse error: {e}")
+            logger.warning(f"Parse error: {e}")
 
     def print_ready_set(self):
         if self.ready_set != self.prev_ready_set:
-            print(f"{now()} | {self.robot_name} sees ready_set = {sorted(self.ready_set)}")
+            logger.info(f"{self.robot_name} sees ready_set = {sorted(self.ready_set)}")
             self.prev_ready_set = set(self.ready_set)
 
     def check_sync_complete(self):
         if len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count:
             if not self.sync_complete_event.is_set():
-                print(f"{now()} | ✅ All robots OK! {self.robot_name} can proceed.")
+                logger.info(f"✅ All robots OK! {self.robot_name} can proceed.")
                 self.sync_complete_event.set()
                 self.ready_timer.cancel()
                 self.sync_timeout_timer.cancel()
@@ -443,8 +331,7 @@ class RobotSyncManager:
             return
         elapsed = time.time() - self.sync_start_time
         if elapsed > self.timeout:
-            print(f"{now()} | ⏱️ Timeout! {self.robot_name} failed to sync in time.")
-            self.node.get_logger().warn(f"Sync timeout: not all robots are ready in {self.timeout} seconds.")
+            logger.warning(f"⏱️ Timeout! {self.robot_name} failed to sync in time.")
             self.ready_timer.cancel()
             self.sync_timeout_timer.cancel()
             self.sync_complete_event.set()
@@ -454,334 +341,227 @@ class RobotSyncManager:
         return len(self.ready_set) >= self.target_count and len(self.ack_set) >= self.target_count
 
 # =========================
-# Sequential
+# 工具函数
 # =========================
-class RobotSequenceManager:
-    def __init__(self, node: Node, robot_name: str, sequence: int, timeout: float = 60.0):
-        self.node = node
-        self.robot_name = robot_name
-        self.sequence = sequence
-        self.timeout = timeout
+def validate_local_plan(task_data: Dict[str, Any]):
+    """校验任务计划"""
+    seen_seq_owner: Dict[int, str] = {}
+    for robot, tasks in task_data.get("robots", {}).items():
+        seen_seq_in_robot = set()
+        for t in tasks:
+            s = t.get("sequence")
+            sg = t.get("sync_group")
 
-        self.finished_set: Set[str] = set()
-        self.ack_set: Set[str] = set()
-        self.prev_finished_set: Set[str] = set()
+            if s is not None and sg is not None:
+                raise ValueError(f"Task cannot have both sequence and sync_group: {t}")
 
-        self.pub = node.create_publisher(String, '/robot_status', 10)
-        self.sub = node.create_subscription(String, '/robot_status', self.status_callback, 10)
+            if s is not None:
+                if s in seen_seq_in_robot:
+                    raise ValueError(f"Duplicate sequence={s} in robot '{robot}'")
+                seen_seq_in_robot.add(s)
 
-        self.finished_timer = node.create_timer(1.0, self.publish_finished)
-        self.sync_start_time = time.time()
-        self.sync_timeout_timer = node.create_timer(0.5, self.check_timeout)
+                if s in seen_seq_owner and seen_seq_owner[s] != robot:
+                    raise ValueError(
+                        f"Duplicate global sequence={s} found on '{seen_seq_owner[s]}' and '{robot}'"
+                    )
+                seen_seq_owner[s] = robot
 
-        self.sync_complete_event = threading.Event()
-        print(f"{now()} | {robot_name} waiting for all ack_finished for seq={sequence}...")
+def build_prev_stage_map(task_data: Dict[str, Any]) -> Dict[int, Optional[int]]:
+    """构建前驱阶段映射"""
+    stages = sorted({
+        t["sequence"]
+        for tasks in task_data.get("robots", {}).values()
+        for t in tasks
+        if t.get("sequence") is not None
+    })
+    prev = {}
+    for i, s in enumerate(stages):
+        prev[s] = stages[i - 1] if i > 0 else None
+    return prev
 
-    def publish_finished(self):
-        msg = {
-            "kind": "finished",
-            "robot": self.robot_name,
-            "sequence": self.sequence,
-            "ts": time.time()
-        }
-        self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | 📤 PUBLISH {self.robot_name} → finished (seq={self.sequence})")
+def build_seq_owner_map(task_data: Dict[str, Any]) -> Dict[int, str]:
+    """构建序列所有者映射"""
+    owner = {}
+    for robot, tasks in task_data.get("robots", {}).items():
+        for t in tasks:
+            s = t.get("sequence")
+            if s is not None:
+                owner[int(s)] = robot
+    return owner
 
-    def publish_ack(self, to_robot):
-        msg = {
-            "kind": "ack_finished",
-            "robot": self.robot_name,
-            "to": to_robot,
-            "sequence": self.sequence,
-            "ts": time.time()
-        }
-        self.pub.publish(String(data=json.dumps(msg)))
-        print(f"{now()} | {self.robot_name} send ack_finished to {to_robot} (seq={self.sequence})")
+def count_robots_per_sync_key(task_data: Dict[str, Any]) -> Dict[tuple, int]:
+    """计算同步组机器人数量"""
+    out: Dict[tuple, int] = {}
+    sg_map = defaultdict(set)
+    for robot, tasks in task_data.get("robots", {}).items():
+        for t in tasks:
+            sg = t.get("sync_group")
+            if sg is not None:
+                sg = int(sg)
+                sg_map[(None, sg)].add(robot)
+    out.update({k: len(v) for k, v in sg_map.items()})
+    return out
 
-    def status_callback(self, msg):
-        try:
-            data = json.loads(msg.data)
-            if data.get("sequence") != self.sequence:
-                return
-            kind = data.get("kind")
-            robot = data.get("robot")
-
-            if kind == "finished":
-                if robot not in self.finished_set:
-                    self.finished_set.add(robot)
-                    self.publish_ack(robot)
-            elif kind == "ack_finished" and data.get("to") == self.robot_name:
-                if robot not in self.ack_set:
-                    self.ack_set.add(robot)
-
-            self.print_finished_set()
-            self.check_sync_complete()
-
-        except Exception as e:
-            self.node.get_logger().warn(f"Parse error: {e}")
-
-    def print_finished_set(self):
-        if self.finished_set != self.prev_finished_set:
-            print(f"{now()} | {self.robot_name} sees finished_set = {sorted(self.finished_set)}")
-            self.prev_finished_set = set(self.finished_set)
-
-    def check_sync_complete(self):
-        if len(self.finished_set) >= 1 and len(self.ack_set) >= 1:
-            if not self.sync_complete_event.is_set():
-                print(f"{now()} | ✅ Stage {self.sequence} confirmed done by all. {self.robot_name} can proceed.")
-                self.sync_complete_event.set()
-                self.finished_timer.cancel()
-                self.sync_timeout_timer.cancel()
-
-    def check_timeout(self):
-        if self.sync_complete_event.is_set():
-            return
-        elapsed = time.time() - self.sync_start_time
-        if elapsed > self.timeout:
-            print(f"{now()} | ⏱️ Timeout! {self.robot_name} did not receive all acks for seq={self.sequence}.")
-            self.node.get_logger().warn(f"Timeout waiting for ack_finished for seq={self.sequence}")
-            self.finished_timer.cancel()
-            self.sync_timeout_timer.cancel()
-            self.sync_complete_event.set()
-
-    def wait_for_acks(self):
-        self.sync_complete_event.wait()
-        return len(self.finished_set) >= 1 and len(self.ack_set) >= 1
+def ensure_task_ids(task_data: Dict[str, Any]):
+    """确保每个任务都有ID"""
+    for robot, tasks in task_data.get("robots", {}).items():
+        for i, t in enumerate(tasks):
+            seq = t.get("sequence")
+            sg = t.get("sync_group")
+            tag = f"seq{seq}" if seq is not None else (f"sg{sg}" if sg is not None else "local")
+            t["task_id"] = f"{robot}-{tag}-{i}"
 
 # =========================
-# 节点生命周期
+# 改进的调度器主逻辑
 # =========================
-def shutdown_node(node: Node) -> bool:
-    if node is None or not rclpy.ok():
-        return False
-    try:
-        node.get_logger().info("🛑 Safe shutdown")
-        node.destroy_node()
-        return True
-    except Exception:
-        node.get_logger().exception(f"❌ Node destruction failed: \n{traceback.format_exc()}")
-        return False
+def run_improved_scheduler_for_robot(node: Node, robot_name: str, task_data: Dict[str, Any],
+                                    executor, prev_stage: Dict[int, Optional[int]],
+                                    seq_owner_map: Dict[int, str]):
+    """使用三次握手机制的改进调度器"""
+    logger.info(f"🤖 Robot `{robot_name}` starting IMPROVED task scheduler with three-way handshake")
 
-
-
-
-
-# =========================
-# 调度器主逻辑（按数组顺序遍历，遇到依赖插入屏障等待）
-# =========================
-def run_scheduler_for_robot(node, robot_name: str, task_data: Dict[str, Any],
-                            executor, prev_stage: Dict[int, Optional[int]],
-                            seq_owner_map: Dict[int, str]):
-    print(f"\n🤖 Robot `{robot_name}` starting task scheduler...\n")
-
-    is_successful_overall = False
+    is_successful_overall = True
     tasks = task_data["robots"].get(robot_name, [])
+    all_robots = set(task_data["robots"].keys())
+    target_counts = count_robots_per_sync_key(task_data)
 
-    # 互斥校验（单任务不能同时包含 sequence 与 sync_group）
-    for t in tasks:
-        if t.get("sequence") is not None and t.get("sync_group") is not None:
-            raise ValueError(f"Task cannot have both sequence and sync_group: {t}")
+    # 创建sequential管理器
+    seq_mgr = ImprovedSequentialManager(node, robot_name, all_robots)
+    
+    # 给ROS一些时间建立连接
+    time.sleep(2.0)
 
     try:
         for task in tasks:
             task["robot"] = robot_name
-            tid   = task.get("task_id")
+            tid = task.get("task_id")
             seq = task.get("sequence")
             sg = task.get("sync_group")
+            
             if sg is not None:
                 sg = int(sg)
 
-            # A) 跨机器人串行阶段（只有 sequence）
+            # A) Sequential execution with three-way handshake
             if seq is not None and sg is None:
-                # 有前驱阶段则等待 (prev_seq, None, "finished")
-                p = prev_stage.get(seq)
-                if p is not None:
-                    # 只有“上一个阶段的 owner 不是自己”时，才需要等待 + TTS
-                    prev_owner = seq_owner_map.get(int(p))
-                    if prev_owner is not None and prev_owner != robot_name:
-                        tts_manager.say_sync("i'm waiting for the other robots to finish")
-                        wait_for_all_status((p, None), "finished")
-                        print(f"[{robot_name}] ⏩ Stage {p} finished by {prev_owner} → start Stage {seq}")
-                        tts_manager.say_sync(f"sequence {p} is finished, i'm going to start the mission")
-                    else:
-                        # 上一个阶段是自己（或不存在 owner），无需等待与播报
-                        print(f"[{robot_name}] previous stage {p} is mine → proceed without waiting")
-
-                # 本阶段执行
-                publish_state(robot_name, tid, seq, None, "running")
-                ok = execute_action(node, executor, task)
-                is_successful_overall = ok or is_successful_overall
-
-                # 广播本阶段完成并启动 ACK 确认管理器
-                publish_state(robot_name, tid, seq, None, "finished")
-                seq_mgr = RobotSequenceManager(node, robot_name, seq)
-                node.create_subscription(String, "/robot_status", seq_mgr.status_callback, 10)
-                ack_ok = seq_mgr.wait_for_acks()
+                prev_seq = prev_stage.get(seq)
                 
-                if not ack_ok:
-                    print(f"[{robot_name}] ⚠️ Timeout waiting for ACKs in sequence {seq}.")
-                    continue
-                
+                # 等待前序任务
+                if prev_seq is not None:
+                    prev_owner = seq_owner_map.get(prev_seq)
+                    if prev_owner and prev_owner != robot_name:
+                        tts_manager.say_sync("I'm waiting for the other robots to finish")
+                        success = seq_mgr.wait_for_previous_sequence(seq, prev_seq, prev_owner)
+                        if not success:
+                            logger.warning(f"❌ {robot_name} failed to wait for seq={prev_seq}")
+                            is_successful_overall = False
+                            continue
+                        tts_manager.say_sync(f"sequence {prev_seq} is finished, I'm going to start the mission")
+
+                # 执行任务并进行三次握手
+                success = seq_mgr.execute_sequence_with_handshake(task, executor)
+                if not success:
+                    is_successful_overall = False
                 continue
 
-            # B) 跨机器人同步（只有 sync_group）
-            if sg is not None and seq is None:
-                # 启动同步管理器
+            # B) Synchronous execution (unchanged)
+            elif sg is not None and seq is None:
                 sync_group = sg
-                target_count = target_counts.get(sync_group, 2)  # 默认2台，如果没设定
-                sync_mgr = RobotSyncManager(node, robot_name, sync_group, target_count)
-                node.create_subscription(String, "/robot_status", sync_mgr.status_callback, 10)
+                target_count = target_counts.get((None, sync_group), 2)
+                sync_manager = RobotSyncManager(node, robot_name, sync_group, target_count)
 
-                # 等待同步完成（含timeout保护）
-                ok = sync_mgr.wait_for_sync()
-                if not ok:
-                    print(f"[{robot_name}] ❌ Sync failed or timed out. Skipping task {tid}.")
-                    tts_manager.say_sync("synchronisation failed or timeout, skipping this task")
+                success = sync_manager.wait_for_sync()
+                if not success:
+                    logger.warning(f"❌ {robot_name} sync failed for group {sync_group}")
+                    tts_manager.say_sync("synchronization failed or timeout, skipping this task")
+                    is_successful_overall = False
                     continue
 
-                print(f"[{robot_name}] ✅ Sync success → now executing task {tid}")
-                publish_state(robot_name, tid, None, sg, "running")
-                ok = execute_action(node, executor, task)
-                is_successful_overall = ok or is_successful_overall
-
-                publish_state(robot_name, tid, None, sg, "finished")
-                print(f"sync_group={sg} | Task completed.")
+                logger.info(f"✅ {robot_name} sync success → executing task {tid}")
+                success = execute_action(node, executor, task)
+                if not success:
+                    is_successful_overall = False
                 continue
 
-            # C) 无依赖（本地默认顺序）：直接执行，不发任何屏障状态
-            ok = execute_action(node, executor, task)
-            is_successful_overall = ok or is_successful_overall
+            # C) Local execution (unchanged)
+            else:
+                success = execute_action(node, executor, task)
+                if not success:
+                    is_successful_overall = False
 
         if is_successful_overall:
-            print(f"🎯 All tasks completed for `{robot_name}`!")
+            logger.info(f"🎯 All tasks completed successfully for `{robot_name}`!")
+        else:
+            logger.warning(f"⚠️ Some tasks failed for `{robot_name}`")
+            
         return is_successful_overall
 
-    except Exception:
-        logger.warning(f"⚠️ Failed to execute tasks:\n{traceback.format_exc()}")
+    except Exception as e:
+        logger.exception(f"⚠️ Failed to execute tasks for {robot_name}: {e}")
         return False
 
 # =========================
-# 入口
+# 入口函数
 # =========================
 def run(task_data: Dict[str, Any]):
-    global ros_node, status_pub, target_counts
-
-    # —— 本地计划校验（只用 task_data["robots"]）——
+    """改进的调度器入口"""
     validate_local_plan(task_data)
 
     robot_id = config.get("robot_id")
     is_successful = False
 
-    # 1) 先统计屏障规模
-    target_counts = count_robots_per_sync_key(task_data)
-    print("🎯 target_counts =", target_counts)
-
-    # 2) init（多次调用保护）
+    # 初始化ROS
     try:
         rclpy.init()
     except RuntimeError:
         pass
 
-    # 3) node & executor
-    ros_node = rclpy.create_node(f"status_node_{robot_id}")
+    # 创建节点和执行器
+    ros_node = rclpy.create_node(f"improved_scheduler_{robot_id}")
     executor = MultiThreadedExecutor()
     executor.add_node(ros_node)
 
-    # 4) QoS：RELIABLE + TRANSIENT_LOCAL
-    qos = QoSProfile(depth=10)
-    qos.reliability = ReliabilityPolicy.RELIABLE
-    qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
-
-    # 5) pub/sub
-    global status_pub
-    status_pub = ros_node.create_publisher(String, "/robot_status", qos)
-
-    # 6) spin + 心跳
+    # 启动executor
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
-
-    start_heartbeat(robot_id)
 
     try:
         ensure_task_ids(task_data)
         prev_stage = build_prev_stage_map(task_data)
         seq_owner_map = build_seq_owner_map(task_data)
-        is_successful = run_scheduler_for_robot(ros_node, robot_id, task_data, executor, prev_stage, seq_owner_map)
-        return is_successful
-    except Exception:
-        logger.exception(f"⚠️ Failed to schedule tasks :\n{traceback.format_exc()}")
-        return is_successful
+        
+        is_successful = run_improved_scheduler_for_robot(
+            ros_node, robot_id, task_data, executor, prev_stage, seq_owner_map
+        )
+        
+    except Exception as e:
+        logger.exception(f"⚠️ Scheduler failed: {e}")
     finally:
-        print(f"🛑 Shutting down ROS node for {robot_id}")
-        stop_heartbeat()
+        logger.info(f"🛑 Shutting down improved scheduler for {robot_id}")
         try:
             executor.remove_node(ros_node)
         except Exception:
             pass
         executor.shutdown()
-        shutdown_node(ros_node)
+        ros_node.destroy_node()
         rclpy.shutdown()
         spin_thread.join(timeout=1)
 
+    return is_successful
 
 # =========================
-# 自测示例（注意：sequence 全局唯一）
+# 测试入口
 # =========================
 if __name__ == "__main__":
-    # raw_response = dedent("""
-    # {
-    #   "robots": {
-    #     "robot1": [
-    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}},
-    #       {"action": "turn",  "parameters": {"direction": "left",    "value": 180, "unit": "degrees"}, "sync_group": "1"},
-    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 1},
-    #       {"action": "turn",  "parameters": {"direction": "right",   "value": 45, "unit": "degrees"}}
-    #     ],
-    #     "robot2": [
-    #       {"action": "navigate",  "parameters": {"target": "table"}},
-    #       {"action": "turn","parameters": {"direction": "right",   "value": 180, "unit": "degrees"}, "sync_group": "1"},
-    #       {"action": "move",  "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 2}
-    #     ]
-    #   }
-    # }
-    # """)
-
-    # raw_response = dedent("""
-    # {
-    #   "robots": {
-    #     "robot1": [
-    #       {"action": "navigate",  "parameters": {"target": "table"}}
-    #     ],
-    #     "robot2": [
-    #       {"action": "navigate",  "parameters": {"target": "table"}}
-    #     ]
-    #   }
-    # }
-    # """)
-
-    raw_response = dedent("""
-    {
+    test_data = {
         "robots": {
             "robot1": [
-                {
-                "action": "navigate",
-                "parameters": {
-                    "target": "table"
-                },
-                "sync_group": 0
-                }
+                {"action": "move", "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, "sequence": 0},
+                {"action": "turn", "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, "sequence": 2}
             ],
             "robot2": [
-                {
-                "action": "navigate",
-                "parameters": {
-                    "target": "table"
-                },
-                "sync_group": 0
-                }
+                {"action": "navigate", "parameters": {"target": "table"}, "sequence": 1},
+                {"action": "collect", "parameters": {"item": "box", "target": "table"}, "sequence": 3}
             ]
         }
     }
-    """)
-    task_data = json.loads(raw_response)
-    run(task_data)
+    run(test_data)
