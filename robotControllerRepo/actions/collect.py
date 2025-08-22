@@ -28,30 +28,91 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
     print(f"🎯 Target: {target} (type: {type(target).__name__})")
     
     if isinstance(target, str):
-        print(f"🔍 Target is blackboard key, resolving position...")
+        print(f"🔍 Target is string: '{target}'")
         
-        # 获取机器人位置
+        # 首先尝试从黑板解析（find找到的物体）
         from robotControllerRepo.actions.navigate import get_current_position
         robot_x, robot_y, robot_heading = get_current_position(robot_name)
         robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
         print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
         
-        # 🔥 解析物体位置
         map_position = resolve_object_position(robot_name, target, robot_pos)
         if map_position:
-            print(f"✅ Object position resolved:")
+            print(f"✅ Found in blackboard - Object position resolved:")
             print(f"   📍 Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
             print(f"   📏 Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
             print(f"   🎯 Confidence: {map_position.get('confidence', 0):.2f}")
             target = map_position
         else:
-            print(f"❌ Failed to resolve position for '{target}'")
-            print(f"💡 Make sure blackboard data exists for this object")
-            return False
+            # 尝试从config的语义位置解析
+            print(f"🔍 Not found in blackboard, checking semantic locations...")
+            if target in semantic_locations:
+                semantic_pos = semantic_locations[target]
+                print(f"✅ Found in semantic locations:")
+                print(f"   📍 Coordinates: ({semantic_pos['x']:.2f}, {semantic_pos['y']:.2f})")
+                if 'heading_deg' in semantic_pos:
+                    print(f"   🧭 Heading: {semantic_pos['heading_deg']}°")
+                target = semantic_pos
+            else:
+                print(f"❌ Target '{target}' not found in blackboard or semantic locations!")
+                print(f"💡 Available semantic locations: {list(semantic_locations.keys())}")
+                return False
 
     # === 阶段 1：导航到目标位置 ===
     print(f"\n🧭 Phase 1: Navigation to target")
-    is_successful = navigate_to_target(node, executor, robot_name, target)
+    
+    if isinstance(target, dict) and "x" in target and "y" in target:
+        # 使用坐标导航：计算角度和距离，然后rotate + move
+        from robotControllerRepo.actions.navigate import get_current_position
+        from robotControllerRepo.actions.rotate import rotate_deg
+        from robotControllerRepo.actions.move import move
+        
+        # 获取当前位置
+        robot_x, robot_y, robot_heading = get_current_position(robot_name)
+        target_x, target_y = target["x"], target["y"]
+        
+        # 计算目标角度和距离
+        dx = target_x - robot_x
+        dy = target_y - robot_y
+        target_angle = math.degrees(math.atan2(dx, dy)) % 360
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # 计算需要旋转的角度
+        angle_diff = (target_angle - robot_heading + 180) % 360 - 180
+        
+        print(f"📍 Current: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
+        print(f"🎯 Target: ({target_x:.2f}, {target_y:.2f})")
+        print(f"📏 Distance: {distance:.2f}m")
+        print(f"🔄 Need to rotate: {angle_diff:.1f}°")
+        
+        # Step 1: 旋转到目标方向
+        if abs(angle_diff) > 5:  # 角度误差大于5度才旋转
+            print(f"🔄 Rotating {angle_diff:.1f}°...")
+            rotate_success = rotate_deg(node, robot_name, angle_diff)
+            if not rotate_success:
+                print(f"❌ Rotation failed!")
+                return False
+            print(f"✅ Rotation completed")
+        else:
+            print(f"✅ Already facing target direction")
+        
+        # Step 2: 前进到目标位置
+        if distance > 0.1:  # 距离大于10cm才移动
+            print(f"🚶 Moving forward {distance:.2f}m...")
+            move_success = move(node, robot_name, "forward", distance, "meter")
+            if not move_success:
+                print(f"❌ Movement failed!")
+                return False
+            print(f"✅ Movement completed")
+        else:
+            print(f"✅ Already at target position")
+            
+        is_successful = True
+        
+    else:
+        # 回退到原有的navigate_to_target
+        print(f"🔄 Using navigate_to_target for: {target}")
+        is_successful = navigate_to_target(node, executor, robot_name, target)
     
     if not is_successful:
         print(f"❌ Navigation failed!")
