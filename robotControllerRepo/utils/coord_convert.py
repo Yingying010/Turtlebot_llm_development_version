@@ -132,8 +132,7 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         camera_params = {
             "image_width": 640,
             "image_height": 480,
-            "fov_horizontal_deg": 8.38,  # 调整过的FOV
-            # 🔥 添加这两行：
+            "fov_horizontal_deg": 2.79,  # 🔥 调整：从8.38°改为2.79° (3.0°→1.0°)
             "camera_offset_x": 0.0,    # 摄像头相对机器人中心的x偏移
             "camera_offset_y": 0.0     # 摄像头相对机器人中心的y偏移
         }
@@ -287,7 +286,7 @@ def resolve_object_position(robot_name: str,
     camera_params.update({
         "image_width": detected_width,
         "image_height": detected_height,
-        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 8.38),
+        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 2.79),  # 🔥 修改默认值
         "camera_offset_x": camera_params.get("camera_offset_x", 0.0),
         "camera_offset_y": camera_params.get("camera_offset_y", 0.0)
     })

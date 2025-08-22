@@ -64,54 +64,41 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
     # === 阶段 1：导航到目标位置 ===
     print(f"\n🧭 Phase 1: Navigation to target")
     
-    if isinstance(target, dict) and "x" in target and "y" in target:
-        # 使用坐标导航：计算角度和距离，然后rotate + move
+    if isinstance(target, dict) and "estimated_distance" in target:
+        # 🎯 使用coord_convert的结果，但仍需要调整朝向
+        print(f"📏 Using coord_convert results")
+        print(f"🎯 Target coordinates: ({target['x']:.2f}, {target['y']:.2f})")
         
         # 获取当前位置
         robot_x, robot_y, robot_heading = get_current_position(robot_name)
         target_x, target_y = target["x"], target["y"]
         
-        # 计算目标角度和距离
+        # 计算朝向（coord_convert给的是绝对坐标，需要相对当前位置计算角度）
         dx = target_x - robot_x
         dy = target_y - robot_y
+        current_distance = math.sqrt(dx*dx + dy*dy)
         target_angle = math.degrees(math.atan2(dx, dy)) % 360
-        distance = math.sqrt(dx*dx + dy*dy)
-        
-        # 计算需要旋转的角度
         angle_diff = (target_angle - robot_heading + 180) % 360 - 180
         
         print(f"📍 Current: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
-        print(f"🎯 Target: ({target_x:.2f}, {target_y:.2f})")
-        print(f"📏 Distance: {distance:.2f}m")
+        print(f"📏 Current distance to target: {current_distance:.2f}m")
         print(f"🔄 Need to rotate: {angle_diff:.1f}°")
         
-        # Step 1: 旋转到目标方向
-        if abs(angle_diff) > 5:  # 角度误差大于5度才旋转
+        # Step 1: 转向目标
+        if abs(angle_diff) > 3:  # 3度容差
             print(f"🔄 Rotating {angle_diff:.1f}°...")
             rotate_success = rotate_deg(node, robot_name, angle_diff)
             if not rotate_success:
                 print(f"❌ Rotation failed!")
                 return False
-            print(f"✅ Rotation completed")
         else:
             print(f"✅ Already facing target direction")
         
-        # Step 2: 前进到目标位置
-        if distance > 0.1:  # 距离大于10cm才移动
-            print(f"🚶 Moving forward {distance:.2f}m...")
-            move_success = move(node, robot_name, "forward", distance, "meter")
-            if not move_success:
-                print(f"❌ Movement failed!")
-                return False
-            print(f"✅ Movement completed")
-        else:
-            print(f"✅ Already at target position")
-            
-        is_successful = True
-        
+        # Step 2: 前进到目标
+        print(f"🚶 Moving forward {current_distance:.2f}m...")
+        is_successful = move(node, robot_name, "forward", current_distance, "meter")
     else:
-        # 回退到原有的navigate_to_target
-        print(f"🔄 Using navigate_to_target for: {target}")
+        # 对于语义位置，使用完整导航
         is_successful = navigate_to_target(node, executor, robot_name, target)
     
     if not is_successful:
