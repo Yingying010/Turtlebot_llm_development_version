@@ -382,7 +382,7 @@ def _group_detections_by_position(detections: List[Dict],
 # -------- 兼容性包装器 --------
 def _detect_with_camera(detector: StandaloneYOLODetector, target_class: str, conf_thres: float) -> Optional[Dict]:
     """兼容旧接口的包装器，默认使用多帧检测"""
-    return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames=3)
+    return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames=5)
 
 # -------- 分步旋转扫描 --------
 def _rotate_scan_stepwise(robot_name: str,
