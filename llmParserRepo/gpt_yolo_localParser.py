@@ -905,9 +905,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 if __name__ == "__main__":
     # 测试用例
     test_instructions = [
-        "I want robot1 to move forward for 3 seconds and then turn left 90 degrees.",
-        "robot1 and robot2 move forward simultaneously",
-        "describe what you see"
+        "robot1, come here"
     ]
     
     for instr in test_instructions:
