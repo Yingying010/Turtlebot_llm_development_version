@@ -48,7 +48,7 @@ def main():
     node = ContinuousMover()
 
     try:
-        node.start_moving("robot1", "forward", 0.02)
+        node.start_moving("robot1", "forward", 0.01)
         node.start_moving("robot2", "backward", 0.01)
         print("🚀 Both robots are moving. Press Ctrl+C to stop.")
         rclpy.spin(node)  # 保持运行
