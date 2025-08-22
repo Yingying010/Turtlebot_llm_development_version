@@ -95,13 +95,19 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     # 取两个估计的平均值
     estimated_distance = (distance_from_width + distance_from_height) / 2
     
+    # 🔥 添加经验校准系数（基于实际测试调整）
+    # 如果估计距离偏小，增大这个系数
+    CALIBRATION_FACTOR = 2.5  # 将0.4m校准到1.0m: 1.0/0.4 = 2.5
+    estimated_distance *= CALIBRATION_FACTOR
+    
     # 限制距离范围：0.2m - 5.0m
     estimated_distance = max(0.2, min(5.0, estimated_distance))
     
     logger.debug(f"Distance estimation for {object_class}:")
     logger.debug(f"  - Bbox: {bbox_width:.1f}x{bbox_height:.1f} pixels")
     logger.debug(f"  - Real size: {real_width_cm}x{real_height_cm} cm")
-    logger.debug(f"  - Estimated distance: {estimated_distance:.2f}m")
+    logger.debug(f"  - Raw distance: {estimated_distance/CALIBRATION_FACTOR:.2f}m")
+    logger.debug(f"  - Calibrated distance: {estimated_distance:.2f}m")
     
     return estimated_distance
 
