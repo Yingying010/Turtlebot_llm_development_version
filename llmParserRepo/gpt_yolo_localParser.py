@@ -199,8 +199,29 @@ def get_robot_id():
 def get_master_name():
     return config.get("master_id")
 
-import json
-import re
+def detect_once() -> List[Dict[str, Any]]:
+    """
+    执行一次YOLO感知，返回 detections 列表（每个元素是一个 dict，包含 class / conf / center_xy / bbox_xyxy）
+    用于被 find 动作调用
+    """
+    try:
+        perceiver = YOLOPerceiver()
+
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        img_path = f"/tmp/yolo_parser_frame_{ts}.jpg"
+        subprocess.run([
+            "rpicam-still", "-t", "1000",
+            "--width", "1640", "--height", "1232",
+            "-o", img_path
+        ], check=True)
+
+        _, det_json = perceiver.detect_photo(img_path)
+        detections = det_json.get("detections", [])
+        return detections
+    except Exception as e:
+        logger.warning(f"⚠️ detect_once failed: {e}")
+        return []
+
 
 def safe_json_parse(raw_str: str) -> dict:
     """增强版JSON解析器，处理各种格式问题"""

@@ -14,6 +14,10 @@ from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
 from robotControllerRepo.actions.deliver import deliver_item
+from robotControllerRepo.actions.find import run_action as run_find 
+from robotControllerRepo.actions.rotate import rotate_deg
+from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
+from llmParserRepo.gpt_yolo_localParser import detect_once
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
@@ -82,6 +86,16 @@ def execute_action(node, executor, task: Dict):
         print(f"  → Waiting for {params['duration_sec']} seconds")
         time.sleep(params["duration_sec"])
         is_successful = True
+
+    elif action == "find":
+        return run_find(
+            node,
+            task,
+            detect_fn=detect_once,
+            rotate_fn=lambda robot, deg: rotate_deg(node, robot, deg),
+            navigate_to_fn=lambda robot, target: navigate_to(node, executor, robot, target),
+            event_pub=None
+    )
 
 
     else:

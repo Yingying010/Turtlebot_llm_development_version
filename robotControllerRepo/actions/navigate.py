@@ -584,6 +584,12 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     is_successful = True
     return is_successful
 
+def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
+    """
+    轻量包装：让签名更简单，内部复用 navigate_to_target
+    """
+    return navigate_to_target(node, executor, robot_name, target)
+
 
 # === 调试和监控函数 ===
 

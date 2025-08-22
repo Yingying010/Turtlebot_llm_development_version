@@ -47,3 +47,11 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
         return is_successful
     except Exception:
         return is_successful
+    
+
+def rotate_deg(node: Node, robot_id: str, deg: float):
+    """
+    轻量包装：按角度旋转（正=左转，负=右转），单位 degree
+    """
+    direction = "left" if deg >= 0 else "right"
+    return rotate(node, robot_id, direction, abs(deg), "degree", target="self")
