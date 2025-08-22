@@ -962,7 +962,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 if __name__ == "__main__":
     # 测试用例
     test_instructions = [
-        "Could you help me look around for my cup? If you find it, could you bring it to me? If you don't find it, never mind?"
+        "Could you help me look around for my bottle? If you find it, could you bring it to me? If you don't find it, never mind?"
     ]
     
     for instr in test_instructions:
