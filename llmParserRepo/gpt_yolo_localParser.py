@@ -951,6 +951,44 @@ if __name__ == "__main__":
         try:
             out = perceive_and_parse(instr, show_window=False, save_annotated=None)
             print(json.dumps(out, indent=2, ensure_ascii=False))
+            if out and "command" in out:
+                cmd = out["command"]
+                resp = cmd.get("response", "")
+
+                # 🔥 将原始用户输入添加到所有任务中
+                if "robots" in cmd:
+                    for robot_id, tasks in cmd["robots"].items():
+                        for task in tasks:
+                            task["original_user_input"] = user_input
+                
+                # 检查是否有有效的response
+                if resp and resp != "i can't give you any response":
+                    print(f"🤖 Response: {resp}")
+                    tts_manager.say_sync(resp)
+                else:
+                    print("🤖 Response: Processing your command...")
+                    tts_manager.say_sync("Processing your command.")
+                
+                # 尝试执行命令
+                execution_payload = normalize_for_scheduler(cmd)
+                if execution_payload.get("robots"):
+                    try:
+                        isSchedule = robot_scheduler.run(execution_payload)
+                        if isSchedule is True:
+                            logger.info("✅ Command(s) executed successfully.")
+                            tts_manager.say_sync("Command executed successfully.")
+                        else:
+                            logger.warning("⚠️ Command execution failed")
+                            tts_manager.say_sync("Command execution failed. Please try again.")
+                    except Exception as exec_error:
+                        logger.error(f"❌ Scheduler error: {exec_error}")
+                        tts_manager.say_sync("Sorry, there was an error executing the command.")
+                else:
+                    # 没有机器人命令，可能是聊天
+                    if resp:
+                        logger.info("💬 Chat mode - no robot commands detected")
+                    else:
+                        tts_manager.say_sync("I didn't detect any robot commands in your request.")
         except Exception as e:
             print(f"Test failed: {e}")
             traceback.print_exc()
