@@ -88,13 +88,6 @@ def execute_action(node, executor, task: Dict):
         is_successful = True
 
     elif action == "find":
-        # 🔥 测试旋转功能
-        logger.info("🧪 Testing rotation before find...")
-        test_result = rotate_deg(node, robot, 45)  # 直接测试旋转45度
-        logger.info(f"🧪 Test rotation result: {test_result}")
-        time.sleep(2)
-
-
         # 🔥 关键修改：处理find任务的动态重规划
         result = run_find(
             node,

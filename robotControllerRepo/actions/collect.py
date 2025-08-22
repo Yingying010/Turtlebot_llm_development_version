@@ -18,6 +18,10 @@ from phasespace.rigid_tracker import RigidTracker
 from rclpy.executors import MultiThreadedExecutor
 from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.utils.coord_convert import resolve_object_position
+from robotControllerRepo.actions.navigate import get_current_position
+from robotControllerRepo.actions.navigate import get_current_position
+from robotControllerRepo.actions.rotate import rotate_deg
+from robotControllerRepo.actions.move import move
 
 semantic_locations = config.get("semantic_locations")
 
@@ -31,7 +35,6 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
         print(f"🔍 Target is string: '{target}'")
         
         # 首先尝试从黑板解析（find找到的物体）
-        from robotControllerRepo.actions.navigate import get_current_position
         robot_x, robot_y, robot_heading = get_current_position(robot_name)
         robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
         print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
@@ -63,9 +66,6 @@ def collect_item(node: Node, robot_name: str, item: str, target, executor):
     
     if isinstance(target, dict) and "x" in target and "y" in target:
         # 使用坐标导航：计算角度和距离，然后rotate + move
-        from robotControllerRepo.actions.navigate import get_current_position
-        from robotControllerRepo.actions.rotate import rotate_deg
-        from robotControllerRepo.actions.move import move
         
         # 获取当前位置
         robot_x, robot_y, robot_heading = get_current_position(robot_name)
