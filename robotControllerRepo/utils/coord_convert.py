@@ -149,10 +149,14 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
     image_height = camera_params["image_height"]
     fov_horizontal_rad = math.radians(camera_params["fov_horizontal_deg"])
     
-    # 计算物体相对于图像中心的角度偏移
+    # 🔥 关键修复：计算物体相对于图像中心的角度偏移
     center_offset_x = center_x - (image_width / 2)
     angle_per_pixel = fov_horizontal_rad / image_width
-    relative_angle_rad = center_offset_x * angle_per_pixel
+    
+    # 🔥 修复角度计算：
+    # - 物体在图像左侧（center_offset_x < 0）→ 机器人需要左转（正角度）
+    # - 物体在图像右侧（center_offset_x > 0）→ 机器人需要右转（负角度）
+    relative_angle_rad = -center_offset_x * angle_per_pixel
     
     # 物体在全局坐标系中的角度
     object_angle_global_rad = robot_heading_rad + relative_angle_rad
@@ -172,11 +176,14 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         "heading_deg": None
     }
     
-    logger.debug(f"Coordinate conversion:")
+    logger.debug(f"🔧 FIXED Coordinate conversion:")
     logger.debug(f"  - Pixel: ({center_x:.1f}, {center_y:.1f})")
+    logger.debug(f"  - Image center: ({image_width/2}, {image_height/2})")
+    logger.debug(f"  - Pixel offset: {center_offset_x:.1f} (negative=left, positive=right)")
     logger.debug(f"  - Robot pos: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading_deg:.1f}°)")
     logger.debug(f"  - Distance: {estimated_distance:.2f}m")
-    logger.debug(f"  - Relative angle: {math.degrees(relative_angle_rad):.1f}°")
+    logger.debug(f"  - Relative angle: {math.degrees(relative_angle_rad):.1f}° (positive=left turn, negative=right turn)")
+    logger.debug(f"  - Global angle: {math.degrees(object_angle_global_rad):.1f}°")
     logger.debug(f"  - Map coordinates: ({object_x:.2f}, {object_y:.2f})")
     
     return result
