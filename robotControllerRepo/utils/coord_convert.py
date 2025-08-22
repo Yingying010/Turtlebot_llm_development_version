@@ -96,7 +96,7 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     estimated_distance = (distance_from_width + distance_from_height) / 2
     
     # 🔥 添加经验校准系数（基于实际测试调整）
-    CALIBRATION_FACTOR = 2.5
+    CALIBRATION_FACTOR = 2
     estimated_distance *= CALIBRATION_FACTOR
     
     # 限制距离范围：0.2m - 5.0m
@@ -132,7 +132,7 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         camera_params = {
             "image_width": 640,
             "image_height": 480,
-            "fov_horizontal_deg": 0.5,
+            "fov_horizontal_deg": 0.3,
             "camera_offset_x": 0.0,    # 摄像头相对机器人中心的x偏移
             "camera_offset_y": 0.0     # 摄像头相对机器人中心的y偏移
         }
@@ -256,7 +256,7 @@ def resolve_object_position(robot_name: str,
     camera_params.update({
         "image_width": detected_width,
         "image_height": detected_height,
-        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 1),
+        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 0.3),
         "camera_offset_x": camera_params.get("camera_offset_x", 0.0),
         "camera_offset_y": camera_params.get("camera_offset_y", 0.0)
     })
