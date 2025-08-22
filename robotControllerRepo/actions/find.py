@@ -480,31 +480,148 @@ def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     # 使用简化版的重规划
     return execute_find_with_simple_replanning(node, robot, task.get("parameters", {}), **ctx)
 
+# -------- 真实的机器人控制函数 --------
+def real_rotate(node, robot_name: str, degrees: float):
+    """真实的机器人旋转函数"""
+    try:
+        import rclpy
+        from geometry_msgs.msg import Twist
+        import math
+        
+        # 创建发布器
+        publisher = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        
+        # 设置旋转参数
+        twist = Twist()
+        angular_speed = math.radians(30)  # 30°/s
+        
+        direction = "left" if degrees >= 0 else "right"
+        twist.angular.z = angular_speed if degrees >= 0 else -angular_speed
+        
+        # 计算旋转时间
+        angle_rad = math.radians(abs(degrees))
+        duration = angle_rad / abs(angular_speed)
+        
+        logger.info(f"🔄 Real rotation: {robot_name} turning {direction} {abs(degrees)}° for {duration:.2f}s")
+        
+        # 等待发布器初始化
+        time.sleep(0.2)
+        
+        # 持续发布旋转命令
+        start_time = time.time()
+        while time.time() - start_time < duration:
+            publisher.publish(twist)
+            time.sleep(0.01)
+        
+        # 停止旋转
+        publisher.publish(Twist())
+        logger.info(f"✅ Real rotation completed: {robot_name}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Real rotation failed: {e}")
+        return False
+
+def real_navigate(node, robot_name: str, target):
+    """简单的导航实现（占位）"""
+    logger.info(f"🚶 Navigation: {robot_name} -> {target} (placeholder)")
+    time.sleep(1.0)  # 模拟导航时间
+    return True
+
+# -------- 独立运行的主函数 --------
+def run_standalone_test():
+    """独立运行find测试，使用真实的ROS控制"""
+    import sys
+    
+    try:
+        import rclpy
+        from rclpy.node import Node
+        
+        # 初始化ROS
+        rclpy.init()
+        logger.info("🚀 ROS initialized for standalone find test")
+        
+        # 创建ROS节点
+        node = rclpy.create_node('standalone_find_test')
+        logger.info("🤖 ROS node created: standalone_find_test")
+        
+        # 获取机器人名称
+        robot_name = sys.argv[1] if len(sys.argv) > 1 else "robot1"
+        target_class = sys.argv[2] if len(sys.argv) > 2 else "cup"
+        
+        logger.info(f"🎯 Test parameters: robot={robot_name}, target={target_class}")
+        
+        # 创建真实的旋转函数
+        def rotate_fn(robot, deg):
+            return real_rotate(node, robot, deg)
+        
+        def nav_fn(robot, target):
+            return real_navigate(node, robot, target)
+        
+        def event_fn(kind, payload):
+            logger.info(f"📡 Event: {kind} -> {payload}")
+        
+        print(f"🧪 Testing REAL find functionality for {robot_name}...")
+        print(f"🎯 Looking for: {target_class}")
+        print("⚠️  Make sure your robot is ready and ROS topics are active!")
+        
+        # 等待用户确认
+        input("Press Enter when robot is ready, or Ctrl+C to cancel...")
+        
+        # 执行真实的find测试
+        res = execute_find(
+            node=node,
+            robot_name=robot_name,
+            params={
+                "target_class": target_class,
+                "save_as": f"{target_class}_target",
+                "timeout_sec": 30,  # 增加超时时间
+                "search_waypoints": []  # 暂时不使用waypoints
+            },
+            rotate_fn=rotate_fn,
+            navigate_to_fn=nav_fn,
+            event_pub=event_fn
+        )
+        
+        print("\n" + "="*50)
+        print("🎉 FIND TEST RESULT:")
+        print(f"✅ Success: {res.get('ok', False)}")
+        print(f"🎯 Found: {res.get('found', False)}")
+        if res.get('found'):
+            print(f"📦 Object: {res.get('blackboard_key')}")
+            print(f"🎯 Confidence: {res.get('record', {}).get('conf', 0):.3f}")
+        print("="*50)
+        
+        return res
+        
+    except KeyboardInterrupt:
+        print("\n🛑 Test cancelled by user")
+        return {"ok": False, "cancelled": True}
+        
+    except Exception as e:
+        logger.error(f"❌ Standalone test failed: {e}")
+        return {"ok": False, "error": str(e)}
+        
+    finally:
+        try:
+            node.destroy_node()
+            rclpy.shutdown()
+            logger.info("🔚 ROS shutdown completed")
+        except:
+            pass
+
 # -------- 命令行测试 --------
 if __name__ == "__main__":
-    def fake_rotate(robot, deg):
-        print(f"[stub] rotate {robot} by {deg} deg")
-        time.sleep(0.1)  # 模拟旋转时间
-
-    def fake_nav(robot, target):
-        print(f"[stub] navigate {robot} to {target}")
-
-    def fake_event(kind, payload):
-        print(f"[event] {kind}: {payload}")
-
-    print("🧪 Testing standalone find functionality...")
+    print("🤖 Standalone Find.py Test")
+    print("Usage: python3 find.py [robot_name] [target_class]")
+    print("Example: python3 find.py robot1 cup")
+    print("")
     
-    res = execute_find(
-        node=None,
-        robot_name="robot1",
-        params={
-            "target_class": "cup",
-            "save_as": "cup_target",
-            "timeout_sec": 8,
-            "search_waypoints": ["kitchen"]
-        },
-        rotate_fn=fake_rotate,
-        navigate_to_fn=fake_nav,
-        event_pub=fake_event
-    )
-    print("RESULT:", res)
+    result = run_standalone_test()
+    
+    if result.get("ok"):
+        print("🎉 Test completed successfully!")
+        exit(0)
+    else:
+        print("❌ Test failed!")
+        exit(1)
