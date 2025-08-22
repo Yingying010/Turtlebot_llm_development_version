@@ -959,7 +959,7 @@ if __name__ == "__main__":
                 if "robots" in cmd:
                     for robot_id, tasks in cmd["robots"].items():
                         for task in tasks:
-                            task["original_user_input"] = user_input
+                            task["original_user_input"] = test_instructions
                 
                 # 检查是否有有效的response
                 if resp and resp != "i can't give you any response":
