@@ -733,18 +733,19 @@ def create_llm_replanning_function():
             Detection Quality: {found_object["detection_quality"]["frames_detected"]} frames, stability: {found_object["detection_quality"]["position_stability"]:.2f}
             Blackboard Key: {found_object["blackboard_key"]}
 
+            IMPORTANT: The robot has already found the object and moved close to it during the search process. 
+            The robot is now positioned near the object and ready for the next action.
+
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
-            2. Navigate to the object location first, then collect it
-            3. Navigate to object, collect it, then navigate to recipient and deliver it
-            4. Navigate closer to examine the object
+            2. Collect the object (robot is already at the object location)
+            3. Collect the object, then navigate to recipient and deliver it
+            4. Navigate closer to examine the object (if needed)
             5. Other specific actions
-
-            IMPORTANT: Analyze the user's original intent from the conversation history. Don't assume they always want collect+deliver.
 
             CRITICAL: Use the exact parameter format expected by the robot controller:
 
-            For "collect" action (robot should already be at the object location):
+            For "collect" action (robot is already at the object location):
             {{
                 "action": "collect",
                 "parameters": {{
@@ -764,7 +765,7 @@ def create_llm_replanning_function():
             {{
                 "action": "navigate",
                 "parameters": {{
-                    "target": "<blackboard_key_or_location>"
+                    "target": "<location_name>"
                 }}
             }}
 
@@ -776,17 +777,19 @@ def create_llm_replanning_function():
                 }}
             }}
 
-            Typical task sequences:
-            - Find + Navigate to object + Collect + Navigate to recipient + Deliver
-            - Find + Navigate to object + Collect (if user just wants the robot to get it)
-            - Find + Navigate closer + Face object (if user wants to examine it)
+            Typical task sequences after finding an object:
+            - Just collect: [collect]
+            - Collect and deliver: [collect, navigate to recipient, deliver]
+            - Examine closer: [face object] or [navigate closer, face object]
+
+            DO NOT include a navigate action to the object itself - the robot is already there!
 
             Respond in JSON format:
             {{
                 "action_needed": true/false,
                 "tasks": [
                     {{
-                        "action": "navigate|collect|deliver|face|wait",
+                        "action": "collect|deliver|navigate|face|wait",
                         "parameters": {{ ... }}
                     }}
                 ],
@@ -796,13 +799,12 @@ def create_llm_replanning_function():
             If no action is needed, set "action_needed": false and "tasks": [].
 
             Remember: 
+            - The robot is already at the object location after finding it
             - collect/deliver only need "item" parameter
-            - Use navigate action to move to locations before collect/deliver
-            - Use blackboard_key for navigating to found objects
+            - Use navigate action only to move to delivery destinations, not to the object
             - When user says "bring to me", "deliver to me", "here", use "{get_master_name()}" as the target
             - When user says "bring to someone else", use that person's name as the target
             """).strip()
-
 
 
 
