@@ -96,8 +96,8 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     estimated_distance = (distance_from_width + distance_from_height) / 2
     
     # 🔥 添加经验校准系数（基于实际测试调整）
-    # 如果估计距离偏小，增大这个系数
-    CALIBRATION_FACTOR = 2.5  # 将0.4m校准到1.0m: 1.0/0.4 = 2.5
+    # 距离校准：1.52m → 1.02m，系数 = 1.02/1.52 ≈ 0.67
+    CALIBRATION_FACTOR = 1.67  # 之前2.5调整为1.67 (2.5 × 0.67)
     estimated_distance *= CALIBRATION_FACTOR
     
     # 限制距离范围：0.2m - 5.0m
@@ -244,10 +244,51 @@ def resolve_object_position(robot_name: str,
         logger.error(f"❌ Missing fields in object info: {missing_fields}")
         return None
     
-    # 估计距离
+    # 🔥 动态推断图像尺寸
+    bbox_xyxy = object_info["bbox_xyxy"]
+    center_xy = object_info["center_xy"]
+    
+    # 根据边界框和中心点推断可能的图像尺寸
+    max_x = max(bbox_xyxy[2], center_xy[0])  # bbox右边界 vs 中心x
+    max_y = max(bbox_xyxy[3], center_xy[1])  # bbox下边界 vs 中心y
+    
+    # 推断图像尺寸（加一些余量）
+    inferred_width = int(max_x * 1.2)  # 增加20%余量
+    inferred_height = int(max_y * 1.2)
+    
+    # 常见的图像尺寸
+    common_sizes = [
+        (640, 480), (1280, 720), (1920, 1080), (800, 600), 
+        (1024, 768), (320, 240), (1640, 1232)
+    ]
+    
+    # 找到最接近的标准尺寸
+    best_match = min(common_sizes, 
+                    key=lambda size: abs(size[0] - inferred_width) + abs(size[1] - inferred_height))
+    
+    detected_width, detected_height = best_match
+    
+    logger.info(f"📏 Image size detection:")
+    logger.info(f"   🔍 Object bounds: max_x={max_x:.1f}, max_y={max_y:.1f}")
+    logger.info(f"   📐 Inferred size: {inferred_width}x{inferred_height}")
+    logger.info(f"   ✅ Using standard size: {detected_width}x{detected_height}")
+    
+    # 使用检测到的图像尺寸更新相机参数
+    if camera_params is None:
+        camera_params = {}
+    
+    camera_params.update({
+        "image_width": detected_width,
+        "image_height": detected_height,
+        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 21)
+    })
+    
+    # 估计距离（使用检测到的尺寸）
     estimated_distance = estimate_distance_from_bbox(
         object_info["bbox_xyxy"],
-        object_info["class"]
+        object_info["class"],
+        image_width=detected_width,
+        image_height=detected_height
     )
     
     # 转换坐标
@@ -263,8 +304,10 @@ def resolve_object_position(robot_name: str,
     map_position["confidence"] = object_info.get("conf", 0.0)
     map_position["object_class"] = object_info["class"]
     map_position["timestamp"] = object_info.get("timestamp", time.time())
+    map_position["detected_image_size"] = f"{detected_width}x{detected_height}"
     
     logger.info(f"✅ Position resolved: ({map_position['x']:.2f}, {map_position['y']:.2f})")
+    logger.info(f"📏 Distance: {estimated_distance:.2f}m, Image: {detected_width}x{detected_height}")
     return map_position
 
 # -------- 测试和调试功能 --------
