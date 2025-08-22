@@ -444,7 +444,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     waypoints: List[Any] = params.get("search_waypoints", [])
     
     # === 多帧检测参数 ===
-    num_frames: int = int(params.get("detection_frames", 3))  # 默认3帧
+    num_frames: int = int(params.get("detection_frames", 5))  # 默认3帧
     frame_interval: float = float(params.get("frame_interval", 0.3))  # 帧间间隔0.3秒
 
     # === 系统优化参数 ===
