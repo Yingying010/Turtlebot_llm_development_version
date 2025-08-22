@@ -37,7 +37,7 @@ def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
     action = task.get("action", "")
     params = task.get("parameters", {}).copy()
     
-    # 🔧 collect动作参数标准化
+    # 🔧 collect动作参数标准化 - 只保留item参数
     if action == "collect":
         # LLM可能生成的格式 → 标准格式
         if "object_id" in params and "item" not in params:
@@ -47,13 +47,11 @@ def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
         if "object" in params and "item" not in params:
             params["item"] = params.pop("object")
             
-        # 如果没有target，可能需要从blackboard获取
-        if "target" not in params:
-            item_name = params.get("item", "unknown")
-            params["target"] = f"{item_name}_target"  # 假设blackboard key
-            logger.warning(f"[NORMALIZE] collect action missing target, using: {params['target']}")
+        # 移除target参数（新版collect不需要）
+        if "target" in params:
+            logger.debug(f"[NORMALIZE] Removing target from collect params: {params.pop('target')}")
     
-    # 🔧 deliver动作参数标准化  
+    # 🔧 deliver动作参数标准化 - 只保留item参数  
     elif action == "deliver":
         # LLM可能生成的格式 → 标准格式
         if "object_id" in params and "item" not in params:
@@ -63,16 +61,15 @@ def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
         if "object" in params and "item" not in params:
             params["item"] = params.pop("object")
             
-        if "recipient" in params and "target" not in params:
-            params["target"] = params.pop("recipient")
-        if "to" in params and "target" not in params:
-            params["target"] = params.pop("to")
-        if "destination" in params and "target" not in params:
-            params["target"] = params.pop("destination")
-            
-        # 处理用户引用
-        if params.get("target") in ["user", "master", "human"]:
-            params["target"] = robot_name.replace("robot", "master")  # robot1 → master1
+        # 移除target参数（新版deliver不需要）
+        if "target" in params:
+            logger.debug(f"[NORMALIZE] Removing target from deliver params: {params.pop('target')}")
+        if "recipient" in params:
+            logger.debug(f"[NORMALIZE] Removing recipient from deliver params: {params.pop('recipient')}")
+        if "to" in params:
+            logger.debug(f"[NORMALIZE] Removing to from deliver params: {params.pop('to')}")
+        if "destination" in params:
+            logger.debug(f"[NORMALIZE] Removing destination from deliver params: {params.pop('destination')}")
     
     # 🔧 navigate动作参数标准化
     elif action == "navigate":
@@ -147,22 +144,14 @@ def execute_action(node, executor, task: Dict):
             logger.warning(f"Missing 'target' in follow params: {params}")
 
     elif action == "collect":
+        # 🔥 新版collect：只需要item参数
         item = params["item"]
-        if "position" in params:
-            is_successful = collect_item(node, robot, item, params["position"], executor)
-        elif "target" in params:
-            is_successful = collect_item(node, robot, item, params["target"], executor)
-        else:
-            print(f"Missing 'position' or 'target' in collect params: {params}")
+        is_successful = collect_item(node, robot, item, executor)
             
     elif action == "deliver":
+        # 🔥 新版deliver：只需要item参数
         item = params["item"]
-        if "position" in params:
-            is_successful = deliver_item(node, robot, item, params["position"], executor)
-        elif "target" in params:
-            is_successful = deliver_item(node, robot, item, params["target"], executor)
-        else:
-            print(f"Missing 'position' or 'target' in deliver params: {params}")
+        is_successful = deliver_item(node, robot, item, executor)
     
     elif action == "wait":
         print(f"  → Waiting for {params['duration_sec']} seconds")
@@ -254,24 +243,14 @@ def execute_action_single(node, executor, task: Dict):
             return False
 
     elif action == "collect":
+        # 🔥 新版collect：只需要item参数
         item = params["item"]
-        if "position" in params:
-            return collect_item(node, robot, item, params["position"], executor)
-        elif "target" in params:
-            return collect_item(node, robot, item, params["target"], executor)
-        else:
-            logger.error(f"Missing 'position' or 'target' in collect params: {params}")
-            return False
+        return collect_item(node, robot, item, executor)
             
     elif action == "deliver":
+        # 🔥 新版deliver：只需要item参数  
         item = params["item"]
-        if "position" in params:
-            return deliver_item(node, robot, item, params["position"], executor)
-        elif "target" in params:
-            return deliver_item(node, robot, item, params["target"], executor)
-        else:
-            logger.error(f"Missing 'position' or 'target' in deliver params: {params}")
-            return False
+        return deliver_item(node, robot, item, executor)
     
     elif action == "wait":
         duration = params.get("duration_sec", 1.0)
