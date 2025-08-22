@@ -287,7 +287,7 @@ def resolve_object_position(robot_name: str,
     camera_params.update({
         "image_width": detected_width,
         "image_height": detected_height,
-        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 21),
+        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 11.45),
         "camera_offset_x": camera_params.get("camera_offset_x", 0.0),
         "camera_offset_y": camera_params.get("camera_offset_y", 0.0)
     })
