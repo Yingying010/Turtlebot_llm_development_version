@@ -96,7 +96,7 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     estimated_distance = (distance_from_width + distance_from_height) / 2
     
     # 🔥 添加经验校准系数（基于实际测试调整）
-    CALIBRATION_FACTOR = 2.66
+    CALIBRATION_FACTOR = 4.97
     estimated_distance *= CALIBRATION_FACTOR
     
     # 限制距离范围：0.2m - 5.0m
@@ -244,40 +244,10 @@ def resolve_object_position(robot_name: str,
     
     logger.info(f"📐 原始坐标范围: max_x={max_x:.1f}, max_y={max_y:.1f}")
     
-    # 🔥 更智能的图像尺寸推断
-    # 如果坐标值很小，可能是低分辨率或者相对坐标
-    if max_x < 100 and max_y < 100:
-        # 可能是相对坐标，尝试更大的尺寸
-        detected_width, detected_height = 1640, 1232  # 树莓派常用分辨率
-        logger.info(f"🔍 检测到小坐标值，使用高分辨率: {detected_width}x{detected_height}")
-    elif max_x < 400 and max_y < 300:
-        # 可能是320x240放大的
-        detected_width, detected_height = 640, 480
-        logger.info(f"🔍 检测到中等坐标值，使用标准分辨率: {detected_width}x{detected_height}")
-    else:
-        # 使用原来的逻辑
-        inferred_width = int(max_x * 1.2)
-        inferred_height = int(max_y * 1.2)
-        
-        # 🔥 扩展常见尺寸列表，优先使用高分辨率
-        common_sizes = [
-            (1640, 1232),  # 树莓派高分辨率
-            (1280, 720),   # 720p
-            (1920, 1080),  # 1080p
-            (800, 600),    # SVGA
-            (640, 480),    # VGA
-            (1024, 768),   # XGA
-            (320, 240)     # QVGA (最后选择)
-        ]
-        
-        # 找到最接近的标准尺寸
-        best_match = min(common_sizes, 
-                        key=lambda size: abs(size[0] - inferred_width) + abs(size[1] - inferred_height))
-        
-        detected_width, detected_height = best_match
-        logger.info(f"🔍 推断尺寸: {inferred_width}x{inferred_height} → 使用: {detected_width}x{detected_height}")
-    
-    logger.info(f"📏 最终图像尺寸: {detected_width}x{detected_height}")
+    # 🔥 固定图像尺寸为640x480，避免动态检测不稳定
+    detected_width, detected_height = 640, 480
+    logger.info(f"🔧 使用固定图像尺寸: {detected_width}x{detected_height} (避免动态检测变化)")
+    logger.info(f"📐 原始检测范围: max_x={max_x:.1f}, max_y={max_y:.1f} (仅供参考)")
     
     # 使用检测到的图像尺寸更新相机参数
     if camera_params is None:
