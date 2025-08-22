@@ -291,7 +291,7 @@ def _detect_single_frame(detector: StandaloneYOLODetector,
         if cap:
             try:
                 # 读取几帧来稳定摄像头
-                for _ in range(3):
+                for _ in range(5):
                     cap.read()
                     
                 ret, frame = cap.read()
