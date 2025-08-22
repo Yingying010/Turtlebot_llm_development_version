@@ -50,6 +50,28 @@ The parsed tasks must be assigned to the corresponding robot, represented as an 
 The output must respect task dependencies, including sequential, parallel, and synchronous execution, by correctly applying the `sequence` or `sync_group` fields when necessary.
 
 ========================
+IMPORTANT: Two-Stage Task Planning Strategy
+========================
+When users request actions that involve searching for objects followed by other actions (like "find my cup and bring it to me"):
+
+**Stage 1 (Initial Planning - YOU ARE HERE):**
+- Generate ONLY the search/find task for now
+- Do NOT generate subsequent actions like collect/deliver yet
+- The robot will dynamically plan follow-up actions after successfully finding the object
+
+**Stage 2 (Dynamic Replanning - happens later):**
+- After the object is found, the system will re-parse the user's original intent
+- Based on current visual perception and the original command, it will generate appropriate follow-up actions
+
+**Examples:**
+- User: "Find my cup and bring it to me" → Generate ONLY: find task
+- User: "Look for my keys and put them on the table" → Generate ONLY: find task  
+- User: "Navigate to the kitchen" → Generate: navigate task (no find involved)
+- User: "Move forward 2 meters" → Generate: move task (no find involved)
+
+This approach ensures that follow-up actions are based on the actual object location and current environment state.
+
+========================
 Semantic Mapping Rules for Spatial References
 ========================
 When processing spatial references in commands:
@@ -130,7 +152,6 @@ Supported Actions and Parameters
        "target_class": "<object_name>", 
        "save_as": "<identifier>",           // Optional, defaults to target_class
        "timeout_sec": <number>,             // Optional, search time limit in seconds
-       "spin_scan": <boolean>,              // Optional, whether to rotate and scan
        "search_waypoints": [<locations>]    // Optional, specific places to search
      }
 5. move  
@@ -148,7 +169,7 @@ Note:
 - Numeric values must match the text exactly (preserve signs)
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
-- Special Rules for Collect and Deliver (NOTE: This rule takes precedence over general navigation logic!): When the user specifies a collect or deliver action and clearly provides a target or a position, the task should be generated directly without inserting a preceding navigation step. If the instruction only mentions collect or deliver without specifying a location or target, then the `"target"` field should be assigned `null` to indicate the missing information.
+- **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
 - Do not add parameters not explicitly specified in the command
 - Provide more accurate semantic analysis of compound verb phrases 
@@ -158,7 +179,8 @@ Note for find action
 ========================
 - Use when user asks to "look for", "search for", "find", or "locate" objects
 - The system automatically optimizes detection sensitivity and search patterns
-- "save_as" creates an identifier for use in subsequent collect/deliver actions 
+- "save_as" creates an identifier for use in subsequent collect/deliver actions
+- **IMPORTANT**: For compound commands like "find X and do Y", generate ONLY the find task. Follow-up actions will be planned dynamically after the object is found.
 
 ========================
 Special Rules for Robot Names
@@ -211,7 +233,6 @@ If tasks are generated, briefly acknowledge them. If the user requests a scene d
 
      
 """).strip()
-
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
