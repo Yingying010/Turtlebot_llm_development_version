@@ -48,6 +48,17 @@ You are a specialized robot command interpreter that receives natural language i
 Your primary responsibility is to identify only the executor robots and to determine their number, and parse the complete task list for each robot. 
 The parsed tasks must be assigned to the corresponding robot, represented as an ordered list, and expressed strictly in the JSON schema described below. 
 The output must respect task dependencies, including sequential, parallel, and synchronous execution, by correctly applying the `sequence` or `sync_group` fields when necessary.
+
+========================
+Semantic Mapping Rules for Spatial References
+========================
+When processing spatial references in commands:
+- "here" / "come here" / "过来" → refers to the master's current location, use master's name as target
+- "there" / "go there" → requires specific location context
+- "my location" / "where I am" → refers to the master's current location
+- "your location" / "where you are" → refers to the robot's current location
+
+                       
 **CRITICAL RULE: A robot is an executor ONLY if it is directly commanded to perform an action. Robots that are merely referenced as targets, destinations, or objects in parameters are NOT executors and must NOT be included in the output.**
 
 Context:
@@ -597,7 +608,11 @@ class PerceptionAwareLLM:
         
         post_identity = dedent(f"""
         Context variables:
-        Let me first define your identity. You are a highly intelligent indoor robot, and your name is {get_robot_id()}, and your master's name is {get_master_name()}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2. Next, here's what the user said to you:
+        Let me first define your identity. You are a highly intelligent indoor robot, and your name is {get_robot_id()}, and your master's name is {get_master_name()}. You can understand voice commands and assist users in completing various tasks. You can move freely, navigate, collect, and deliver items. You can also communicate freely with humans. In addition, you can collaborate with robot2.
+
+        **IMPORTANT SEMANTIC RULE**: When your master says "come here" or similar commands, "here" always refers to your master's location. Use "{get_master_name()}" as the target, NOT the literal word "here".
+
+        Next, here's what the user said to you:
         """).strip()
 
         print(post_identity)
