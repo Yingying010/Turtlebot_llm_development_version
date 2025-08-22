@@ -39,6 +39,7 @@ import subprocess
 import numpy as np
 from typing import Any, Dict, List, Optional
 from collections import Counter
+import config
 from ttsRepo.stream_tts import tts_manager
 
 # 简单的日志工具
@@ -49,6 +50,14 @@ class SimpleLogger:
     def debug(self, msg): print(f"[DEBUG] {msg}")
 
 logger = SimpleLogger()
+
+# -------- robot id & master id -------
+
+def get_robot_id():
+    return config.get("robot_id")
+
+def get_master_name():
+    return config.get("master_id")
 
 # -------- 黑板工具（/tmp） --------
 def _bb_path(robot_name: str) -> str:
@@ -718,48 +727,47 @@ def create_llm_replanning_function():
             system_prompt = dedent(f"""
             You are an intelligent robot task planner. A robot has just found an object and you need to decide what to do next.
 
-            Robot: {robot_name}
+            Robot: {get_robot_id()}
+            Master: {get_master_name()}
             Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
             Detection Quality: {found_object["detection_quality"]["frames_detected"]} frames, stability: {found_object["detection_quality"]["position_stability"]:.2f}
             Blackboard Key: {found_object["blackboard_key"]}
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
-            2. Collect the object 
-            3. Collect and deliver the object to someone
+            2. Navigate to the object location first, then collect it
+            3. Navigate to object, collect it, then navigate to recipient and deliver it
             4. Navigate closer to examine the object
             5. Other specific actions
 
             IMPORTANT: Analyze the user's original intent from the conversation history. Don't assume they always want collect+deliver.
 
             CRITICAL: Use the exact parameter format expected by the robot controller:
-            
-            For "collect" action:
+
+            For "collect" action (robot should already be at the object location):
             {{
                 "action": "collect",
                 "parameters": {{
-                    "item": "<object_class>",
-                    "target": "<blackboard_key>"
+                    "item": "<object_class>"
                 }}
             }}
-            
-            For "deliver" action:
+
+            For "deliver" action (robot should already be at the destination):
             {{
                 "action": "deliver", 
                 "parameters": {{
-                    "item": "<object_class>",
-                    "target": "<recipient_or_location>"
+                    "item": "<object_class>"
                 }}
             }}
-            
+
             For "navigate" action:
             {{
                 "action": "navigate",
                 "parameters": {{
-                    "target": "<location_or_coordinates>"
+                    "target": "<blackboard_key_or_location>"
                 }}
             }}
-            
+
             For "face" action:
             {{
                 "action": "face",
@@ -768,12 +776,17 @@ def create_llm_replanning_function():
                 }}
             }}
 
+            Typical task sequences:
+            - Find + Navigate to object + Collect + Navigate to recipient + Deliver
+            - Find + Navigate to object + Collect (if user just wants the robot to get it)
+            - Find + Navigate closer + Face object (if user wants to examine it)
+
             Respond in JSON format:
             {{
                 "action_needed": true/false,
                 "tasks": [
                     {{
-                        "action": "collect|deliver|navigate|face|wait",
+                        "action": "navigate|collect|deliver|face|wait",
                         "parameters": {{ ... }}
                     }}
                 ],
@@ -781,10 +794,18 @@ def create_llm_replanning_function():
             }}
 
             If no action is needed, set "action_needed": false and "tasks": [].
-            
-            Remember: Use "item" not "object_id", use "target" not "recipient"!
+
+            Remember: 
+            - collect/deliver only need "item" parameter
+            - Use navigate action to move to locations before collect/deliver
+            - Use blackboard_key for navigating to found objects
+            - When user says "bring to me", "deliver to me", "here", use "{get_master_name()}" as the target
+            - When user says "bring to someone else", use that person's name as the target
             """).strip()
-            
+
+
+
+
             # 构建对话历史字符串
             history_text = ""
             if chat_history:
