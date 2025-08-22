@@ -1,5 +1,12 @@
 # find.py
 # -*- coding: utf-8 -*-
+"""
+通用"查找"动作模块（完整版）
+- 旋转扫描 + 多点搜索 + 智能摄像头处理
+- 命中后把目标信息写入黑板（/tmp/robot_blackboard_<robot>.json）
+- 支持两阶段任务规划：基于History的动态重规划
+"""
+
 from __future__ import annotations
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -8,16 +15,14 @@ import os
 import json
 import time
 import cv2
-import json
+import math
+import threading
+import numpy as np
 from typing import Any, Dict, List, Optional
+from collections import Counter
 from ttsRepo.stream_tts import tts_manager
-from llmParserRepo.gpt_yolo_localParser import YOLOPerceiver
-from llmParserRepo.gpt_yolo_localParser import PerceptionAwareLLM, build_perception_context, HistoryStore, MEMORY_PATH
 
-
-
-
-# -------- 日志与TTS --------
+# 导入必要的模块
 try:
     from loguru import logger
 except Exception:
@@ -26,7 +31,12 @@ except Exception:
         def warning(self, *a, **k): print("[WARN]", *a)
         def error(self, *a, **k): print("[ERROR]", *a)
         def debug(self, *a, **k): print("[DEBUG]", *a)
-    logger = _DummyLogger()  # type: ignore
+    logger = _DummyLogger()
+
+from llmParserRepo.gpt_yolo_localParser import (
+    YOLOPerceiver, PerceptionAwareLLM, build_perception_context, 
+    HistoryStore, MEMORY_PATH, safe_json_parse
+)
 
 # -------- 黑板工具（/tmp） --------
 def _bb_path(robot_name: str) -> str:
@@ -69,159 +79,9 @@ def bb_clear(robot_name: str, key: Optional[str] = None) -> None:
         db["objects"].pop(key, None)
         _bb_write(robot_name, db)
 
-# -------- YOLO/感知 --------
-def _scan_once_with_yolo(detect_fn, target_class: str, conf_thres: float = 0.5) -> Optional[Dict[str, Any]]:
-    """
-    detect_fn() -> List[ {class, conf, center_xy, bbox_xyxy, map_xy?} ]
-    返回符合 class 且置信度最高的目标；否则 None
-    """
-    try:
-        objs: List[Dict[str, Any]] = detect_fn() or []
-    except Exception as e:
-        logger.error(f"detect_fn failed: {e}")
-        return None
-    cand = [o for o in objs if o.get("class") == target_class and float(o.get("conf", 0)) >= conf_thres]
-    return max(cand, key=lambda o: float(o.get("conf", 0))) if cand else None
-
-# def _rotate_scan(robot_name: str,
-#                  rotate_fn,
-#                  detect_fn,
-#                  target_class: str,
-#                  *,
-#                  max_rot_deg: int = 360,
-#                  step_deg: int = 30,
-#                  pause: float = 0.4,
-#                  conf_thres: float = 0.5) -> Optional[Dict[str, Any]]:
-#     """
-#     原地旋转扫描：每 step_deg 旋转一次，旋转后暂停 pause 秒，做一次检测
-#     先看一眼当前帧，避免无谓旋转
-#     """
-#     # 先看当前帧
-#     hit = _scan_once_with_yolo(detect_fn, target_class, conf_thres)
-#     if hit:
-#         logger.debug("hit before spin-scan")
-#         return hit
-
-#     turned = 0
-#     while turned < max_rot_deg:
-#         try:
-#             rotate_fn(robot_name, step_deg)
-#         except Exception as e:
-#             logger.error(f"rotate_fn error: {e}")
-#             break
-#         time.sleep(pause)
-#         hit = _scan_once_with_yolo(detect_fn, target_class, conf_thres)
-#         if hit:
-#             return hit
-#         turned += step_deg
-#     return None
-
-
-def _rotate_scan_realtime(robot_name: str,
-                           rotate_fn,
-                           detect_model,
-                           *,
-                           max_rot_deg: int = 360,
-                           deg_per_frame: int = 10,
-                           fps: int = 5,
-                           conf_thres: float = 0.5,
-                           video_source: int = 0,
-                           timeout_sec: float = 10.0) -> Optional[Dict[str, Any]]:
-    """
-    实时版本：机器人边旋转，边持续检测图像，命中目标立即返回。
-    """
-    logger.info("[find] 🚀 Starting real-time rotate+detect scan...")
-    
-    # 🔥 添加调试信息
-    logger.info(f"[find] 🔧 Scan parameters: max_rot={max_rot_deg}°, deg_per_frame={deg_per_frame}°, fps={fps}, timeout={timeout_sec}s")
-    logger.info(f"[find] 🔧 Rotate function: {rotate_fn}")
-    logger.info(f"[find] 🔧 Robot name: {robot_name}")
-    
-    t0 = time.time()
-    total_rotated = 0
-    frame_interval = 1.0 / fps
-
-    cap = cv2.VideoCapture(video_source)
-    if not cap.isOpened():
-        logger.error("❌ Failed to open camera for real-time scan")
-        return None
-
-    try:
-        frame_count = 0
-        while total_rotated < max_rot_deg and (time.time() - t0) < timeout_sec:
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                time.sleep(0.01)
-                continue
-
-            frame_count += 1
-            logger.debug(f"[find] 📷 Processing frame {frame_count}, rotated={total_rotated}°")
-
-            # YOLO 检测
-            res = detect_model.model.predict(
-                source=frame,
-                conf=detect_model.conf,
-                iou=detect_model.iou,
-                device=detect_model.device,
-                verbose=False
-            )[0]
-
-            names = res.names
-            for b in getattr(res, "boxes", []):
-                x1, y1, x2, y2 = b.xyxy[0].tolist()
-                conf = float(b.conf[0])
-                cls_id = int(b.cls[0])
-                cx = (x1 + x2) / 2.0
-                cy = (y1 + y2) / 2.0
-                cls_name = names.get(cls_id, str(cls_id)).lower()
-
-                logger.debug(f"[find] 🎯 Detected: {cls_name} (conf={conf:.3f})")
-                
-                if conf >= conf_thres:
-                    logger.info(f"🎯 Found {cls_name} with conf={conf:.3f}")
-                    cap.release()
-                    return {
-                        "class": cls_name,
-                        "conf": conf,
-                        "bbox_xyxy": [x1, y1, x2, y2],
-                        "center_xy": [cx, cy]
-                    }
-
-            # 🔥 关键调试：没检测到目标 → 继续旋转
-            if callable(rotate_fn):
-                logger.info(f"[find] 🔄 Rotating {deg_per_frame}° (total: {total_rotated}°/{max_rot_deg}°)")
-                try:
-                    rotate_fn(robot_name, deg_per_frame)
-                    logger.info(f"[find] ✅ Rotation command sent successfully")
-                except Exception as e:
-                    logger.error(f"[find] ❌ Rotation failed: {e}")
-                    break
-            else:
-                logger.error(f"[find] ❌ rotate_fn is not callable: {rotate_fn}")
-                break
-                
-            total_rotated += deg_per_frame
-            time.sleep(frame_interval)
-
-        logger.info("🛑 Scan complete, no object found")
-        logger.info(f"[find] 📊 Final stats: frames={frame_count}, total_rotated={total_rotated}°, elapsed={time.time()-t0:.1f}s")
-        return None
-
-    finally:
-        cap.release()
-
-
+# -------- 智能参数优化 --------
 def get_optimized_params(target_class: str, has_waypoints: bool) -> tuple:
-    """根据物体类型和搜索策略优化检测参数
-    
-    Args:
-        target_class: 要搜索的物体类型
-        has_waypoints: 是否有多个搜索点
-        
-    Returns:
-        (conf_thres, max_rot_deg): 优化后的参数
-    """
-    # 基础配置
+    """根据物体类型和搜索策略优化检测参数"""
     conf_thres = 0.5
     max_rot_deg = 360
     
@@ -240,13 +100,400 @@ def get_optimized_params(target_class: str, has_waypoints: bool) -> tuple:
     logger.debug(f"Optimized params for '{target_class}': conf_thres={conf_thres}, max_rot_deg={max_rot_deg}")
     return conf_thres, max_rot_deg
 
+# -------- YOLO/感知 --------
+def _assign_ids(dets: List[Dict], topk: int = 3):
+    dets = dets[:topk]
+    totals = Counter(d["class"] for d in dets)
+    seen   = Counter()
+    objs = []
+    for d in dets:
+        cls = d["class"]
+        seen[cls] += 1
+        oid = cls if totals[cls] == 1 else f"{cls}{seen[cls]}"
+        objs.append((oid, cls, d))
+    return objs
+
+def _scan_once_with_yolo(detect_fn, target_class: str, conf_thres: float = 0.5) -> Optional[Dict[str, Any]]:
+    """单次YOLO检测"""
+    try:
+        objs: List[Dict[str, Any]] = detect_fn() or []
+    except Exception as e:
+        logger.error(f"detect_fn failed: {e}")
+        return None
+    cand = [o for o in objs if o.get("class") == target_class and float(o.get("conf", 0)) >= conf_thres]
+    return max(cand, key=lambda o: float(o.get("conf", 0))) if cand else None
+
+# -------- 摄像头处理 --------
+def _create_video_capture(video_source: int = 0) -> cv2.VideoCapture:
+    """创建并配置摄像头capture对象"""
+    logger.info(f"[find] 📷 Attempting to open camera: {video_source}")
+    
+    # 尝试不同的后端
+    backends_to_try = [
+        cv2.CAP_V4L2,      # Linux V4L2
+        cv2.CAP_GSTREAMER, # GStreamer
+        cv2.CAP_FFMPEG,    # FFmpeg
+        cv2.CAP_ANY        # 自动选择
+    ]
+    
+    for backend in backends_to_try:
+        logger.debug(f"[find] 🔧 Trying backend: {backend}")
+        cap = cv2.VideoCapture(video_source, backend)
+        
+        if cap.isOpened():
+            # 设置摄像头参数
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # 测试读取帧
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                logger.info(f"[find] ✅ Camera opened successfully with backend {backend}")
+                logger.info(f"[find] 📏 Frame shape: {frame.shape}")
+                return cap
+            else:
+                logger.warning(f"[find] ⚠️ Camera opened but cannot read frames with backend {backend}")
+                cap.release()
+        else:
+            logger.warning(f"[find] ❌ Failed to open camera with backend {backend}")
+    
+    logger.error(f"[find] ❌ Failed to open camera with any backend")
+    return None
+
+def _test_camera_simple() -> bool:
+    """简单测试摄像头是否可用"""
+    logger.info("[find] 🧪 Testing camera access...")
+    
+    cap = _create_video_capture(0)
+    if cap is None:
+        return False
+    
+    try:
+        # 尝试读取10帧
+        success_count = 0
+        for i in range(10):
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                success_count += 1
+            time.sleep(0.1)
+        
+        logger.info(f"[find] 📊 Camera test: {success_count}/10 frames read successfully")
+        return success_count >= 5  # 至少成功读取一半
+        
+    finally:
+        cap.release()
+
+# -------- 实时旋转扫描 --------
+def _rotate_scan_realtime_fixed(robot_name: str,
+                               rotate_fn,
+                               detect_model,
+                               *,
+                               max_rot_deg: int = 360,
+                               deg_per_frame: int = 10,
+                               fps: int = 5,
+                               conf_thres: float = 0.5,
+                               video_source: int = 0,
+                               timeout_sec: float = 10.0) -> Optional[Dict[str, Any]]:
+    """修复版实时旋转检测"""
+    logger.info("[find] 🚀 Starting FIXED real-time rotate+detect scan...")
+    
+    # 创建摄像头对象
+    cap = _create_video_capture(video_source)
+    if cap is None:
+        logger.error("❌ Failed to create camera capture")
+        return None
+
+    try:
+        # 预热摄像头
+        logger.info("[find] 🔥 Warming up camera...")
+        for i in range(5):
+            ret, frame = cap.read()
+            if ret:
+                logger.debug(f"[find] ✅ Warmup frame {i+1} success: {frame.shape}")
+            else:
+                logger.warning(f"[find] ⚠️ Warmup frame {i+1} failed")
+            time.sleep(0.1)
+        
+        t0 = time.time()
+        total_rotated = 0
+        frame_interval = 1.0 / fps
+        frame_count = 0
+
+        while total_rotated < max_rot_deg and (time.time() - t0) < timeout_sec:
+            # 读取帧
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                logger.debug(f"[find] ⚠️ Frame read failed, continuing...")
+                time.sleep(0.01)
+                continue
+
+            frame_count += 1
+            logger.debug(f"[find] 📷 Processing frame {frame_count}, rotated={total_rotated}°")
+
+            # YOLO 检测
+            try:
+                res = detect_model.model.predict(
+                    source=frame,
+                    conf=detect_model.conf,
+                    iou=detect_model.iou,
+                    device=detect_model.device,
+                    verbose=False
+                )[0]
+
+                names = res.names
+                for b in getattr(res, "boxes", []):
+                    x1, y1, x2, y2 = b.xyxy[0].tolist()
+                    conf = float(b.conf[0])
+                    cls_id = int(b.cls[0])
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
+                    cls_name = names.get(cls_id, str(cls_id)).lower()
+
+                    logger.debug(f"[find] 🎯 Detected: {cls_name} (conf={conf:.3f})")
+                    
+                    if conf >= conf_thres:
+                        logger.info(f"🎯 Found {cls_name} with conf={conf:.3f}")
+                        return {
+                            "class": cls_name,
+                            "conf": conf,
+                            "bbox_xyxy": [x1, y1, x2, y2],
+                            "center_xy": [cx, cy]
+                        }
+            except Exception as e:
+                logger.warning(f"[find] ⚠️ YOLO detection error: {e}")
+
+            # 继续旋转
+            if total_rotated < max_rot_deg:
+                try:
+                    logger.debug(f"[find] 🔄 Rotating {deg_per_frame}° (total: {total_rotated}°/{max_rot_deg}°)")
+                    rotate_fn(robot_name, deg_per_frame)
+                    total_rotated += deg_per_frame
+                except Exception as e:
+                    logger.error(f"[find] ❌ Rotation failed: {e}")
+                    break
+
+            time.sleep(frame_interval)
+
+        logger.info(f"🛑 Scan complete: {frame_count} frames processed, {total_rotated}° rotated")
+        return None
+
+    finally:
+        cap.release()
+
+# -------- 分步旋转扫描（回退方案）--------
+def _rotate_scan_stepwise(robot_name: str,
+                         rotate_fn,
+                         detect_fn,
+                         target_class: str,
+                         *,
+                         max_rot_deg: int = 360,
+                         step_deg: int = 30,
+                         pause: float = 0.5,
+                         conf_thres: float = 0.5) -> Optional[Dict[str, Any]]:
+    """回退方案：分步旋转扫描"""
+    logger.info(f"[find] 🔄 Starting stepwise rotate+detect scan (fallback mode)")
+    logger.info(f"[find] 🔧 Step parameters: max_rot={max_rot_deg}°, step={step_deg}°, pause={pause}s")
+    
+    # 先看当前帧
+    logger.info(f"[find] 📷 Checking current view first...")
+    hit = _scan_once_with_yolo(detect_fn, target_class, conf_thres)
+    if hit:
+        logger.info(f"[find] 🎯 Found {target_class} in current view!")
+        return hit
+
+    turned = 0
+    step_count = 0
+    while turned < max_rot_deg:
+        step_count += 1
+        logger.info(f"[find] 🔄 Step {step_count}: Rotating {step_deg}° (total: {turned}°/{max_rot_deg}°)")
+        
+        try:
+            rotate_fn(robot_name, step_deg)
+            logger.info(f"[find] ✅ Rotation step completed")
+        except Exception as e:
+            logger.error(f"[find] ❌ Rotation step failed: {e}")
+            break
+            
+        # 暂停让机器人稳定
+        time.sleep(pause)
+        
+        # 检测当前视角
+        logger.info(f"[find] 📷 Detecting after rotation step {step_count}...")
+        hit = _scan_once_with_yolo(detect_fn, target_class, conf_thres)
+        if hit:
+            logger.info(f"[find] 🎯 Found {target_class} after {turned + step_deg}° rotation!")
+            return hit
+            
+        turned += step_deg
+        
+    logger.info(f"[find] 🛑 Stepwise scan complete: {step_count} steps, {turned}° total rotation")
+    return None
+
+# -------- 基础find功能 --------
+def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
+    """查找动作：旋转扫描 + 多点搜索"""
+    # === 解析参数 ===
+    target: str = params.get("target_class", "cup")
+    save_as: str = params.get("save_as", target)
+    timeout_sec: float = float(params.get("timeout_sec", 25))
+    use_spin: bool = bool(params.get("spin_scan", True))
+    waypoints: List[Any] = params.get("search_waypoints", [])
+
+    # === 系统优化参数 ===
+    conf_thres, max_rot_deg = get_optimized_params(target, bool(waypoints))
+    
+    # === 验证上下文函数 ===
+    detect_fn = ctx.get("detect_fn")
+    rotate_fn = ctx.get("rotate_fn")
+    navigate_to_fn = ctx.get("navigate_to_fn")
+    event_pub = ctx.get("event_pub")
+
+    if not callable(detect_fn):
+        return {"ok": False, "found": False, "reason": "detect_fn missing"}
+    if use_spin and not callable(rotate_fn):
+        logger.warning("spin_scan=True but rotate_fn missing, will skip spin scan.")
+        use_spin = False
+    if waypoints and not callable(navigate_to_fn):
+        logger.warning("search_waypoints provided but navigate_to_fn missing, will skip waypoint search.")
+        waypoints = []
+
+    # === 摄像头测试 ===
+    camera_ok = _test_camera_simple()
+    logger.info(f"[find] 📷 Camera test result: {'✅ PASS' if camera_ok else '❌ FAIL'}")
+
+    # === 开始搜索 ===
+    t0 = time.time()
+    tts_manager.say(f"Okay, I'll look around for the {target}.")
+    logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
+
+    hit: Optional[Dict[str, Any]] = None
+    detect_model = YOLOPerceiver()
+
+    # === 1. 当前帧检测 ===
+    hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
+
+    # === 2. 旋转扫描 ===
+    if not hit and use_spin:
+        if camera_ok:
+            logger.info(f"[find] 🔄 Starting FIXED real-time rotation scan")
+            hit = _rotate_scan_realtime_fixed(
+                robot_name=robot_name,
+                rotate_fn=rotate_fn,
+                detect_model=detect_model,
+                conf_thres=conf_thres,
+                video_source=0,
+                fps=3,  # 降低fps，增加稳定性
+                deg_per_frame=15,  # 增加旋转步长
+                max_rot_deg=max_rot_deg,
+                timeout_sec=timeout_sec - (time.time() - t0)
+            )
+        else:
+            logger.warning("[find] 📷 Camera test failed, using stepwise fallback")
+            hit = _rotate_scan_stepwise(
+                robot_name=robot_name,
+                rotate_fn=rotate_fn,
+                detect_fn=detect_fn,
+                target_class=target,
+                conf_thres=conf_thres,
+                max_rot_deg=max_rot_deg,
+                step_deg=30,
+                pause=0.5
+            )
+
+    # === 3. 多点搜索 ===
+    if not hit and waypoints:
+        logger.info(f"[find] 🗺️ Starting waypoint search: {waypoints}")
+        for i, wp in enumerate(waypoints):
+            if time.time() - t0 > timeout_sec:
+                logger.info("[find] timeout during waypoints loop")
+                break
+                
+            logger.info(f"[find] 🚶 Moving to waypoint {i+1}/{len(waypoints)}: {wp}")
+            try:
+                navigate_to_fn(robot_name, wp)
+            except Exception as e:
+                logger.warning(f"navigate_to_fn error on {wp}: {e}")
+                continue
+
+            time.sleep(0.5)  # 到达后稍微等待
+            
+            # 到达后先检测一次
+            hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
+            if hit:
+                logger.info(f"[find] 🎯 Found {target} at waypoint {wp}!")
+                break
+
+            # 如果没找到，在这个位置做半圈扫描
+            if use_spin:
+                logger.info(f"[find] 🔄 Scanning at waypoint {wp}")
+                if camera_ok:
+                    hit = _rotate_scan_realtime_fixed(
+                        robot_name=robot_name,
+                        rotate_fn=rotate_fn,
+                        detect_model=detect_model,
+                        conf_thres=conf_thres,
+                        max_rot_deg=180,  # waypoint处只扫描半圈
+                        timeout_sec=timeout_sec - (time.time() - t0)
+                    )
+                else:
+                    hit = _rotate_scan_stepwise(
+                        robot_name=robot_name,
+                        rotate_fn=rotate_fn,
+                        detect_fn=detect_fn,
+                        target_class=target,
+                        conf_thres=conf_thres,
+                        max_rot_deg=180,  # waypoint处只扫描半圈
+                        step_deg=45,      # 更大步长，提高效率
+                        pause=0.5
+                    )
+
+            if hit:
+                logger.info(f"[find] 🎯 Found {target} during scan at waypoint {wp}!")
+                break
+
+    # === 处理结果 ===
+    if not hit:
+        tts_manager.say("I couldn't find it.")
+        payload = {"robot": robot_name, "target": target, "found": False, "ts": time.time()}
+        if callable(event_pub):
+            try:
+                event_pub("find_result", payload)
+            except Exception as e:
+                logger.warning(f"event_pub error: {e}")
+        logger.info(f"[find] not found: {target}")
+        return {"ok": True, "found": False, "blackboard_key": save_as}
+
+    # === 成功找到 ===
+    record = {
+        "class": target,
+        "center_xy": hit.get("center_xy"),
+        "bbox_xyxy": hit.get("bbox_xyxy"),
+        "map_xy": hit.get("map_xy") if "map_xy" in hit else None,
+        "conf": float(hit.get("conf", 0.0)),
+        "timestamp": time.time()
+    }
+    bb_set(robot_name, save_as, record)
+
+    payload = {"robot": robot_name, "target": target, "found": True,
+               "key": save_as, "conf": record["conf"], "ts": record["timestamp"]}
+    if callable(event_pub):
+        try:
+            event_pub("find_result", payload)
+        except Exception as e:
+            logger.warning(f"event_pub error: {e}")
+
+    tts_manager.say(f"I found the {target}.")
+    logger.info(f"[find] found {target} (key={save_as}, conf={record['conf']:.3f})")
+    return {"ok": True, "found": True, "blackboard_key": save_as, "record": record}
+
+# -------- 基于History的动态重规划 --------
 def execute_find_with_history_replanning(node: Any,
                                         robot_name: str,
                                         params: Dict[str, Any],
                                         **ctx) -> Dict[str, Any]:
-    """
-    基于History的find增强版：找到物体后，利用历史记录重新解析用户意图
-    """
+    """基于History的find增强版：找到物体后，利用历史记录重新解析用户意图"""
     # === 1. 执行基础find逻辑 ===
     basic_result = execute_find(node, robot_name, params, **ctx)
     
@@ -258,7 +505,7 @@ def execute_find_with_history_replanning(node: Any,
     logger.info(f"[find] {robot_name} found object, initiating history-based replanning...")
     
     try:
-        # 🔥 读取本地历史记录
+        # 读取本地历史记录
         store = HistoryStore(MEMORY_PATH)
         recent_messages = store.recent_chat_messages(max_turns=3)  # 获取最近3轮对话
         
@@ -306,13 +553,12 @@ def execute_find_with_history_replanning(node: Any,
         raw_response = llm.parse(
             user_text=replanning_prompt,
             perception_context=perception_ctx,
-            chat_history_messages=recent_messages,  # 🔥 传入历史对话上下文
+            chat_history_messages=recent_messages,
             perception_history_text=None
         )
         
         # 解析LLM响应
         try:
-            from llmParserRepo.gpt_yolo_localParser import safe_json_parse
             replanned_data = safe_json_parse(raw_response)
             
             # 提取新的任务列表
@@ -325,7 +571,7 @@ def execute_find_with_history_replanning(node: Any,
                 basic_result["replanning_success"] = True
                 basic_result["replanning_source"] = "history"
                 
-                # 🔥 将重新规划的结果也写入历史记录
+                # 将重新规划的结果也写入历史记录
                 store.append("assistant", f"Found {params.get('target_class')}. Planning follow-up actions based on your request.")
                 
             else:
@@ -345,171 +591,21 @@ def execute_find_with_history_replanning(node: Any,
     
     return basic_result
 
-# -------- 核心入口 --------
-def execute_find(node: Any,
-                 robot_name: str,
-                 params: Dict[str, Any],
-                 **ctx) -> Dict[str, Any]:
-    """
-    查找动作：旋转扫描 + 多点搜索
-    返回: {"ok": True, "found": bool, "blackboard_key": save_as, "record": {...}?}
-    """
-    # === 1. 解析用户参数 ===
-    target: str = params.get("target_class", "cup")
-    save_as: str = params.get("save_as", target)
-    timeout_sec: float = float(params.get("timeout_sec", 25))
-    use_spin: bool = bool(params.get("spin_scan", True))
-    waypoints: List[Any] = params.get("search_waypoints", [])
-
-    # === 2. 🔥 调用智能参数优化 ===
-    conf_thres, max_rot_deg = get_optimized_params(target, bool(waypoints))
-    
-    # === 3. 验证必要的上下文函数 ===
-    detect_fn = ctx.get("detect_fn")
-    rotate_fn = ctx.get("rotate_fn")
-    navigate_to_fn = ctx.get("navigate_to_fn")
-    event_pub = ctx.get("event_pub")
-
-    # 🔥 添加调试信息
-    rotate_fn = ctx.get("rotate_fn")
-    logger.info(f"[find] 🔧 Context functions check:")
-    logger.info(f"  - detect_fn: {callable(detect_fn)}")
-    logger.info(f"  - rotate_fn: {callable(rotate_fn)}")
-    logger.info(f"  - navigate_to_fn: {callable(navigate_to_fn)}")
-
-    if use_spin and callable(rotate_fn):
-        # 🔥 测试旋转函数
-        logger.info(f"[find] 🧪 Testing rotation function...")
-        try:
-            rotate_fn(robot_name, 10)  # 测试旋转10度
-            logger.info(f"[find] ✅ Rotation test successful")
-            time.sleep(1)  # 给机器人时间执行
-        except Exception as e:
-            logger.error(f"[find] ❌ Rotation test failed: {e}")
-
-    if not callable(detect_fn):
-        return {"ok": False, "found": False, "reason": "detect_fn missing"}
-    if use_spin and not callable(rotate_fn):
-        logger.warning("spin_scan=True but rotate_fn missing, will skip spin scan.")
-        use_spin = False
-    if waypoints and not callable(navigate_to_fn):
-        logger.warning("search_waypoints provided but navigate_to_fn missing, will skip waypoint search.")
-        waypoints = []
-
-    # === 4. 开始搜索流程 ===
-    t0 = time.time()
-    tts_manager.say(f"Okay, I'll look around for the {target}.")
-    logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
-
-    hit: Optional[Dict[str, Any]] = None
-
-    # === 5. 实例化 YOLO 模型 ===
-    detect_model = YOLOPerceiver()
-
-    # === 6. 当前帧检测 ===
-    hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
-
-    # === 7. 原地旋转实时检测 ===
-    if not hit and use_spin:
-        hit = _rotate_scan_realtime(
-            robot_name=robot_name,
-            rotate_fn=rotate_fn,
-            detect_model=detect_model,
-            conf_thres=conf_thres,          # 🔥 使用优化后的参数
-            video_source=0,
-            fps=5,
-            deg_per_frame=10,
-            max_rot_deg=max_rot_deg,        # 🔥 使用优化后的参数
-            timeout_sec=timeout_sec - (time.time() - t0)
-        )
-
-    # === 8. 多点搜索 ===
-    if not hit and waypoints:
-        for wp in waypoints:
-            if time.time() - t0 > timeout_sec:
-                logger.info("[find] timeout during waypoints loop")
-                break
-            try:
-                navigate_to_fn(robot_name, wp)
-            except Exception as e:
-                logger.warning(f"navigate_to_fn error on {wp}: {e}")
-                continue
-
-            time.sleep(0.35)
-            hit = _scan_once_with_yolo(detect_fn, target, conf_thres)  # 🔥 使用优化参数
-
-            if not hit and use_spin:
-                remaining_time = timeout_sec - (time.time() - t0)
-                hit = _rotate_scan_realtime(
-                    robot_name=robot_name,
-                    rotate_fn=rotate_fn,
-                    detect_model=detect_model,
-                    conf_thres=conf_thres,      # 🔥 使用优化参数
-                    video_source=0,
-                    fps=5,
-                    deg_per_frame=10,
-                    max_rot_deg=min(180, max_rot_deg),  # 多点搜索时限制旋转角度
-                    timeout_sec=remaining_time
-                )
-
-            if hit:
-                break
-
-    # === 9. 处理搜索结果 ===
-    if not hit:
-        tts_manager.say("I couldn't find it.")
-        payload = {"robot": robot_name, "target": target, "found": False, "ts": time.time()}
-        if callable(event_pub):
-            try:
-                event_pub("find_result", payload)
-            except Exception as e:
-                logger.warning(f"event_pub error: {e}")
-        logger.info(f"[find] not found: {target}")
-        return {"ok": True, "found": False, "blackboard_key": save_as}
-
-    # === 10. 记录成功结果 ===
-    record = {
-        "class": target,
-        "center_xy": hit.get("center_xy"),
-        "bbox_xyxy": hit.get("bbox_xyxy"),
-        "map_xy": hit.get("map_xy") if "map_xy" in hit else None,
-        "conf": float(hit.get("conf", 0.0)),
-        "timestamp": time.time()
-    }
-    bb_set(robot_name, save_as, record)
-
-    payload = {"robot": robot_name, "target": target, "found": True,
-               "key": save_as, "conf": record["conf"], "ts": record["timestamp"]}
-    if callable(event_pub):
-        try:
-            event_pub("find_result", payload)
-        except Exception as e:
-            logger.warning(f"event_pub error: {e}")
-
-    tts_manager.say(f"I found the {target}.")
-    logger.info(f"[find] found {target} (key={save_as}, conf={record['conf']:.3f})")
-    return {"ok": True, "found": True, "blackboard_key": save_as, "record": record}
-
-
-# -------- 兼容：给 robot_controller 直接用的小包装 --------
+# -------- 对外接口 --------
 def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
-    """
-    与 robot_controller.execute_action 的单步接口保持一致：
-    task = {"robot": "robot1", "action": "find", "parameters": {...}}
-    """
+    """与 robot_controller 的单步接口保持一致，使用基于History的增强版本"""
     robot = task.get("robot") or task.get("parameters", {}).get("robot")
     if not robot:
         return {"ok": False, "reason": "robot name missing"}
+    
+    # 使用基于History的增强版本
     return execute_find_with_history_replanning(node, robot, task.get("parameters", {}), **ctx)
 
-
-# -------- 可选：命令行自测（stub） --------
+# -------- 命令行测试 --------
 if __name__ == "__main__":
-    # 你可以临时跑：python3 find.py 观察日志是否正常（以下是简易桩）
     import random
 
     def fake_detect():
-        # 20% 几率“看到杯子”
         if random.random() < 0.2:
             return [{
                 "class": "cup",
@@ -535,9 +631,6 @@ if __name__ == "__main__":
             "target_class": "cup",
             "save_as": "cup_target",
             "timeout_sec": 8,
-            "spin_scan": True,
-            "max_rot_deg": 360,
-            "step_deg": 45,
             "search_waypoints": ["kitchen", [1.2, -0.5]]
         },
         detect_fn=fake_detect,
