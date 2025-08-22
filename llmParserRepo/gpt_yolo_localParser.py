@@ -119,22 +119,30 @@ Supported Actions and Parameters
 1. navigate  
    - To a named target: {"target": "<target_name>"}  
    - To coordinates: {"position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
-2. follow  
-   {"target": "<target_name>"}
-3. face  
-   {"target": "<target_name>"}
-4. collect  
+2. collect  
    - From a user or semantic location: {"item": "<item>", "target": "<target>"}  
    - From coordinates: {"item": "<item>", "position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
-5. deliver  
+3. deliver  
    - To a user or semantic location: {"item": "<item>", "target": "<target>"}  
    - To coordinates: {"item": "<item>", "position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
-6. wait  
-   {"duration_sec": <number>}
-7. move  
+4. find  
+   - Search for an object: {
+       "target_class": "<object_name>", 
+       "save_as": "<identifier>",           // Optional, defaults to target_class
+       "timeout_sec": <number>,             // Optional, search time limit in seconds
+       "spin_scan": <boolean>,              // Optional, whether to rotate and scan
+       "search_waypoints": [<locations>]    // Optional, specific places to search
+     }
+5. move  
    {"direction": "forward" or "backward", "value": <number>, "unit": "meter" or "second"}
-8. turn  
+6. turn  
    {"direction": "left" or "right", "value": <number>, "unit": "degree" or "second"}
+7. follow  
+   {"target": "<target_name>"}
+8. face  
+   {"target": "<target_name>"}
+9. wait  
+   {"duration_sec": <number>}
 
 Note:
 - Numeric values must match the text exactly (preserve signs)
@@ -143,14 +151,21 @@ Note:
 - Special Rules for Collect and Deliver (NOTE: This rule takes precedence over general navigation logic!): When the user specifies a collect or deliver action and clearly provides a target or a position, the task should be generated directly without inserting a preceding navigation step. If the instruction only mentions collect or deliver without specifying a location or target, then the `"target"` field should be assigned `null` to indicate the missing information.
 - Strictly adhere to the principle of semantic precedence
 - Do not add parameters not explicitly specified in the command
-- Provide more accurate semantic analysis of compound verb phrases  
+- Provide more accurate semantic analysis of compound verb phrases 
+
+========================
+Note for find action
+========================
+- Use when user asks to "look for", "search for", "find", or "locate" objects
+- The system automatically optimizes detection sensitivity and search patterns
+- "save_as" creates an identifier for use in subsequent collect/deliver actions 
 
 ========================
 Special Rules for Robot Names
 ========================     
-All robot names must be converted to lowercase alphanumeric format without spaces. 
-The same formatting rules apply to all target names.
-For example: convert "robot one" to "robot1"
+- All robot names must be converted to lowercase alphanumeric format without spaces. 
+- The same formatting rules apply to all target names.
+- For example: convert "robot one" to "robot1"
                        
 ========================
 Executor Robot Identification Rules

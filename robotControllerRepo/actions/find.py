@@ -211,6 +211,36 @@ def _rotate_scan_realtime(robot_name: str,
         cap.release()
 
 
+def get_optimized_params(target_class: str, has_waypoints: bool) -> tuple:
+    """根据物体类型和搜索策略优化检测参数
+    
+    Args:
+        target_class: 要搜索的物体类型
+        has_waypoints: 是否有多个搜索点
+        
+    Returns:
+        (conf_thres, max_rot_deg): 优化后的参数
+    """
+    # 基础配置
+    conf_thres = 0.5
+    max_rot_deg = 360
+    
+    # 针对不同物体类型的优化
+    if target_class in ["cup", "bottle", "phone", "remote", "keys"]:  # 小物体
+        conf_thres = 0.45  # 稍微宽松，避免漏检小物体
+    elif target_class in ["person", "chair", "table", "sofa", "bed"]:  # 大物体
+        conf_thres = 0.6   # 可以更严格，大物体通常检测置信度高
+    elif target_class in ["book", "laptop", "mouse", "keyboard"]:  # 中等物体
+        conf_thres = 0.5   # 保持默认
+    
+    # 如果有多个搜索点，每个点只需半圈扫描（提高效率）
+    if has_waypoints:
+        max_rot_deg = 180  # 多点搜索时每点半圈即可
+    
+    logger.debug(f"Optimized params for '{target_class}': conf_thres={conf_thres}, max_rot_deg={max_rot_deg}")
+    return conf_thres, max_rot_deg
+
+
 # -------- 核心入口 --------
 def execute_find(node: Any,
                  robot_name: str,
@@ -219,24 +249,18 @@ def execute_find(node: Any,
     """
     查找动作：旋转扫描 + 多点搜索
     返回: {"ok": True, "found": bool, "blackboard_key": save_as, "record": {...}?}
-
-    必要 ctx:
-      - detect_fn(): -> List[Dict] (单帧检测函数)
-      - rotate_fn(robot, deg): 控制旋转
-      - navigate_to_fn(robot, target): 控制导航
-    可选 ctx:
-      - event_pub(kind, payload)
     """
+    # === 1. 解析用户参数 ===
     target: str = params.get("target_class", "cup")
     save_as: str = params.get("save_as", target)
     timeout_sec: float = float(params.get("timeout_sec", 25))
-    conf_thres: float = float(params.get("conf_thres", 0.5))
-
     use_spin: bool = bool(params.get("spin_scan", True))
-    max_rot_deg: int = int(params.get("max_rot_deg", 360))
-    step_deg: int = int(params.get("step_deg", 30))
     waypoints: List[Any] = params.get("search_waypoints", [])
 
+    # === 2. 🔥 调用智能参数优化 ===
+    conf_thres, max_rot_deg = get_optimized_params(target, bool(waypoints))
+    
+    # === 3. 验证必要的上下文函数 ===
     detect_fn = ctx.get("detect_fn")
     rotate_fn = ctx.get("rotate_fn")
     navigate_to_fn = ctx.get("navigate_to_fn")
@@ -251,33 +275,34 @@ def execute_find(node: Any,
         logger.warning("search_waypoints provided but navigate_to_fn missing, will skip waypoint search.")
         waypoints = []
 
+    # === 4. 开始搜索流程 ===
     t0 = time.time()
     tts_manager.say(f"Okay, I'll look around for the {target}.")
     logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
 
     hit: Optional[Dict[str, Any]] = None
 
-    # 0) 实例化 YOLO 模型一次即可
+    # === 5. 实例化 YOLO 模型 ===
     detect_model = YOLOPerceiver()
 
-    # 1) 当前帧检测
+    # === 6. 当前帧检测 ===
     hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
 
-    # 2) 原地旋转实时检测
+    # === 7. 原地旋转实时检测 ===
     if not hit and use_spin:
         hit = _rotate_scan_realtime(
             robot_name=robot_name,
             rotate_fn=rotate_fn,
             detect_model=detect_model,
-            conf_thres=conf_thres,
+            conf_thres=conf_thres,          # 🔥 使用优化后的参数
             video_source=0,
             fps=5,
             deg_per_frame=10,
-            max_rot_deg=max_rot_deg,
+            max_rot_deg=max_rot_deg,        # 🔥 使用优化后的参数
             timeout_sec=timeout_sec - (time.time() - t0)
         )
 
-    # 3) 多点搜索（每点尝试一次检测+半圈旋转）
+    # === 8. 多点搜索 ===
     if not hit and waypoints:
         for wp in waypoints:
             if time.time() - t0 > timeout_sec:
@@ -290,7 +315,7 @@ def execute_find(node: Any,
                 continue
 
             time.sleep(0.35)
-            hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
+            hit = _scan_once_with_yolo(detect_fn, target, conf_thres)  # 🔥 使用优化参数
 
             if not hit and use_spin:
                 remaining_time = timeout_sec - (time.time() - t0)
@@ -298,18 +323,18 @@ def execute_find(node: Any,
                     robot_name=robot_name,
                     rotate_fn=rotate_fn,
                     detect_model=detect_model,
-                    conf_thres=conf_thres,
+                    conf_thres=conf_thres,      # 🔥 使用优化参数
                     video_source=0,
                     fps=5,
                     deg_per_frame=10,
-                    max_rot_deg=min(180, max_rot_deg),
+                    max_rot_deg=min(180, max_rot_deg),  # 多点搜索时限制旋转角度
                     timeout_sec=remaining_time
                 )
 
             if hit:
                 break
 
-    # 4) 未命中 → 播报 + 返回
+    # === 9. 处理搜索结果 ===
     if not hit:
         tts_manager.say("I couldn't find it.")
         payload = {"robot": robot_name, "target": target, "found": False, "ts": time.time()}
@@ -321,7 +346,7 @@ def execute_find(node: Any,
         logger.info(f"[find] not found: {target}")
         return {"ok": True, "found": False, "blackboard_key": save_as}
 
-    # 5) 命中 → 记录黑板 + 播报
+    # === 10. 记录成功结果 ===
     record = {
         "class": target,
         "center_xy": hit.get("center_xy"),
