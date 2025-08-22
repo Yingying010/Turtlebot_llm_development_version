@@ -33,10 +33,19 @@ except Exception:
         def debug(self, *a, **k): print("[DEBUG]", *a)
     logger = _DummyLogger()
 
-from llmParserRepo.gpt_yolo_localParser import (
-    YOLOPerceiver, PerceptionAwareLLM, build_perception_context, 
-    HistoryStore, MEMORY_PATH, safe_json_parse
-)
+# 🔥 延迟导入，避免循环导入
+def _get_yolo_perceiver():
+    """延迟导入YOLOPerceiver"""
+    from llmParserRepo.gpt_yolo_localParser import YOLOPerceiver
+    return YOLOPerceiver()
+
+def _get_llm_parser():
+    """延迟导入LLM相关模块"""
+    from llmParserRepo.gpt_yolo_localParser import (
+        PerceptionAwareLLM, build_perception_context, 
+        HistoryStore, MEMORY_PATH, safe_json_parse
+    )
+    return PerceptionAwareLLM, build_perception_context, HistoryStore, MEMORY_PATH, safe_json_parse
 
 # -------- 黑板工具（/tmp） --------
 def _bb_path(robot_name: str) -> str:
@@ -369,7 +378,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
 
     hit: Optional[Dict[str, Any]] = None
-    detect_model = YOLOPerceiver()
+    detect_model = _get_yolo_perceiver()  # 🔥 使用延迟导入
 
     # === 1. 当前帧检测 ===
     hit = _scan_once_with_yolo(detect_fn, target, conf_thres)
@@ -505,6 +514,9 @@ def execute_find_with_history_replanning(node: Any,
     logger.info(f"[find] {robot_name} found object, initiating history-based replanning...")
     
     try:
+        # 🔥 使用延迟导入
+        PerceptionAwareLLM, build_perception_context, HistoryStore, MEMORY_PATH, safe_json_parse = _get_llm_parser()
+        
         # 读取本地历史记录
         store = HistoryStore(MEMORY_PATH)
         recent_messages = store.recent_chat_messages(max_turns=3)  # 获取最近3轮对话
@@ -549,7 +561,7 @@ def execute_find_with_history_replanning(node: Any,
         """
         
         # 调用LLM重新解析
-        llm = PerceptionAwareLLM()
+        llm = PerceptionAwareLLM()  # 现在可以安全使用
         raw_response = llm.parse(
             user_text=replanning_prompt,
             perception_context=perception_ctx,
