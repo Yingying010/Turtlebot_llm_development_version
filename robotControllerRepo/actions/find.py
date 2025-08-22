@@ -714,7 +714,7 @@ def create_llm_replanning_function():
             
             # === 构建LLM提示 ===
             found_object = discovery_context["found_object"]
-            
+
             system_prompt = dedent(f"""
             You are an intelligent robot task planner. A robot has just found an object and you need to decide what to do next.
 
@@ -725,41 +725,39 @@ def create_llm_replanning_function():
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
-            2. Collect the object 
-            3. Collect and deliver the object to someone
+            2. Navigate to the object location first, then collect it
+            3. Navigate to object, collect it, then navigate to recipient and deliver it
             4. Navigate closer to examine the object
             5. Other specific actions
 
             IMPORTANT: Analyze the user's original intent from the conversation history. Don't assume they always want collect+deliver.
 
             CRITICAL: Use the exact parameter format expected by the robot controller:
-            
-            For "collect" action:
+
+            For "collect" action (robot should already be at the object location):
             {{
                 "action": "collect",
                 "parameters": {{
-                    "item": "<object_class>",
-                    "target": "<blackboard_key>"
+                    "item": "<object_class>"
                 }}
             }}
-            
-            For "deliver" action:
+
+            For "deliver" action (robot should already be at the destination):
             {{
                 "action": "deliver", 
                 "parameters": {{
-                    "item": "<object_class>",
-                    "target": "<recipient_or_location>"
+                    "item": "<object_class>"
                 }}
             }}
-            
+
             For "navigate" action:
             {{
                 "action": "navigate",
                 "parameters": {{
-                    "target": "<location_or_coordinates>"
+                    "target": "<blackboard_key_or_location>"
                 }}
             }}
-            
+
             For "face" action:
             {{
                 "action": "face",
@@ -768,12 +766,17 @@ def create_llm_replanning_function():
                 }}
             }}
 
+            Typical task sequences:
+            - Find + Navigate to object + Collect + Navigate to recipient + Deliver
+            - Find + Navigate to object + Collect (if user just wants the robot to get it)
+            - Find + Navigate closer + Face object (if user wants to examine it)
+
             Respond in JSON format:
             {{
                 "action_needed": true/false,
                 "tasks": [
                     {{
-                        "action": "collect|deliver|navigate|face|wait",
+                        "action": "navigate|collect|deliver|face|wait",
                         "parameters": {{ ... }}
                     }}
                 ],
@@ -781,10 +784,13 @@ def create_llm_replanning_function():
             }}
 
             If no action is needed, set "action_needed": false and "tasks": [].
-            
-            Remember: Use "item" not "object_id", use "target" not "recipient"!
+
+            Remember: 
+            - collect/deliver only need "item" parameter
+            - Use navigate action to move to locations before collect/deliver
+            - Use blackboard_key for navigating to found objects
             """).strip()
-            
+     
             # 构建对话历史字符串
             history_text = ""
             if chat_history:

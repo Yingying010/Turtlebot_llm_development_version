@@ -138,15 +138,16 @@ A task_object has the following structure:
 ========================
 Supported Actions and Parameters
 ========================
+========================
+Supported Actions and Parameters
+========================
 1. navigate  
    - To a named target: {"target": "<target_name>"}  
    - To coordinates: {"position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
 2. collect  
-   - From a user or semantic location: {"item": "<item>", "target": "<target>"}  
-   - From coordinates: {"item": "<item>", "position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
+   - Collect an item (robot should already be at the location): {"item": "<item>"}
 3. deliver  
-   - To a user or semantic location: {"item": "<item>", "target": "<target>"}  
-   - To coordinates: {"item": "<item>", "position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
+   - Deliver an item (robot should already be at the destination): {"item": "<item>"}
 4. find  
    - Search for an object: {
        "target_class": "<object_name>", 
