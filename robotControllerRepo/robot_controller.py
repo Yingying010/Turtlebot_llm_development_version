@@ -23,6 +23,86 @@ import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
+def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
+    """
+    标准化LLM生成的任务参数格式，确保与robot_controller兼容
+    
+    Args:
+        task: LLM生成的任务 {"action": "...", "parameters": {...}}
+        robot_name: 机器人名称
+    
+    Returns:
+        标准化后的任务
+    """
+    action = task.get("action", "")
+    params = task.get("parameters", {}).copy()
+    
+    # 🔧 collect动作参数标准化
+    if action == "collect":
+        # LLM可能生成的格式 → 标准格式
+        if "object_id" in params and "item" not in params:
+            params["item"] = params.pop("object_id")
+        if "object_class" in params and "item" not in params:
+            params["item"] = params.pop("object_class")
+        if "object" in params and "item" not in params:
+            params["item"] = params.pop("object")
+            
+        # 如果没有target，可能需要从blackboard获取
+        if "target" not in params:
+            item_name = params.get("item", "unknown")
+            params["target"] = f"{item_name}_target"  # 假设blackboard key
+            logger.warning(f"[NORMALIZE] collect action missing target, using: {params['target']}")
+    
+    # 🔧 deliver动作参数标准化  
+    elif action == "deliver":
+        # LLM可能生成的格式 → 标准格式
+        if "object_id" in params and "item" not in params:
+            params["item"] = params.pop("object_id")
+        if "object_class" in params and "item" not in params:
+            params["item"] = params.pop("object_class")
+        if "object" in params and "item" not in params:
+            params["item"] = params.pop("object")
+            
+        if "recipient" in params and "target" not in params:
+            params["target"] = params.pop("recipient")
+        if "to" in params and "target" not in params:
+            params["target"] = params.pop("to")
+        if "destination" in params and "target" not in params:
+            params["target"] = params.pop("destination")
+            
+        # 处理用户引用
+        if params.get("target") in ["user", "master", "human"]:
+            params["target"] = robot_name.replace("robot", "master")  # robot1 → master1
+    
+    # 🔧 navigate动作参数标准化
+    elif action == "navigate":
+        if "destination" in params and "target" not in params:
+            params["target"] = params.pop("destination")
+        if "location" in params and "target" not in params:
+            params["target"] = params.pop("location")
+    
+    # 🔧 face动作参数标准化
+    elif action == "face":
+        if "object" in params and "target" not in params:
+            params["target"] = params.pop("object")
+        if "direction" in params and "target" not in params:
+            params["target"] = params.pop("direction")
+    
+    # 🔧 wait动作参数标准化
+    elif action == "wait":
+        if "duration" in params and "duration_sec" not in params:
+            params["duration_sec"] = params.pop("duration")
+        if "time" in params and "duration_sec" not in params:
+            params["duration_sec"] = params.pop("time")
+    
+    logger.debug(f"[NORMALIZE] {action}: {task.get('parameters', {})} → {params}")
+    
+    return {
+        "action": action,
+        "parameters": params
+    }
+
+
 def execute_action(node, executor, task: Dict):
     """
     增强版execute_action: 支持动态后续任务执行
@@ -101,11 +181,14 @@ def execute_action(node, executor, task: Dict):
             for i, follow_task in enumerate(follow_up_tasks, 1):
                 logger.info(f"📋 Follow-up task {i}/{len(follow_up_tasks)}: {follow_task['action']}")
                 
+                # 🔧 标准化任务参数格式
+                normalized_task = normalize_task_parameters(follow_task, robot)
+                
                 # 构建完整的任务对象
                 full_follow_task = {
                     "robot": robot,
-                    "action": follow_task["action"],
-                    "parameters": follow_task["parameters"]
+                    "action": normalized_task["action"],
+                    "parameters": normalized_task["parameters"]
                 }
                 
                 # 递归执行后续任务（但不处理其follow_up_tasks避免无限递归）

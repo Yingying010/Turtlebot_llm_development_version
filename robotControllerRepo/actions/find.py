@@ -721,6 +721,7 @@ def create_llm_replanning_function():
             Robot: {robot_name}
             Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
             Detection Quality: {found_object["detection_quality"]["frames_detected"]} frames, stability: {found_object["detection_quality"]["position_stability"]:.2f}
+            Blackboard Key: {found_object["blackboard_key"]}
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
@@ -730,6 +731,42 @@ def create_llm_replanning_function():
             5. Other specific actions
 
             IMPORTANT: Analyze the user's original intent from the conversation history. Don't assume they always want collect+deliver.
+
+            CRITICAL: Use the exact parameter format expected by the robot controller:
+            
+            For "collect" action:
+            {{
+                "action": "collect",
+                "parameters": {{
+                    "item": "<object_class>",
+                    "target": "<blackboard_key>"
+                }}
+            }}
+            
+            For "deliver" action:
+            {{
+                "action": "deliver", 
+                "parameters": {{
+                    "item": "<object_class>",
+                    "target": "<recipient_or_location>"
+                }}
+            }}
+            
+            For "navigate" action:
+            {{
+                "action": "navigate",
+                "parameters": {{
+                    "target": "<location_or_coordinates>"
+                }}
+            }}
+            
+            For "face" action:
+            {{
+                "action": "face",
+                "parameters": {{
+                    "target": "<target_name_or_coordinates>"
+                }}
+            }}
 
             Respond in JSON format:
             {{
@@ -744,6 +781,8 @@ def create_llm_replanning_function():
             }}
 
             If no action is needed, set "action_needed": false and "tasks": [].
+            
+            Remember: Use "item" not "object_id", use "target" not "recipient"!
             """).strip()
             
             # 构建对话历史字符串
