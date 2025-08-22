@@ -215,7 +215,7 @@ def _test_camera_simple() -> bool:
 def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
                                   target_class: str, 
                                   conf_thres: float,
-                                  num_frames: int = 3,
+                                  num_frames: int = 5,
                                   frame_interval: float = 0.3) -> Optional[Dict]:
     """使用摄像头进行多帧检测，提高检测稳定性"""
     if not detector.available:
