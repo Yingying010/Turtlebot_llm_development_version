@@ -3,8 +3,30 @@
 """
 独立版通用"查找"动作模块 - 避免循环导入
 - 旋转扫描 + 多点搜索 + 智能摄像头处理
+- 多帧检测提高稳定性和准确性
+- 智能LLM重规划：根据对话历史决定后续动作
 - 命中后把目标信息写入黑板（/tmp/robot_blackboard_<robot>.json）
 - 完全独立，不依赖其他模块的复杂导入
+
+集成方式：
+在robot_controller.py中调用find动作时，传入以下上下文：
+```python
+from robotControllerRepo.actions.find import create_llm_replanning_function
+
+# 创建LLM重规划函数
+llm_replanning_fn = create_llm_replanning_function()
+
+# 在execute_action中调用
+result = run_find(
+    node, task,
+    detect_fn=detect_once,
+    rotate_fn=lambda robot, deg: rotate_deg(node, robot, deg),
+    navigate_to_fn=lambda robot, target: navigate_to(node, executor, robot, target),
+    event_pub=event_publisher,
+    llm_replanning_fn=llm_replanning_fn,  # 传入LLM重规划函数
+    history_store=history_store_instance   # 传入历史存储实例
+)
+```
 """
 
 import os
@@ -189,49 +211,169 @@ def _test_camera_simple() -> bool:
     finally:
         cap.release()
 
-# -------- 简单的图像检测 --------
-def _detect_with_camera(detector: StandaloneYOLODetector, target_class: str, conf_thres: float) -> Optional[Dict]:
-    """使用摄像头进行单次检测"""
+# -------- 多帧图像检测 --------
+def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
+                                  target_class: str, 
+                                  conf_thres: float,
+                                  num_frames: int = 3,
+                                  frame_interval: float = 0.3) -> Optional[Dict]:
+    """使用摄像头进行多帧检测，提高检测稳定性"""
     if not detector.available:
         return None
     
+    logger.debug(f"[find] 📷 Starting {num_frames}-frame detection for {target_class}")
+    
+    all_detections = []  # 存储所有帧的检测结果
+    successful_frames = 0
+    
+    # 尝试多帧检测
+    for frame_idx in range(num_frames):
+        logger.debug(f"[find] 📸 Capturing frame {frame_idx + 1}/{num_frames}")
+        
+        frame_result = _detect_single_frame(detector, target_class, conf_thres, frame_idx)
+        if frame_result:
+            all_detections.extend(frame_result)
+            successful_frames += 1
+            
+        # 帧间间隔，让场景稍微变化
+        if frame_idx < num_frames - 1:
+            time.sleep(frame_interval)
+    
+    logger.info(f"[find] 📊 Multi-frame detection: {successful_frames}/{num_frames} frames successful, {len(all_detections)} total detections")
+    
+    if not all_detections:
+        logger.info(f"[find] ❌ No {target_class} detected in any frame")
+        return None
+    
+    # 综合分析多帧结果
+    best_detection = _analyze_multiframe_results(all_detections, target_class, conf_thres)
+    
+    if best_detection:
+        logger.info(f"[find] ✅ Best detection: conf={best_detection['conf']:.3f}, frames_detected={best_detection.get('detection_count', 1)}")
+    
+    return best_detection
+
+
+def _detect_single_frame(detector: StandaloneYOLODetector, 
+                        target_class: str, 
+                        conf_thres: float, 
+                        frame_idx: int) -> List[Dict]:
+    """检测单帧图像"""
     # 使用rpicam-still拍照（针对树莓派）
     try:
         ts = time.strftime("%Y%m%d-%H%M%S")
-        img_path = f"/tmp/find_frame_{ts}.jpg"
+        img_path = f"/tmp/find_frame_{ts}_{frame_idx}.jpg"
         
         result = subprocess.run([
-            "rpicam-still", "-t", "1000",
+            "rpicam-still", "-t", "500",  # 减少拍照时间
             "--width", "640", "--height", "480",
             "-o", img_path
-        ], capture_output=True, check=True)
+        ], capture_output=True, check=True, timeout=3)
         
         if os.path.exists(img_path):
             detections = detector.detect_objects(img_path, conf_thres)
             os.remove(img_path)  # 清理临时文件
             
-            # 找到目标物体
-            targets = [d for d in detections if d["class"] == target_class and d["conf"] >= conf_thres]
-            if targets:
-                return max(targets, key=lambda x: x["conf"])
+            # 找到目标物体并添加帧信息
+            targets = []
+            for d in detections:
+                if d["class"] == target_class and d["conf"] >= conf_thres:
+                    d["frame_idx"] = frame_idx
+                    targets.append(d)
+            
+            return targets
         
-    except subprocess.CalledProcessError:
-        logger.warning("rpicam-still failed, trying OpenCV...")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        logger.debug(f"[find] rpicam-still failed for frame {frame_idx}, trying OpenCV...")
         
         # 回退到OpenCV
         cap = _create_video_capture(0)
         if cap:
             try:
+                # 读取几帧来稳定摄像头
+                for _ in range(3):
+                    cap.read()
+                    
                 ret, frame = cap.read()
                 if ret and frame is not None:
                     detections = detector.detect_objects(frame, conf_thres)
-                    targets = [d for d in detections if d["class"] == target_class and d["conf"] >= conf_thres]
-                    if targets:
-                        return max(targets, key=lambda x: x["conf"])
+                    targets = []
+                    for d in detections:
+                        if d["class"] == target_class and d["conf"] >= conf_thres:
+                            d["frame_idx"] = frame_idx
+                            targets.append(d)
+                    return targets
             finally:
                 cap.release()
     
-    return None
+    return []
+
+
+def _analyze_multiframe_results(all_detections: List[Dict], 
+                               target_class: str, 
+                               conf_thres: float) -> Optional[Dict]:
+    """分析多帧检测结果，返回最可靠的检测"""
+    if not all_detections:
+        return None
+    
+    logger.debug(f"[find] 🔍 Analyzing {len(all_detections)} detections across multiple frames")
+    
+    # 策略1: 直接返回置信度最高的检测
+    best_by_conf = max(all_detections, key=lambda x: x["conf"])
+    
+    # 策略2: 检查是否有多帧都检测到的稳定区域
+    # 将相近位置的检测归类
+    position_groups = _group_detections_by_position(all_detections)
+    
+    if len(position_groups) > 1:
+        # 有多个可能的位置，选择检测次数最多且置信度较高的
+        best_group = max(position_groups, key=lambda g: (len(g), max(d["conf"] for d in g)))
+        stable_detection = max(best_group, key=lambda x: x["conf"])
+        stable_detection["detection_count"] = len(best_group)
+        stable_detection["position_stability"] = len(best_group) / len(set(d["frame_idx"] for d in all_detections))
+        
+        logger.debug(f"[find] 📍 Found stable position group with {len(best_group)} detections")
+        return stable_detection
+    else:
+        # 只有一个位置区域，返回置信度最高的
+        best_by_conf["detection_count"] = len(all_detections)
+        best_by_conf["position_stability"] = len(set(d["frame_idx"] for d in all_detections)) / len(set(d["frame_idx"] for d in all_detections))
+        return best_by_conf
+
+
+def _group_detections_by_position(detections: List[Dict], 
+                                position_tolerance: float = 50.0) -> List[List[Dict]]:
+    """根据位置将检测结果分组"""
+    groups = []
+    
+    for detection in detections:
+        center_x, center_y = detection["center_xy"]
+        
+        # 找到位置相近的组
+        assigned = False
+        for group in groups:
+            for existing in group:
+                ex_x, ex_y = existing["center_xy"]
+                distance = math.sqrt((center_x - ex_x)**2 + (center_y - ex_y)**2)
+                
+                if distance <= position_tolerance:
+                    group.append(detection)
+                    assigned = True
+                    break
+            if assigned:
+                break
+        
+        # 如果没有找到相近的组，创建新组
+        if not assigned:
+            groups.append([detection])
+    
+    return groups
+
+
+# -------- 兼容性包装器 --------
+def _detect_with_camera(detector: StandaloneYOLODetector, target_class: str, conf_thres: float) -> Optional[Dict]:
+    """兼容旧接口的包装器，默认使用多帧检测"""
+    return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames=3)
 
 # -------- 分步旋转扫描 --------
 def _rotate_scan_stepwise(robot_name: str,
@@ -291,6 +433,10 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     timeout_sec: float = float(params.get("timeout_sec", 25))
     use_spin: bool = bool(params.get("spin_scan", True))
     waypoints: List[Any] = params.get("search_waypoints", [])
+    
+    # === 多帧检测参数 ===
+    num_frames: int = int(params.get("detection_frames", 3))  # 默认3帧
+    frame_interval: float = float(params.get("frame_interval", 0.3))  # 帧间间隔0.3秒
 
     # === 系统优化参数 ===
     conf_thres, max_rot_deg = get_optimized_params(target, bool(waypoints))
@@ -321,12 +467,14 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     t0 = time.time()
     # tts_manager.say(f"Okay, I'll look around for the {target}.")
     logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
+    logger.info(f"[find] Multi-frame detection: {num_frames} frames, {frame_interval}s interval")
 
     hit: Optional[Dict[str, Any]] = None
 
     # 创建检测函数
     def detect_current_view(target_class: str, conf_threshold: float):
-        return _detect_with_camera(detector, target_class, conf_threshold)
+        return _detect_with_camera_multiframe(detector, target_class, conf_threshold, 
+                                            num_frames=num_frames, frame_interval=frame_interval)
 
     # === 1. 当前帧检测 ===
     hit = detect_current_view(target, conf_thres)
@@ -405,7 +553,11 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
         "bbox_xyxy": hit.get("bbox_xyxy"),
         "map_xy": hit.get("map_xy") if "map_xy" in hit else None,
         "conf": float(hit.get("conf", 0.0)),
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        # 多帧检测相关信息
+        "detection_count": hit.get("detection_count", 1),
+        "position_stability": hit.get("position_stability", 1.0),
+        "detection_method": "multiframe" if hit.get("detection_count", 1) > 1 else "single"
     }
     bb_set(robot_name, save_as, record)
 
@@ -419,15 +571,96 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
 
     tts_manager.say(f"I found the {target}.")
     logger.info(f"[find] found {target} (key={save_as}, conf={record['conf']:.3f})")
+    logger.info(f"[find] Detection quality: {record['detection_count']} frames, stability={record['position_stability']:.2f}")
     return {"ok": True, "found": True, "blackboard_key": save_as, "record": record}
 
-# -------- 简化的动态重规划 --------
-def execute_find_with_simple_replanning(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
-    """简化版：找到物体后生成基本的后续任务"""
+# -------- 智能动态重规划 --------
+def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
+    """智能版：找到物体后调用LLM决定后续动作"""
     basic_result = execute_find(node, robot_name, params, **ctx)
     
     if not basic_result.get("found", False):
         logger.info(f"[find] {robot_name} didn't find {params.get('target_class')}, no follow-up actions needed")
+        return basic_result
+    
+    # === 获取LLM重规划功能 ===
+    llm_replanning_fn = ctx.get("llm_replanning_fn")
+    history_store = ctx.get("history_store")
+    
+    if not callable(llm_replanning_fn):
+        logger.warning("[find] No LLM replanning function provided, falling back to simple mode")
+        return execute_find_with_simple_replanning(node, robot_name, params, **ctx)
+    
+    # === 准备上下文信息 ===
+    target_class = params.get("target_class", "cup")
+    blackboard_key = basic_result.get("blackboard_key")
+    record = basic_result.get("record", {})
+    
+    # 构建发现物体的上下文
+    discovery_context = {
+        "found_object": {
+            "class": target_class,
+            "confidence": record.get("conf", 0.0),
+            "position": record.get("center_xy", [0, 0]),
+            "blackboard_key": blackboard_key,
+            "detection_quality": {
+                "frames_detected": record.get("detection_count", 1),
+                "position_stability": record.get("position_stability", 1.0),
+                "method": record.get("detection_method", "single")
+            }
+        },
+        "robot_name": robot_name,
+        "search_params": params
+    }
+    
+    # 获取对话历史
+    chat_history = []
+    if history_store:
+        try:
+            chat_history = history_store.recent_chat_messages(max_turns=5)  # 最近5轮对话
+        except Exception as e:
+            logger.warning(f"[find] Failed to get chat history: {e}")
+    
+    logger.info(f"[find] Calling LLM for intelligent replanning...")
+    logger.info(f"[find] Context: found {target_class} with conf={record.get('conf', 0):.3f}")
+    
+    try:
+        # === 调用LLM进行智能规划 ===
+        replanning_result = llm_replanning_fn(
+            discovery_context=discovery_context,
+            chat_history=chat_history,
+            robot_name=robot_name
+        )
+        
+        if replanning_result.get("success", False):
+            follow_up_tasks = replanning_result.get("tasks", [])
+            reasoning = replanning_result.get("reasoning", "")
+            
+            basic_result["follow_up_tasks"] = follow_up_tasks
+            basic_result["replanning_success"] = True
+            basic_result["replanning_source"] = "llm"
+            basic_result["replanning_reasoning"] = reasoning
+            
+            logger.info(f"[find] LLM generated {len(follow_up_tasks)} follow-up tasks")
+            logger.info(f"[find] LLM reasoning: {reasoning}")
+            
+            return basic_result
+        else:
+            logger.warning(f"[find] LLM replanning failed: {replanning_result.get('error', 'unknown')}")
+            
+    except Exception as e:
+        logger.error(f"[find] LLM replanning error: {e}")
+    
+    # === 回退到简单模式 ===
+    logger.info("[find] Falling back to simple replanning")
+    return execute_find_with_simple_replanning(node, robot_name, params, **ctx)
+
+
+def execute_find_with_simple_replanning(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
+    """简化版：找到物体后生成基本的后续任务（回退模式）"""
+    basic_result = execute_find(node, robot_name, params, **ctx)
+    
+    if not basic_result.get("found", False):
         return basic_result
     
     # === 简单的后续任务生成 ===
@@ -454,10 +687,143 @@ def execute_find_with_simple_replanning(node: Any, robot_name: str, params: Dict
     
     basic_result["follow_up_tasks"] = follow_up_tasks
     basic_result["replanning_success"] = True
-    basic_result["replanning_source"] = "simple"
+    basic_result["replanning_source"] = "simple_fallback"
     
-    logger.info(f"[find] Generated {len(follow_up_tasks)} simple follow-up tasks")
+    logger.info(f"[find] Generated {len(follow_up_tasks)} simple fallback tasks")
     return basic_result
+
+
+# -------- LLM重规划实现 --------
+def create_llm_replanning_function():
+    """创建LLM重规划函数，可以在robot_controller中注入"""
+    
+    def llm_replanning_function(discovery_context: Dict, chat_history: List[Dict], robot_name: str) -> Dict:
+        """调用LLM进行智能重规划"""
+        try:
+            # 导入LLM相关模块（延迟导入避免循环依赖）
+            import os
+            import openai
+            import json
+            from textwrap import dedent
+            
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                return {"success": False, "error": "No OpenAI API key"}
+            
+            client = openai.OpenAI(api_key=api_key)
+            
+            # === 构建LLM提示 ===
+            found_object = discovery_context["found_object"]
+            
+            system_prompt = dedent(f"""
+            You are an intelligent robot task planner. A robot has just found an object and you need to decide what to do next.
+
+            Robot: {robot_name}
+            Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
+            Detection Quality: {found_object["detection_quality"]["frames_detected"]} frames, stability: {found_object["detection_quality"]["position_stability"]:.2f}
+
+            Based on the conversation history, decide if the robot should:
+            1. Just report finding the object (no further action)
+            2. Collect the object 
+            3. Collect and deliver the object to someone
+            4. Navigate closer to examine the object
+            5. Other specific actions
+
+            IMPORTANT: Analyze the user's original intent from the conversation history. Don't assume they always want collect+deliver.
+
+            Respond in JSON format:
+            {{
+                "action_needed": true/false,
+                "tasks": [
+                    {{
+                        "action": "collect|deliver|navigate|face|wait",
+                        "parameters": {{ ... }}
+                    }}
+                ],
+                "reasoning": "Brief explanation of why these actions were chosen"
+            }}
+
+            If no action is needed, set "action_needed": false and "tasks": [].
+            """).strip()
+            
+            # 构建对话历史字符串
+            history_text = ""
+            if chat_history:
+                history_text = "Recent conversation:\n"
+                for msg in chat_history[-6:]:  # 最近3轮对话
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+                    history_text += f"{role}: {content}\n"
+            else:
+                history_text = "No recent conversation history available."
+            
+            user_prompt = f"""
+            {history_text}
+
+            The robot has successfully found a {found_object["class"]}. What should it do next?
+            """
+            
+            # === 调用LLM ===
+            logger.debug(f"[find] LLM prompt: {user_prompt[:200]}...")
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            raw_response = response.choices[0].message.content.strip()
+            logger.debug(f"[find] LLM raw response: {raw_response}")
+            
+            # === 解析LLM响应 ===
+            try:
+                # 提取JSON部分
+                if "```json" in raw_response:
+                    json_start = raw_response.find("```json") + 7
+                    json_end = raw_response.find("```", json_start)
+                    json_text = raw_response[json_start:json_end].strip()
+                elif "{" in raw_response and "}" in raw_response:
+                    json_start = raw_response.find("{")
+                    json_end = raw_response.rfind("}") + 1
+                    json_text = raw_response[json_start:json_end]
+                else:
+                    json_text = raw_response
+                
+                parsed = json.loads(json_text)
+                
+                action_needed = parsed.get("action_needed", False)
+                tasks = parsed.get("tasks", [])
+                reasoning = parsed.get("reasoning", "LLM decision")
+                
+                # 验证任务格式
+                validated_tasks = []
+                if action_needed and tasks:
+                    for task in tasks:
+                        if isinstance(task, dict) and "action" in task and "parameters" in task:
+                            validated_tasks.append(task)
+                        else:
+                            logger.warning(f"[find] Invalid task format: {task}")
+                
+                return {
+                    "success": True,
+                    "tasks": validated_tasks,
+                    "reasoning": reasoning,
+                    "action_needed": action_needed
+                }
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"[find] Failed to parse LLM JSON response: {e}")
+                return {"success": False, "error": f"JSON parse error: {e}"}
+            
+        except Exception as e:
+            logger.error(f"[find] LLM replanning function error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    return llm_replanning_function
 
 # -------- 对外接口 --------
 def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
@@ -466,8 +832,8 @@ def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     if not robot:
         return {"ok": False, "reason": "robot name missing"}
     
-    # 使用简化版的重规划
-    return execute_find_with_simple_replanning(node, robot, task.get("parameters", {}), **ctx)
+    # 使用智能LLM重规划版本
+    return execute_find_with_llm_replanning(node, robot, task.get("parameters", {}), **ctx)
 
 # -------- 真实的机器人控制函数 --------
 def real_rotate(node, robot_name: str, degrees: float):
@@ -550,6 +916,20 @@ def run_standalone_test():
         def event_fn(kind, payload):
             logger.info(f"📡 Event: {kind} -> {payload}")
         
+        # 创建LLM重规划函数
+        llm_replanning_fn = create_llm_replanning_function()
+        
+        # 模拟历史存储（在实际使用中从gpt_yolo_localParser获取）
+        class MockHistoryStore:
+            def recent_chat_messages(self, max_turns=5):
+                # 模拟一些对话历史
+                return [
+                    {"role": "user", "content": f"Can you help me find my {target_class}?"},
+                    {"role": "assistant", "content": f"I'll look for your {target_class}."}
+                ]
+        
+        mock_history = MockHistoryStore()
+        
         print(f"🧪 Testing REAL find functionality for {robot_name}...")
         print(f"🎯 Looking for: {target_class}")
         print("⚠️  Make sure your robot is ready and ROS topics are active!")
@@ -558,18 +938,22 @@ def run_standalone_test():
         input("Press Enter when robot is ready, or Ctrl+C to cancel...")
         
         # 执行真实的find测试
-        res = execute_find(
+        res = execute_find_with_llm_replanning(
             node=node,
             robot_name=robot_name,
             params={
                 "target_class": target_class,
                 "save_as": f"{target_class}_target",
                 "timeout_sec": 30,  # 增加超时时间
-                "search_waypoints": []  # 暂时不使用waypoints
+                "search_waypoints": [],  # 暂时不使用waypoints
+                "detection_frames": 5,   # 使用5帧检测提高稳定性
+                "frame_interval": 0.2    # 减少帧间间隔加快检测速度
             },
             rotate_fn=rotate_fn,
             navigate_to_fn=nav_fn,
-            event_pub=event_fn
+            event_pub=event_fn,
+            llm_replanning_fn=llm_replanning_fn,  # 传入LLM重规划函数
+            history_store=mock_history              # 传入历史存储
         )
         
         print("\n" + "="*50)
@@ -577,8 +961,26 @@ def run_standalone_test():
         print(f"✅ Success: {res.get('ok', False)}")
         print(f"🎯 Found: {res.get('found', False)}")
         if res.get('found'):
+            record = res.get('record', {})
             print(f"📦 Object: {res.get('blackboard_key')}")
-            print(f"🎯 Confidence: {res.get('record', {}).get('conf', 0):.3f}")
+            print(f"🎯 Confidence: {record.get('conf', 0):.3f}")
+            print(f"📊 Detection frames: {record.get('detection_count', 1)}")
+            print(f"🎚️ Position stability: {record.get('position_stability', 1.0):.2f}")
+            print(f"🔧 Method: {record.get('detection_method', 'unknown')}")
+            
+            # 显示重规划信息
+            if res.get('replanning_success'):
+                print(f"🧠 Replanning: {res.get('replanning_source', 'unknown')}")
+                if res.get('replanning_reasoning'):
+                    print(f"💭 Reasoning: {res.get('replanning_reasoning')}")
+                
+                follow_up_tasks = res.get('follow_up_tasks', [])
+                if follow_up_tasks:
+                    print(f"📋 Follow-up tasks: {len(follow_up_tasks)}")
+                    for i, task in enumerate(follow_up_tasks, 1):
+                        print(f"   {i}. {task.get('action', 'unknown')} -> {task.get('parameters', {})}")
+                else:
+                    print("📋 No follow-up actions needed")
         print("="*50)
         
         return res

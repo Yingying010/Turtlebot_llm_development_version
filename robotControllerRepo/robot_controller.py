@@ -16,7 +16,7 @@ from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
 from robotControllerRepo.actions.deliver import deliver_item
-from robotControllerRepo.actions.find import run_action as run_find 
+from robotControllerRepo.actions.find import run_action, create_llm_replanning_function
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
 from llmParserRepo.gpt_yolo_localParser import detect_once
@@ -88,59 +88,22 @@ def execute_action(node, executor, task: Dict):
         is_successful = True
 
     elif action == "find":
-        # 🔥 关键修改：处理find任务的动态重规划
-        result = run_find(
-            node,
-            task,
+        # 创建LLM重规划函数
+        llm_replanning_fn = create_llm_replanning_function()
+        
+        # 获取历史存储实例（从gpt_yolo_localParser）
+        from llmParserRepo.gpt_yolo_localParser import HistoryStore, MEMORY_PATH
+        history_store = HistoryStore(MEMORY_PATH)
+        
+        return run_action(
+            node, task,
             detect_fn=detect_once,
             rotate_fn=lambda robot, deg: rotate_deg(node, robot, deg),
             navigate_to_fn=lambda robot, target: navigate_to(node, executor, robot, target),
-            event_pub=None
+            event_pub=None,
+            llm_replanning_fn=llm_replanning_fn,  # 🔥 传入LLM函数
+            history_store=history_store            # 🔥 传入历史存储
         )
-        
-        # 检查find是否成功
-        if result.get("ok", False):
-            is_successful = True
-            
-            # 🔥 处理动态生成的后续任务
-            if result.get("found", False) and "follow_up_tasks" in result:
-                follow_up_tasks = result["follow_up_tasks"]
-                logger.info(f"📋 Executing {len(follow_up_tasks)} follow-up tasks from find result...")
-                tts_manager.say(f"I found the {params.get('target_class')}. Now executing follow-up actions.")
-                
-                # 执行每个后续任务
-                for i, follow_task in enumerate(follow_up_tasks):
-                    logger.info(f"📋 Executing follow-up task {i+1}/{len(follow_up_tasks)}: {follow_task.get('action')}")
-                    
-                    # 确保任务有robot字段
-                    if "robot" not in follow_task:
-                        follow_task["robot"] = robot
-                    
-                    # 递归执行后续任务
-                    follow_success = execute_action(node, executor, follow_task)
-                    
-                    if not follow_success:
-                        logger.warning(f"⚠️ Follow-up task {i+1} failed: {follow_task}")
-                        tts_manager.say(f"Sorry, I encountered an issue with the follow-up action.")
-                        break
-                    else:
-                        logger.info(f"✅ Follow-up task {i+1} completed successfully")
-                
-                logger.info("🎉 All follow-up tasks completed")
-                
-            elif result.get("found", False):
-                # 找到了但没有后续任务
-                logger.info(f"✅ Found {params.get('target_class')} but no follow-up actions needed")
-                tts_manager.say(f"I found the {params.get('target_class')}.")
-                
-            else:
-                # 没找到物体
-                logger.info(f"❌ Could not find {params.get('target_class')}")
-                tts_manager.say(f"Sorry, I couldn't find the {params.get('target_class')}.")
-        
-        else:
-            logger.error(f"❌ Find action failed: {result}")
-            tts_manager.say("Sorry, there was an error during the search.")
 
     else:
         print(f"⚠️ Unknown action: {action}")
