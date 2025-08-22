@@ -891,6 +891,12 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
             if out and "command" in out:
                 cmd = out["command"]
                 resp = cmd.get("response", "")
+
+                # 🔥 将原始用户输入添加到所有任务中
+                if "robots" in cmd:
+                    for robot_id, tasks in cmd["robots"].items():
+                        for task in tasks:
+                            task["original_user_input"] = user_input
                 
                 # 检查是否有有效的response
                 if resp and resp != "i can't give you any response":

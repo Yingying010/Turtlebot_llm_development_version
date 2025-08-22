@@ -1,30 +1,5 @@
 # find.py
 # -*- coding: utf-8 -*-
-"""
-通用“查找”动作模块（独立版）
-- 旋转扫描 + 多点搜索
-- 命中后把目标信息写入黑板（/tmp/robot_blackboard_<robot>.json）
-- 供 robot_controller.py 直接调用：execute_find(node, robot_name, params, **ctx)
-
-params 示例:
-{
-    "target_class": "cup",
-    "save_as": "cup_target",         # 写入黑板的 key（默认与 target_class 同名）
-    "timeout_sec": 25,
-    "conf_thres": 0.5,
-    "spin_scan": true,
-    "max_rot_deg": 360,
-    "step_deg": 30,
-    "search_waypoints": ["kitchen", "desk", [1.2, -0.4]]
-}
-
-ctx 需要注入的函数:
-- detect_fn(): -> List[ {class, conf, center_xy, bbox_xyxy, map_xy?} ]
-- rotate_fn(robot_name:str, deg:float)
-- navigate_to_fn(robot_name:str, target:any)
-- (可选) event_pub(kind:str, payload:dict)
-"""
-
 from __future__ import annotations
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -33,9 +8,13 @@ import os
 import json
 import time
 import cv2
+import json
 from typing import Any, Dict, List, Optional
 from ttsRepo.stream_tts import tts_manager
 from llmParserRepo.gpt_yolo_localParser import YOLOPerceiver
+from llmParserRepo.gpt_yolo_localParser import PerceptionAwareLLM, build_perception_context, HistoryStore, MEMORY_PATH
+
+
 
 
 # -------- 日志与TTS --------
@@ -240,6 +219,110 @@ def get_optimized_params(target_class: str, has_waypoints: bool) -> tuple:
     logger.debug(f"Optimized params for '{target_class}': conf_thres={conf_thres}, max_rot_deg={max_rot_deg}")
     return conf_thres, max_rot_deg
 
+def execute_find_with_history_replanning(node: Any,
+                                        robot_name: str,
+                                        params: Dict[str, Any],
+                                        **ctx) -> Dict[str, Any]:
+    """
+    基于History的find增强版：找到物体后，利用历史记录重新解析用户意图
+    """
+    # === 1. 执行基础find逻辑 ===
+    basic_result = execute_find(node, robot_name, params, **ctx)
+    
+    if not basic_result.get("found", False):
+        logger.info(f"[find] {robot_name} didn't find {params.get('target_class')}, no follow-up actions needed")
+        return basic_result
+    
+    # === 2. 找到了物体，利用History进行重新规划 ===
+    logger.info(f"[find] {robot_name} found object, initiating history-based replanning...")
+    
+    try:
+        # 🔥 读取本地历史记录
+        store = HistoryStore(MEMORY_PATH)
+        recent_messages = store.recent_chat_messages(max_turns=3)  # 获取最近3轮对话
+        
+        # 找到最近的用户输入
+        original_user_input = None
+        for msg in reversed(recent_messages):
+            if msg.get("role") == "user":
+                original_user_input = msg.get("content", "")
+                break
+        
+        if not original_user_input:
+            logger.warning("[find] No recent user input found in history")
+            return basic_result
+        
+        logger.info(f"[find] Found original user input: '{original_user_input}'")
+        
+        # 获取当前视觉上下文
+        detect_fn = ctx.get("detect_fn")
+        if callable(detect_fn):
+            detections = detect_fn()
+            det_json = {"detections": detections or []}
+            perception_ctx = build_perception_context(det_json)
+        else:
+            perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
+                {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "objects": []}, 
+                ensure_ascii=False
+            )
+        
+        # 构建重新解析的prompt
+        replanning_prompt = f"""
+        CONTEXT: I just successfully found the {params.get('target_class')} that the user requested. 
+        Now I need to determine what to do next based on the user's original command.
+        
+        Original user command: "{original_user_input}"
+        Object found: {params.get('target_class')} (saved as blackboard key: {basic_result.get('blackboard_key')})
+        
+        Based on the user's original intent, please generate the appropriate follow-up actions.
+        For collect actions, use the blackboard key "{basic_result.get('blackboard_key')}" as the target.
+        If the user said something like "if you can't find it, never mind", then since I DID find it, 
+        continue with the requested actions (collect, deliver, etc.).
+        """
+        
+        # 调用LLM重新解析
+        llm = PerceptionAwareLLM()
+        raw_response = llm.parse(
+            user_text=replanning_prompt,
+            perception_context=perception_ctx,
+            chat_history_messages=recent_messages,  # 🔥 传入历史对话上下文
+            perception_history_text=None
+        )
+        
+        # 解析LLM响应
+        try:
+            from llmParserRepo.gpt_yolo_localParser import safe_json_parse
+            replanned_data = safe_json_parse(raw_response)
+            
+            # 提取新的任务列表
+            if "robots" in replanned_data and robot_name in replanned_data["robots"]:
+                new_tasks = replanned_data["robots"][robot_name]
+                logger.info(f"[find] Generated {len(new_tasks)} follow-up tasks based on history")
+                
+                # 将新任务添加到结果中
+                basic_result["follow_up_tasks"] = new_tasks
+                basic_result["replanning_success"] = True
+                basic_result["replanning_source"] = "history"
+                
+                # 🔥 将重新规划的结果也写入历史记录
+                store.append("assistant", f"Found {params.get('target_class')}. Planning follow-up actions based on your request.")
+                
+            else:
+                logger.warning("[find] No follow-up tasks generated by LLM")
+                basic_result["follow_up_tasks"] = []
+                basic_result["replanning_success"] = False
+                
+        except Exception as parse_error:
+            logger.error(f"[find] Failed to parse LLM replanning response: {parse_error}")
+            basic_result["follow_up_tasks"] = []
+            basic_result["replanning_success"] = False
+            
+    except Exception as llm_error:
+        logger.error(f"[find] History-based replanning failed: {llm_error}")
+        basic_result["follow_up_tasks"] = []
+        basic_result["replanning_success"] = False
+    
+    return basic_result
 
 # -------- 核心入口 --------
 def execute_find(node: Any,
@@ -379,7 +462,7 @@ def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     robot = task.get("robot") or task.get("parameters", {}).get("robot")
     if not robot:
         return {"ok": False, "reason": "robot name missing"}
-    return execute_find(node, robot, task.get("parameters", {}) or {}, **ctx)
+    return execute_find_with_history_replanning(node, robot, task.get("parameters", {}), **ctx)
 
 
 # -------- 可选：命令行自测（stub） --------

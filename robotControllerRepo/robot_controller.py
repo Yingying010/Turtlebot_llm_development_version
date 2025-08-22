@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
@@ -24,7 +26,6 @@ from ttsRepo.stream_tts import tts_manager
 
 def execute_action(node, executor, task: Dict):
     is_successful = False
-    print(node)
     robot = task["robot"]
     action = task["action"]
     params = task["parameters"]
@@ -41,10 +42,8 @@ def execute_action(node, executor, task: Dict):
     elif action == "navigate":
         if "position" in params:
             is_successful = navigate_to_target(node, executor, robot, params["position"])
-            # print(f"  → Navigating to {params.get('position')}")
         elif "target" in params:
             is_successful = navigate_to_target(node, executor, robot, params["target"])
-            # print(f"  → Navigating to {params.get('target')}")
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
 
@@ -73,6 +72,7 @@ def execute_action(node, executor, task: Dict):
             is_successful = collect_item(node, robot, item, params["target"], executor)
         else:
             print(f"Missing 'position' or 'target' in navigate params: {params}")
+            
     elif action == "deliver":
         item = params["item"]
         if "position" in params:
@@ -88,15 +88,59 @@ def execute_action(node, executor, task: Dict):
         is_successful = True
 
     elif action == "find":
-        return run_find(
+        # 🔥 关键修改：处理find任务的动态重规划
+        result = run_find(
             node,
             task,
             detect_fn=detect_once,
             rotate_fn=lambda robot, deg: rotate_deg(node, robot, deg),
             navigate_to_fn=lambda robot, target: navigate_to(node, executor, robot, target),
             event_pub=None
-    )
-
+        )
+        
+        # 检查find是否成功
+        if result.get("ok", False):
+            is_successful = True
+            
+            # 🔥 处理动态生成的后续任务
+            if result.get("found", False) and "follow_up_tasks" in result:
+                follow_up_tasks = result["follow_up_tasks"]
+                logger.info(f"📋 Executing {len(follow_up_tasks)} follow-up tasks from find result...")
+                tts_manager.say(f"I found the {params.get('target_class')}. Now executing follow-up actions.")
+                
+                # 执行每个后续任务
+                for i, follow_task in enumerate(follow_up_tasks):
+                    logger.info(f"📋 Executing follow-up task {i+1}/{len(follow_up_tasks)}: {follow_task.get('action')}")
+                    
+                    # 确保任务有robot字段
+                    if "robot" not in follow_task:
+                        follow_task["robot"] = robot
+                    
+                    # 递归执行后续任务
+                    follow_success = execute_action(node, executor, follow_task)
+                    
+                    if not follow_success:
+                        logger.warning(f"⚠️ Follow-up task {i+1} failed: {follow_task}")
+                        tts_manager.say(f"Sorry, I encountered an issue with the follow-up action.")
+                        break
+                    else:
+                        logger.info(f"✅ Follow-up task {i+1} completed successfully")
+                
+                logger.info("🎉 All follow-up tasks completed")
+                
+            elif result.get("found", False):
+                # 找到了但没有后续任务
+                logger.info(f"✅ Found {params.get('target_class')} but no follow-up actions needed")
+                tts_manager.say(f"I found the {params.get('target_class')}.")
+                
+            else:
+                # 没找到物体
+                logger.info(f"❌ Could not find {params.get('target_class')}")
+                tts_manager.say(f"Sorry, I couldn't find the {params.get('target_class')}.")
+        
+        else:
+            logger.error(f"❌ Find action failed: {result}")
+            tts_manager.say("Sorry, there was an error during the search.")
 
     else:
         print(f"⚠️ Unknown action: {action}")
@@ -107,9 +151,7 @@ def execute_action(node, executor, task: Dict):
     return is_successful
 
 
-
-
-def execute_robot_commands(node:Node, robot_id: str, commands: List[Dict], robot_position_cache):
+def execute_robot_commands(node: Node, robot_id: str, commands: List[Dict], robot_position_cache):
     print(f"[🤖 Start executing for {robot_id}]")
     for cmd in commands:
         execute_action(node, cmd, robot_position_cache)
