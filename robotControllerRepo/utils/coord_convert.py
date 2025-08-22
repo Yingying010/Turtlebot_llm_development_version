@@ -97,7 +97,7 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     
     # 🔥 添加经验校准系数（基于实际测试调整）
     # 距离校准：1.52m → 1.02m，系数 = 1.02/1.52 ≈ 0.67
-    CALIBRATION_FACTOR = 1.67  # 之前2.5调整为1.67 (2.5 × 0.67)
+    CALIBRATION_FACTOR = 2.76
     estimated_distance *= CALIBRATION_FACTOR
     
     # 限制距离范围：0.2m - 5.0m
@@ -217,35 +217,26 @@ def resolve_object_position(robot_name: str,
                           robot_position: Dict[str, float],
                           camera_params: Optional[Dict] = None) -> Optional[Dict[str, float]]:
     """
-    从黑板解析物体的地图位置
-    
-    Args:
-        robot_name: 机器人名称
-        blackboard_key: 黑板中的物体key
-        robot_position: 当前机器人位置
-        camera_params: 摄像头参数（可选）
-    
-    Returns:
-        物体的地图坐标 {"x": float, "y": float, "heading_deg": None} 或 None
+    从黑板解析物体的地图位置 - 改进图像尺寸检测
     """
-    logger.info(f"🔍 Resolving object position: {blackboard_key}")
+    logger.info(f"🔍 解析物体位置: {blackboard_key}")
     
     # 从黑板读取物体信息
     object_info = bb_get(robot_name, blackboard_key)
     if not object_info:
-        logger.error(f"❌ Object {blackboard_key} not found in blackboard")
+        logger.error(f"❌ 在黑板中未找到物体 {blackboard_key}")
         return None
     
-    logger.info(f"📦 Object info: {object_info}")
+    logger.info(f"📦 物体信息: {object_info}")
     
     # 检查必要的字段
     required_fields = ["center_xy", "bbox_xyxy", "class"]
     missing_fields = [f for f in required_fields if f not in object_info]
     if missing_fields:
-        logger.error(f"❌ Missing fields in object info: {missing_fields}")
+        logger.error(f"❌ 物体信息中缺少字段: {missing_fields}")
         return None
     
-    # 🔥 动态推断图像尺寸
+    # 🔥 改进图像尺寸检测逻辑
     bbox_xyxy = object_info["bbox_xyxy"]
     center_xy = object_info["center_xy"]
     
@@ -253,26 +244,42 @@ def resolve_object_position(robot_name: str,
     max_x = max(bbox_xyxy[2], center_xy[0])  # bbox右边界 vs 中心x
     max_y = max(bbox_xyxy[3], center_xy[1])  # bbox下边界 vs 中心y
     
-    # 推断图像尺寸（加一些余量）
-    inferred_width = int(max_x * 1.2)  # 增加20%余量
-    inferred_height = int(max_y * 1.2)
+    logger.info(f"📐 原始坐标范围: max_x={max_x:.1f}, max_y={max_y:.1f}")
     
-    # 常见的图像尺寸
-    common_sizes = [
-        (640, 480), (1280, 720), (1920, 1080), (800, 600), 
-        (1024, 768), (320, 240), (1640, 1232)
-    ]
+    # 🔥 更智能的图像尺寸推断
+    # 如果坐标值很小，可能是低分辨率或者相对坐标
+    if max_x < 100 and max_y < 100:
+        # 可能是相对坐标，尝试更大的尺寸
+        detected_width, detected_height = 1640, 1232  # 树莓派常用分辨率
+        logger.info(f"🔍 检测到小坐标值，使用高分辨率: {detected_width}x{detected_height}")
+    elif max_x < 400 and max_y < 300:
+        # 可能是320x240放大的
+        detected_width, detected_height = 640, 480
+        logger.info(f"🔍 检测到中等坐标值，使用标准分辨率: {detected_width}x{detected_height}")
+    else:
+        # 使用原来的逻辑
+        inferred_width = int(max_x * 1.2)
+        inferred_height = int(max_y * 1.2)
+        
+        # 🔥 扩展常见尺寸列表，优先使用高分辨率
+        common_sizes = [
+            (1640, 1232),  # 树莓派高分辨率
+            (1280, 720),   # 720p
+            (1920, 1080),  # 1080p
+            (800, 600),    # SVGA
+            (640, 480),    # VGA
+            (1024, 768),   # XGA
+            (320, 240)     # QVGA (最后选择)
+        ]
+        
+        # 找到最接近的标准尺寸
+        best_match = min(common_sizes, 
+                        key=lambda size: abs(size[0] - inferred_width) + abs(size[1] - inferred_height))
+        
+        detected_width, detected_height = best_match
+        logger.info(f"🔍 推断尺寸: {inferred_width}x{inferred_height} → 使用: {detected_width}x{detected_height}")
     
-    # 找到最接近的标准尺寸
-    best_match = min(common_sizes, 
-                    key=lambda size: abs(size[0] - inferred_width) + abs(size[1] - inferred_height))
-    
-    detected_width, detected_height = best_match
-    
-    logger.info(f"📏 Image size detection:")
-    logger.info(f"   🔍 Object bounds: max_x={max_x:.1f}, max_y={max_y:.1f}")
-    logger.info(f"   📐 Inferred size: {inferred_width}x{inferred_height}")
-    logger.info(f"   ✅ Using standard size: {detected_width}x{detected_height}")
+    logger.info(f"📏 最终图像尺寸: {detected_width}x{detected_height}")
     
     # 使用检测到的图像尺寸更新相机参数
     if camera_params is None:
@@ -282,12 +289,11 @@ def resolve_object_position(robot_name: str,
         "image_width": detected_width,
         "image_height": detected_height,
         "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 21),
-        # 🔥 添加这两行：
         "camera_offset_x": camera_params.get("camera_offset_x", 0.0),
         "camera_offset_y": camera_params.get("camera_offset_y", 0.0)
     })
     
-    # 估计距离（使用检测到的尺寸）
+    # 🔥 使用检测到的正确尺寸估计距离
     estimated_distance = estimate_distance_from_bbox(
         object_info["bbox_xyxy"],
         object_info["class"],
@@ -310,9 +316,28 @@ def resolve_object_position(robot_name: str,
     map_position["timestamp"] = object_info.get("timestamp", time.time())
     map_position["detected_image_size"] = f"{detected_width}x{detected_height}"
     
-    logger.info(f"✅ Position resolved: ({map_position['x']:.2f}, {map_position['y']:.2f})")
-    logger.info(f"📏 Distance: {estimated_distance:.2f}m, Image: {detected_width}x{detected_height}")
+    logger.info(f"✅ 位置解析完成: ({map_position['x']:.2f}, {map_position['y']:.2f})")
+    logger.info(f"📏 距离: {estimated_distance:.2f}m, 图像: {detected_width}x{detected_height}")
     return map_position
+
+# ------- 动态校准函数 ---------
+def calibrate_distance_estimation(expected_distance: float, measured_distance: float):
+    """
+    动态校准距离估计
+    
+    Args:
+        expected_distance: 期望的距离（米）
+        measured_distance: 当前测量的距离（米）
+    """
+    if measured_distance > 0:
+        new_factor = expected_distance / measured_distance
+        logger.info(f"🎯 距离校准建议:")
+        logger.info(f"   期望距离: {expected_distance:.2f}m")
+        logger.info(f"   当前测量: {measured_distance:.2f}m") 
+        logger.info(f"   建议校准系数: {new_factor:.2f}")
+        logger.info(f"   在 estimate_distance_from_bbox 中设置 CALIBRATION_FACTOR = {new_factor:.2f}")
+        return new_factor
+    return 1.0
 
 # -------- 测试和调试功能 --------
 def test_coordinate_conversion():
