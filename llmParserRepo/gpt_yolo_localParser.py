@@ -920,7 +920,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 if __name__ == "__main__":
     # 测试用例
     test_instructions = [
-        "I need to take medication now. Can you tell me how to use aspirin? How many times a day should I take it?"
+        "Can you help me to get my water bottle from the kitchen and then give it to me?"
     ]
     
     for instr in test_instructions:
