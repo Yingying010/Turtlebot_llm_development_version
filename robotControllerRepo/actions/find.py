@@ -37,9 +37,16 @@ import math
 import threading
 import subprocess
 import numpy as np
+import config
 from typing import Any, Dict, List, Optional
 from collections import Counter
 from ttsRepo.stream_tts import tts_manager
+
+def get_robot_id():
+    return config.get("robot_id")
+
+def get_master_name():
+    return config.get("master_id")
 
 # 简单的日志工具
 class SimpleLogger:
@@ -718,7 +725,8 @@ def create_llm_replanning_function():
             system_prompt = dedent(f"""
             You are an intelligent robot task planner. A robot has just found an object and you need to decide what to do next.
 
-            Robot: {robot_name}
+            Robot: {get_robot_id()}
+            Master: {get_master_name()}
             Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
             Detection Quality: {found_object["detection_quality"]["frames_detected"]} frames, stability: {found_object["detection_quality"]["position_stability"]:.2f}
             Blackboard Key: {found_object["blackboard_key"]}
@@ -789,8 +797,10 @@ def create_llm_replanning_function():
             - collect/deliver only need "item" parameter
             - Use navigate action to move to locations before collect/deliver
             - Use blackboard_key for navigating to found objects
-            """).strip()
-     
+            - When user says "bring to me", "deliver to me", "here", use "{get_master_name()}" as the target
+            - When user says "bring to someone else", use that person's name as the target
+            """).strip()   
+
             # 构建对话历史字符串
             history_text = ""
             if chat_history:
