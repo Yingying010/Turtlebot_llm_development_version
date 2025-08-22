@@ -96,8 +96,7 @@ def estimate_distance_from_bbox(bbox_xyxy: List[float],
     estimated_distance = (distance_from_width + distance_from_height) / 2
     
     # 🔥 添加经验校准系数（基于实际测试调整）
-    # 距离校准：1.52m → 1.02m，系数 = 1.02/1.52 ≈ 0.67
-    CALIBRATION_FACTOR = 2.76
+    CALIBRATION_FACTOR = 3.70
     estimated_distance *= CALIBRATION_FACTOR
     
     # 限制距离范围：0.2m - 5.0m
