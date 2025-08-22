@@ -133,9 +133,10 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         camera_params = {
             "image_width": 640,
             "image_height": 480,
-            "fov_horizontal_deg": 21,  # 🔥 调整FOV：从60°改为21° (60×7/19.6≈21)
-            "camera_offset_x": 0,      # 摄像头相对机器人中心的x偏移
-            "camera_offset_y": 0       # 摄像头相对机器人中心的y偏移
+            "fov_horizontal_deg": 21,  # 调整过的FOV
+            # 🔥 添加这两行：
+            "camera_offset_x": 0.0,    # 摄像头相对机器人中心的x偏移
+            "camera_offset_y": 0.0     # 摄像头相对机器人中心的y偏移
         }
     
     center_x, center_y = pixel_xy
@@ -280,7 +281,10 @@ def resolve_object_position(robot_name: str,
     camera_params.update({
         "image_width": detected_width,
         "image_height": detected_height,
-        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 21)
+        "fov_horizontal_deg": camera_params.get("fov_horizontal_deg", 21),
+        # 🔥 添加这两行：
+        "camera_offset_x": camera_params.get("camera_offset_x", 0.0),
+        "camera_offset_y": camera_params.get("camera_offset_y", 0.0)
     })
     
     # 估计距离（使用检测到的尺寸）
