@@ -4,6 +4,7 @@ import time
 import math
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from loguru import logger
 
 def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, target: str = "self"):
     is_successful = False
@@ -50,8 +51,8 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
     
 
 def rotate_deg(node: Node, robot_id: str, deg: float):
-    """
-    轻量包装：按角度旋转（正=左转，负=右转），单位 degree
-    """
+    logger.info(f"🔄 rotate_deg called: robot={robot_id}, deg={deg}")
     direction = "left" if deg >= 0 else "right"
-    return rotate(node, robot_id, direction, abs(deg), "degree", target="self")
+    result = rotate(node, robot_id, direction, abs(deg), "degree", target="self")
+    logger.info(f"🔄 rotate_deg result: {result}")
+    return result

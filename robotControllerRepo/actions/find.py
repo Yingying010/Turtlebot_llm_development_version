@@ -129,11 +129,14 @@ def _rotate_scan_realtime(robot_name: str,
                            timeout_sec: float = 10.0) -> Optional[Dict[str, Any]]:
     """
     实时版本：机器人边旋转，边持续检测图像，命中目标立即返回。
-    - rotate_fn(robot, deg): 控制机器人旋转角度（每帧触发一次）
-    - detect_model: YOLOPerceiver() 实例（必须已有）
-    - video_source: 通常是 0
     """
     logger.info("[find] 🚀 Starting real-time rotate+detect scan...")
+    
+    # 🔥 添加调试信息
+    logger.info(f"[find] 🔧 Scan parameters: max_rot={max_rot_deg}°, deg_per_frame={deg_per_frame}°, fps={fps}, timeout={timeout_sec}s")
+    logger.info(f"[find] 🔧 Rotate function: {rotate_fn}")
+    logger.info(f"[find] 🔧 Robot name: {robot_name}")
+    
     t0 = time.time()
     total_rotated = 0
     frame_interval = 1.0 / fps
@@ -144,11 +147,15 @@ def _rotate_scan_realtime(robot_name: str,
         return None
 
     try:
+        frame_count = 0
         while total_rotated < max_rot_deg and (time.time() - t0) < timeout_sec:
             ok, frame = cap.read()
             if not ok or frame is None:
                 time.sleep(0.01)
                 continue
+
+            frame_count += 1
+            logger.debug(f"[find] 📷 Processing frame {frame_count}, rotated={total_rotated}°")
 
             # YOLO 检测
             res = detect_model.model.predict(
@@ -168,6 +175,8 @@ def _rotate_scan_realtime(robot_name: str,
                 cy = (y1 + y2) / 2.0
                 cls_name = names.get(cls_id, str(cls_id)).lower()
 
+                logger.debug(f"[find] 🎯 Detected: {cls_name} (conf={conf:.3f})")
+                
                 if conf >= conf_thres:
                     logger.info(f"🎯 Found {cls_name} with conf={conf:.3f}")
                     cap.release()
@@ -178,12 +187,24 @@ def _rotate_scan_realtime(robot_name: str,
                         "center_xy": [cx, cy]
                     }
 
-            # 没检测到目标 → 继续旋转
-            rotate_fn(robot_name, deg_per_frame)
+            # 🔥 关键调试：没检测到目标 → 继续旋转
+            if callable(rotate_fn):
+                logger.info(f"[find] 🔄 Rotating {deg_per_frame}° (total: {total_rotated}°/{max_rot_deg}°)")
+                try:
+                    rotate_fn(robot_name, deg_per_frame)
+                    logger.info(f"[find] ✅ Rotation command sent successfully")
+                except Exception as e:
+                    logger.error(f"[find] ❌ Rotation failed: {e}")
+                    break
+            else:
+                logger.error(f"[find] ❌ rotate_fn is not callable: {rotate_fn}")
+                break
+                
             total_rotated += deg_per_frame
             time.sleep(frame_interval)
 
         logger.info("🛑 Scan complete, no object found")
+        logger.info(f"[find] 📊 Final stats: frames={frame_count}, total_rotated={total_rotated}°, elapsed={time.time()-t0:.1f}s")
         return None
 
     finally:
@@ -348,6 +369,23 @@ def execute_find(node: Any,
     rotate_fn = ctx.get("rotate_fn")
     navigate_to_fn = ctx.get("navigate_to_fn")
     event_pub = ctx.get("event_pub")
+
+    # 🔥 添加调试信息
+    rotate_fn = ctx.get("rotate_fn")
+    logger.info(f"[find] 🔧 Context functions check:")
+    logger.info(f"  - detect_fn: {callable(detect_fn)}")
+    logger.info(f"  - rotate_fn: {callable(rotate_fn)}")
+    logger.info(f"  - navigate_to_fn: {callable(navigate_to_fn)}")
+
+    if use_spin and callable(rotate_fn):
+        # 🔥 测试旋转函数
+        logger.info(f"[find] 🧪 Testing rotation function...")
+        try:
+            rotate_fn(robot_name, 10)  # 测试旋转10度
+            logger.info(f"[find] ✅ Rotation test successful")
+            time.sleep(1)  # 给机器人时间执行
+        except Exception as e:
+            logger.error(f"[find] ❌ Rotation test failed: {e}")
 
     if not callable(detect_fn):
         return {"ok": False, "found": False, "reason": "detect_fn missing"}

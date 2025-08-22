@@ -12,7 +12,6 @@ import time
 import re
 from ttsRepo.stream_tts import tts_manager
 from loguru import logger
-from loguru import logger
 import traceback
 import argparse
 from pathlib import Path
