@@ -17,6 +17,7 @@ import subprocess
 import numpy as np
 from typing import Any, Dict, List, Optional
 from collections import Counter
+from ttsRepo.stream_tts import tts_manager
 
 # 简单的日志工具
 class SimpleLogger:
@@ -26,18 +27,6 @@ class SimpleLogger:
     def debug(self, msg): print(f"[DEBUG] {msg}")
 
 logger = SimpleLogger()
-
-# 简单的TTS替代
-class SimpleTTS:
-    def say(self, text):
-        print(f"🔊 TTS: {text}")
-        # 尝试使用系统TTS，失败就静默
-        try:
-            subprocess.run(["espeak", text], check=False, capture_output=True)
-        except:
-            pass
-
-tts_manager = SimpleTTS()
 
 # -------- 黑板工具（/tmp） --------
 def _bb_path(robot_name: str) -> str:
@@ -330,7 +319,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
 
     # === 开始搜索 ===
     t0 = time.time()
-    tts_manager.say(f"Okay, I'll look around for the {target}.")
+    # tts_manager.say(f"Okay, I'll look around for the {target}.")
     logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
 
     hit: Optional[Dict[str, Any]] = None
