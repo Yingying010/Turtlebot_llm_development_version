@@ -623,7 +623,7 @@ def main():
     # === 这里修改参数进行测试 ===
     robot_name = "robot1"
     # 目标点，可以用语义位置（"table"）或者直接用坐标
-    target = {"x": 50.0, "y": 50.0}
+    target = {"x": 50.0, "y": 50.0, "heading_deg":None}
 
     try:
         print(f"🚀 Starting navigation test for {robot_name}...")
