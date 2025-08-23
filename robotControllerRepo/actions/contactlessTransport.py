@@ -32,7 +32,7 @@ from std_msgs.msg import String
 # ===== 使用你现有的导航函数 =====
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from robotControllerRepo.actions.navigate import navigate_to_target
+from robotControllerRepo.actions.navigate import navigate_to_target, get_current_position
 
 # ===== 全局参数（直接改这里就行） =====
 PARTICLE = (0.0, -1000.0)     # 微粒点坐标
@@ -87,6 +87,34 @@ class Motion:
 
 # ===== 协调协议 =====
 MSG_SYN, MSG_ACK, MSG_READY, MSG_GO, MSG_ABORT = "syn", "ack", "ready", "go", "abort"
+
+
+# --------快速验证对称性
+def check_formation_symmetry(node: Node, robot1_pose, robot2_pose, particle_xy, baseline):
+    x1, y1, theta1 = robot1_pose
+    x2, y2, theta2 = robot2_pose
+    px, py = particle_xy
+
+    # 检查两机器人之间的距离
+    dx = x1 - x2
+    dy = y1 - y2
+    dist = math.hypot(dx, dy)
+
+    # 中点是否接近 particle 点
+    mid_x = (x1 + x2) / 2
+    mid_y = (y1 + y2) / 2
+    offset = math.hypot(mid_x - px, mid_y - py)
+
+    # 朝向差是否接近 180°
+    dtheta = (theta1 - theta2 + 180) % 360 - 180
+    angle_ok = abs(abs(dtheta) - 180) < 10  # 容差 10°
+
+    print(f"🧩 Formation check:")
+    print(f"  ↔️ baseline: {dist:.1f} mm (expected: {baseline} mm)")
+    print(f"  🎯 center offset: {offset:.1f} mm (should be ~0)")
+    print(f"  🔄 heading diff: {dtheta:.1f}° (should be ±180°)")
+    print(f"  ✅ symmetry: {'YES' if abs(dist - baseline) < 30 and offset < 50 and angle_ok else 'NO'}")
+
 
 class TransportManager:
     """
@@ -225,6 +253,17 @@ class TransportManager:
         if nav_result["ok"] is False:
             self._abort("Navigation failed (navigate_to_target returned False)")
             return
+        
+        # === 对称性检测 ===（只由 robot1 发起，避免重复打印）
+        if self.is_r1:
+            # 获取两台车的当前位姿
+            x1, y1, h1 = get_current_position("robot1")
+            x2, y2, h2 = get_current_position("robot2")
+
+            robot1_pose = (x1, y1, h1)
+            robot2_pose = (x2, y2, h2)
+            particle_xy = PARTICLE  # 原始微粒坐标
+            check_formation_symmetry(self.node, robot1_pose, robot2_pose, particle_xy, BASELINE)
 
         if self.aborted:
             return
