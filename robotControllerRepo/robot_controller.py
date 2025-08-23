@@ -15,7 +15,7 @@ from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
 from robotControllerRepo.actions.deliver import deliver_item
 from robotControllerRepo.actions.find import run_action as run_find 
-from robotControllerRepo.actions.find import create_llm_replanning_function
+from robotControllerRepo.actions.find import execute_find_with_llm_replanning
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
 from llmParserRepo.gpt_yolo_localParser import detect_once, HistoryStore, MEMORY_PATH
@@ -275,7 +275,7 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
     
     try:
         # 创建LLM重规划函数
-        llm_replanning_fn = create_llm_replanning_function()
+        llm_replanning_fn = execute_find_with_llm_replanning()
         
         # 获取历史存储实例
         history_store = HistoryStore(MEMORY_PATH)
