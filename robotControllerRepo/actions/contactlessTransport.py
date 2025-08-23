@@ -53,8 +53,8 @@ def plan_formation(particle_xy, target_xy, baseline):
     phi = math.atan2(ty - py, tx - px)        # 整体朝向
     ux, uy = math.cos(phi), math.sin(phi)
     half = 0.5 * baseline
-    r1 = (px - half * ux, py - half * uy, phi)           # robot1 面向 φ
-    r2 = (px + half * ux, py + half * uy, phi + math.pi) # robot2 面向 φ+π
+    r2 = (px - half * ux, py - half * uy, phi)           # robot1 面向 φ
+    r1 = (px + half * ux, py + half * uy, phi + math.pi) # robot2 面向 φ+π
     path_len = math.hypot(tx - px, ty - py)              # 中心到目标直线距离
     return phi, r1, r2, path_len
 
