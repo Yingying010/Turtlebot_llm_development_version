@@ -47,15 +47,17 @@ WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
 
 # ===== 工具函数 =====
 def plan_formation(particle_xy, target_xy, baseline):
-    """返回：phi, r1(x,y,yaw), r2(x,y,yaw), path_len"""
     px, py = particle_xy
     tx, ty = target_xy
-    phi = math.atan2(ty - py, tx - px)        # 整体朝向
-    ux, uy = math.cos(phi), math.sin(phi)
+    phi = math.atan2(ty - py, tx - px)
+    
+    # 关键补偿：坐标系中 x 是反的
+    ux, uy = -math.cos(phi), math.sin(phi)
+
     half = 0.5 * baseline
-    r2 = (px - half * ux, py - half * uy, phi)           # robot1 面向 φ
-    r1 = (px + half * ux, py + half * uy, phi + math.pi) # robot2 面向 φ+π
-    path_len = math.hypot(tx - px, ty - py)              # 中心到目标直线距离
+    r1 = (px - half * ux, py - half * uy, phi)           # robot1
+    r2 = (px + half * ux, py + half * uy, phi + math.pi) # robot2
+    path_len = math.hypot(tx - px, ty - py)
     return phi, r1, r2, path_len
 
 # ===== 简单直线匀速控制（运输阶段用） =====
