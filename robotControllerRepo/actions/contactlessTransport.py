@@ -52,7 +52,7 @@ def plan_formation(particle_xy, target_xy, baseline):
     phi = math.atan2(ty - py, tx - px)
     
     # 关键补偿：坐标系中 x 是反的
-    ux, uy = -math.cos(phi), math.sin(phi)
+    ux, uy = math.cos(phi), math.sin(phi)
 
     half = 0.5 * baseline
     r1 = (px - half * ux, py - half * uy, phi)           # robot1
