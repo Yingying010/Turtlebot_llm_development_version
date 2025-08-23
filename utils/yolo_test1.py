@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-实时YOLO稳态检测（单帧可稳定）：
-- One-Euro风格自适应EMA滤波（首帧即可稳定，无窗口预热）
-- IoU极简关联：保持目标ID，短暂丢帧不抖
-- 类别稳态：短时类别跳变做多数投票/平滑
-- 尺寸变化约束：抑制“忽大忽小”的框闪烁
-- 低延迟：丢弃启动时的缓存帧，尽量保持即摄即显
-
+实时YOLO稳态检测（含类别名）：
+- One-Euro风格自适应EMA滤波（首帧即稳定）
+- 极简IoU多目标跟踪（保ID，短丢帧不抖）
+- 类别稳态：多数投票，输出稳定的**类名**
+- 尺寸变化约束：抑制忽大忽小
+- 保留/显示“物品名字”（YOLO的class name）
 环境变量（可选）：
-  YOLO_SRC        输入源（默认：UDP示例，改成你的摄像头/RTSP/文件）
-  YOLO_MODEL      权重（默认 yolov8n.pt）
-  YOLO_IMGSZ      尺寸（默认 640）
-  YOLO_CONF       置信度阈值（默认 0.5）
-  YOLO_NMS_IOU    NMS IoU（默认 0.45）
+  YOLO_SRC, YOLO_MODEL, YOLO_IMGSZ, YOLO_CONF, YOLO_NMS_IOU
 """
 
 import os
@@ -21,10 +16,9 @@ import cv2
 import time
 import math
 import collections
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 from ultralytics import YOLO
-
 
 # ======================
 # 配置
@@ -39,16 +33,16 @@ IMG_SIZE = int(os.getenv("YOLO_IMGSZ", "640"))
 CONF = float(os.getenv("YOLO_CONF", "0.5"))
 IOU_NMS = float(os.getenv("YOLO_NMS_IOU", "0.45"))
 
-# 关联阈值与稳态策略
 ASSOC_IOU = 0.4          # 跟踪关联阈值（IoU）
-MISS_TOL = 10            # 允许丢失帧数量（超过则删除track）
-SIDE_MARGIN = 0.02       # 丢弃靠近左右边缘的框(比例)
-MAX_SCALE_CHANGE = 1.4   # 单帧允许的最大尺寸倍率变化（>1）
+MISS_TOL = 10            # 允许丢失帧数量
+SIDE_MARGIN = 0.02       # 丢弃紧贴左右边缘的框(比例)
+MAX_SCALE_CHANGE = 1.4   # 单帧允许的最大尺寸倍率变化
 
-
+# ======================
+# 工具函数
+# ======================
 def clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
-
 
 def iou_xyxy(a, b) -> float:
     ax1, ay1, ax2, ay2 = a
@@ -65,7 +59,6 @@ def iou_xyxy(a, b) -> float:
     union = max(1e-6, area_a + area_b - inter)
     return inter / union
 
-
 def clamp_size_change(prev_box, new_box, max_scale=1.4):
     """限制单帧宽高变化比例，抑制忽大忽小。"""
     px1, py1, px2, py2 = prev_box
@@ -75,7 +68,6 @@ def clamp_size_change(prev_box, new_box, max_scale=1.4):
     nw = max(1.0, nx2 - nx1)
     nh = max(1.0, ny2 - ny1)
 
-    # 中心对齐，限制尺寸增长比例
     cx = (nx1 + nx2) / 2.0
     cy = (ny1 + ny2) / 2.0
     max_w = pw * max_scale
@@ -90,13 +82,8 @@ def clamp_size_change(prev_box, new_box, max_scale=1.4):
     ny2c = cy + adj_h / 2.0
     return [nx1c, ny1c, nx2c, ny2c]
 
-
 class OneEuroEMA:
-    """
-    One-Euro风格自适应EMA滤波：
-      - 根据速度自适应alpha：移动快 → 减小平滑（避免拖尾）；静止 → 增强平滑（抑制抖动）
-      - 无需窗口预热，首帧即稳定
-    """
+    """速度自适应的EMA滤波，无需预热。"""
     def __init__(self, alpha_min=0.12, alpha_max=0.8, vel_ref=80.0):
         self.alpha_min = alpha_min
         self.alpha_max = alpha_max
@@ -105,7 +92,7 @@ class OneEuroEMA:
         self.prev_t = None
 
     def _alpha(self, v):
-        k = min(5.0, v / self.vel_ref)  # 速度映射系数
+        k = min(5.0, v / self.vel_ref)
         return self.alpha_min + (self.alpha_max - self.alpha_min) * clamp01(k)
 
     def update_vec(self, x: List[float], t: float) -> List[float]:
@@ -119,17 +106,20 @@ class OneEuroEMA:
         self.prev, self.prev_t = y, t
         return y
 
-
+# ======================
+# 跟踪器（保留类别名）
+# ======================
 class Track:
     _next_id = 1
+    def __init__(self, bbox, cls_id, cls_name, score, t):
+        self.id = Track._next_id; Track._next_id += 1
 
-    def __init__(self, bbox, cls, score, t):
-        self.id = Track._next_id
-        Track._next_id += 1
-
-        self.cls_hist = collections.deque(maxlen=5)  # 类别投票窗口
-        self.cls_hist.append(int(cls))
-        self.cls = int(cls)
+        self.cls_hist = collections.deque(maxlen=5)  # 短窗多数投票
+        self.cls_id_hist = collections.deque(maxlen=5)
+        self.cls_hist.append(cls_name)
+        self.cls_id_hist.append(int(cls_id))
+        self.cls_name = cls_name
+        self.cls_id = int(cls_id)
 
         self.score = float(score)
         self.filter = OneEuroEMA(alpha_min=0.10, alpha_max=0.85, vel_ref=90.0)
@@ -137,23 +127,22 @@ class Track:
         self.last_t = t
         self.miss = 0
 
-    def majority_class(self):
-        if not self.cls_hist:
-            return self.cls
-        counts = collections.Counter(self.cls_hist)
-        return counts.most_common(1)[0][0]
+    def _majority(self, dq: collections.deque):
+        if not dq: 
+            return None
+        cnt = collections.Counter(dq)
+        return cnt.most_common(1)[0][0]
 
-    def update(self, bbox, cls, score, t):
-        # 尺寸变化约束（基于当前平滑后的框）
+    def update(self, bbox, cls_id, cls_name, score, t):
         bbox_c = clamp_size_change(self.box, bbox, max_scale=MAX_SCALE_CHANGE)
-        # 平滑
         self.box = self.filter.update_vec(list(bbox_c), t)
 
-        # 类别稳态：轻度多数投票/平滑
-        self.cls_hist.append(int(cls))
-        self.cls = self.majority_class()
+        self.cls_hist.append(cls_name)
+        self.cls_id_hist.append(int(cls_id))
+        # 稳态输出：多数投票
+        self.cls_name = self._majority(self.cls_hist) or cls_name
+        self.cls_id = self._majority(self.cls_id_hist) or int(cls_id)
 
-        # 置信度缓慢更新，避免突跳
         self.score = 0.7 * self.score + 0.3 * float(score)
         self.last_t = t
         self.miss = 0
@@ -161,54 +150,52 @@ class Track:
     def step(self):
         self.miss += 1
 
-
 class SimpleTracker:
     def __init__(self, iou_thr=ASSOC_IOU, miss_tolerance=MISS_TOL):
         self.iou_thr = iou_thr
         self.miss_tol = miss_tolerance
         self.tracks: List[Track] = []
 
-    def update(self, dets: List[Tuple[List[float], int, float]], t: float):
+    def update(self, dets: List[Dict[str, Any]], t: float):
         """
-        dets: [([x1,y1,x2,y2], cls, score), ...]
+        dets: [{'bbox':[x1,y1,x2,y2], 'cls_id':int, 'cls_name':str, 'score':float}, ...]
         """
-        used_det = set()
-
-        # 先给每个track加1丢失计数
+        used = set()
         for tr in self.tracks:
             tr.step()
 
-        # 贪心IoU匹配
+        # 贪心匹配
         for tr in self.tracks:
             best_iou, best_j = -1.0, -1
-            for j, (bb, cls, sc) in enumerate(dets):
-                if j in used_det:
+            for j, d in enumerate(dets):
+                if j in used: 
                     continue
-                # 优先匹配同类别（放宽：允许短时类别不一致，但同类优先）
-                iou_val = iou_xyxy(tr.box, bb)
-                if iou_val > best_iou and (cls == tr.cls or best_iou < self.iou_thr):
-                    best_iou, best_j = iou_val, j
+                ov = iou_xyxy(tr.box, d['bbox'])
+                # 优先同类，但允许低IoU时放宽
+                if ov > best_iou and (d['cls_id'] == tr.cls_id or best_iou < self.iou_thr):
+                    best_iou, best_j = ov, j
             if best_j >= 0 and best_iou >= self.iou_thr:
-                bb, cls, sc = dets[best_j]
-                tr.update(bb, cls, sc, t)
-                used_det.add(best_j)
+                d = dets[best_j]
+                tr.update(d['bbox'], d['cls_id'], d['cls_name'], d['score'], t)
+                used.add(best_j)
 
-        # 未匹配的检测 -> 新建track
-        for j, (bb, cls, sc) in enumerate(dets):
-            if j not in used_det:
-                self.tracks.append(Track(bb, cls, sc, t))
+        # 新轨迹
+        for j, d in enumerate(dets):
+            if j not in used:
+                self.tracks.append(Track(d['bbox'], d['cls_id'], d['cls_name'], d['score'], t))
 
-        # 清理过期
+        # 清理
         self.tracks = [tr for tr in self.tracks if tr.miss <= self.miss_tol]
 
     def get(self) -> List[Track]:
         return self.tracks
 
-
+# ======================
+# 视频与主循环
+# ======================
 def open_capture(src: str):
     cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
     if not cap.isOpened():
-        # 退化到默认摄像头
         cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError(f"无法打开视频源：{src}")
@@ -216,11 +203,9 @@ def open_capture(src: str):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     except Exception:
         pass
-    # 启动期丢掉几帧，降低缓存和PPS/SPS问题
-    for _ in range(8):
+    for _ in range(8):  # 启动丢几帧
         cap.read()
     return cap
-
 
 def main():
     print(f"[INFO] Opening stream: {SRC}")
@@ -230,7 +215,6 @@ def main():
     model = YOLO(MODEL)
 
     tracker = SimpleTracker(iou_thr=ASSOC_IOU, miss_tolerance=MISS_TOL)
-
     frames = 0
     t0 = time.time()
 
@@ -240,12 +224,10 @@ def main():
             print("[WARN] Empty frame")
             time.sleep(0.01)
             continue
-
         t = time.time()
 
-        # 更稳的推理参数
-        res = model.predict(
-            source=frame,         # numpy array
+        r = model.predict(
+            source=frame,
             imgsz=IMG_SIZE,
             conf=CONF,
             iou=IOU_NMS,
@@ -254,32 +236,41 @@ def main():
             device=0 if os.getenv("CUDA_VISIBLE_DEVICES") else None,
         )[0]
 
-        dets = []
-        if res.boxes is not None and len(res.boxes) > 0:
-            xyxy = res.boxes.xyxy.cpu().numpy()
-            cls = res.boxes.cls.cpu().numpy()
-            conf = res.boxes.conf.cpu().numpy()
+        # 类名映射：优先结果里的names，其次模型里的names
+        names_map = getattr(r, "names", None) or getattr(model, "names", {}) or {}
+        dets: List[Dict[str, Any]] = []
+
+        if r.boxes is not None and len(r.boxes) > 0:
+            xyxy = r.boxes.xyxy.cpu().numpy()
+            cls = r.boxes.cls.cpu().numpy()
+            conf = r.boxes.conf.cpu().numpy()
             W = frame.shape[1]
 
             for i in range(len(xyxy)):
                 x1, y1, x2, y2 = xyxy[i].tolist()
-                # 丢弃紧贴左右边缘的框，避免半边框致抖
                 if x1 < SIDE_MARGIN * W or x2 > (1.0 - SIDE_MARGIN) * W:
                     continue
-                dets.append(([x1, y1, x2, y2], int(cls[i]), float(conf[i])))
+                cls_id = int(cls[i])
+                cls_name = str(names_map.get(cls_id, cls_id))
+                dets.append({
+                    "bbox": [x1, y1, x2, y2],
+                    "cls_id": cls_id,
+                    "cls_name": cls_name,
+                    "score": float(conf[i]),
+                })
 
         tracker.update(dets, t)
 
-        # 可视化
+        # 可视化（显示类名）
         vis = frame.copy()
         for tr in tracker.get():
             x1, y1, x2, y2 = [int(v) for v in tr.box]
             cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = f"id{tr.id} c{tr.cls} {tr.score:.2f}"
+            label = f"id{tr.id} {tr.cls_name} {tr.score:.2f}"
             cv2.putText(vis, label, (x1, max(0, y1 - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow("YOLO stabilized", vis)
+        cv2.imshow("YOLO stabilized (with names)", vis)
 
         frames += 1
         if frames % 30 == 0:
@@ -288,12 +279,11 @@ def main():
             print(f"FPS: {fps:.2f}  tracks:{len(tracker.get())}")
             t0, frames = now, 0
 
-        if cv2.waitKey(1) & 0xFF == 27:  # ESC退出
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC
             break
 
     cap.release()
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
