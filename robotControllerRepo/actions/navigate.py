@@ -11,6 +11,7 @@ from std_msgs.msg import String
 from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
 import json
+import argparse
 from phasespace.rigid_tracker import RigidTracker
 import config
 from ttsRepo.stream_tts import tts_manager
@@ -657,12 +658,14 @@ def main():
     executor_thread = threading.Thread(target=executor.spin, daemon=True)
     executor_thread.start()
 
-    robot_name = "robot1"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--robot_id", required=True, choices=["robot1", "robot2"])
+    args = parser.parse_args()
     target = {"x": 100.0, "y": 100.0, "heading_deg": 45.0}
 
     try:
-        print(f"🚀 Starting navigation test for {robot_name}...")
-        success = navigate_to(node, executor, robot_name, target)
+        print(f"🚀 Starting navigation test for {args.robot_id}...")
+        success = navigate_to(node, executor, args.robot_id, target)
         print(f"\n✅ Navigation success: {success}")
     except KeyboardInterrupt:
         print("\n🛑 Interrupted by user")
