@@ -14,6 +14,9 @@ Collaborative Transport with PhaseSpace (using navigate.py)
   robot2:
     python3 test_collaborate_particles_decentralized.py --robot_id robot2
 """
+import os, sys
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+sys.path.append(PROJECT_ROOT)
 
 import rclpy
 from rclpy.node import Node
