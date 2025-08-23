@@ -614,16 +614,19 @@ def print_navigation_status():
 def main():
     import rclpy
     from rclpy.executors import MultiThreadedExecutor
+    import threading
 
     rclpy.init()
     node = rclpy.create_node("navigation_tester")
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
-    # === 这里修改参数进行测试 ===
+    # ✨ 添加这行让 RigidTracker 的回调能跑
+    executor_thread = threading.Thread(target=executor.spin, daemon=True)
+    executor_thread.start()
+
     robot_name = "robot1"
-    # 目标点，可以用语义位置（"table"）或者直接用坐标
-    target = {"x": 50.0, "y": 50.0, "heading": None}
+    target = {"x": 500.0, "y": -500.0}
 
     try:
         print(f"🚀 Starting navigation test for {robot_name}...")
