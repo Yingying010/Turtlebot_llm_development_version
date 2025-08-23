@@ -55,8 +55,8 @@ def plan_formation(particle_xy, target_xy, baseline):
     ux, uy = -math.cos(phi), math.sin(phi)
 
     half = 0.5 * baseline
-    r1 = (px + half * ux, py + half * uy, phi)           # robot1
-    r2 = (px - half * ux, py - half * uy, phi + math.pi) # robot2
+    r1 = (px - half * ux, py - half * uy, phi)           # robot1
+    r2 = (px + half * ux, py + half * uy, phi + math.pi) # robot2
     path_len = math.hypot(tx - px, ty - py)
     return phi, r1, r2, path_len
 
