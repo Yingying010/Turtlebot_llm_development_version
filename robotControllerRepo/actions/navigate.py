@@ -531,13 +531,13 @@ def fine_approach_to_target(node: Node, robot_name: str, target: Dict[str, float
     twist.linear.x = speed_m_per_s
     safe_publish_twist(node, robot_name, twist)
 
-    print(f"🚗 精细阶段：当前在 ({x_now:.1f}, {y_now:.1f})，目标 ({x_target:.1f}, {y_target:.1f})")
+    # print(f"🚗 精细阶段：当前在 ({x_now:.1f}, {y_now:.1f})，目标 ({x_target:.1f}, {y_target:.1f})")
     print(f"🚶 推算直线距离：{distance_mm:.1f} mm，预计时间 {duration_sec:.2f}s")
 
     time.sleep(duration_sec)
 
     safe_publish_twist(node, robot_name, Twist())
-    print("✅ 精细推进完成")
+    # print("✅ 精细推进完成")
 
  
  
