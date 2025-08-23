@@ -99,7 +99,7 @@ class TransportManager:
         # Phase1: 握手
         self._publish(MSG_SYN,{"who":self.robot_id})
         t0=time.time()
-        while not self.have_ack and time.time()-t0<3: rclpy.spin_once(self.node,0.1)
+        while not self.have_ack and time.time()-t0<3: rclpy.spin_once(self.node)
 
         # Phase2: 导航到编队位置 (调用 navigate.py)
         if self.is_r1:
@@ -112,14 +112,14 @@ class TransportManager:
         navigate_to_target(self.node, None, self.robot_id, target)  # executor传None，因为你集成时会传入controller的executor
 
         self.self_ready=True; self._publish(MSG_READY,{"who":self.robot_id})
-        while not(self.self_ready and self.peer_ready): rclpy.spin_once(self.node,0.1)
+        while not(self.self_ready and self.peer_ready): rclpy.spin_once(self.node)
 
         # Phase3: 同步运输
         if self.is_r1:
             self.start_at=time.time()+0.6
             self._publish(MSG_GO,{"start_at":self.start_at,"dist":self.path_len,"speed":SPEED})
         else:
-            while self.start_at is None: rclpy.spin_once(self.node,0.1)
+            while self.start_at is None: rclpy.spin_once(self.node)
 
         while self.start_at>time.time(): time.sleep(0.001)
         forward=self.is_r1
