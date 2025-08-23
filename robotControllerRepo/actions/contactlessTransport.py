@@ -49,7 +49,7 @@ WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
 def plan_formation(particle_xy, target_xy, baseline):
     px, py = particle_xy
     tx, ty = target_xy
-    phi = math.atan2(ty - py, tx - px)
+    phi = -math.atan2(ty - py, tx - px)
     
     # 关键补偿：坐标系中 x 是反的
     ux, uy = math.cos(phi), math.sin(phi)
