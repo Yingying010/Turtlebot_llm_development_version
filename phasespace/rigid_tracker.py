@@ -45,11 +45,11 @@ class RigidTracker(Node):
                 else:
                     self.position_cache[self.robot_name] = data
 
-                self.get_logger().info(
-                    f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
-                    f"qx={msg.qx:.2f}, qy={msg.qy:.2f}, qz={msg.qz:.2f}, qw={msg.qw:.2f}, "
-                    f"heading_y={heading_y:.2f}, cond={cond:.2f}"
-                )
+                # self.get_logger().info(
+                #     f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
+                #     f"qx={msg.qx:.2f}, qy={msg.qy:.2f}, qz={msg.qz:.2f}, qw={msg.qw:.2f}, "
+                #     f"heading_y={heading_y:.2f}, cond={cond:.2f}"
+                # )
 
         except Exception as e:
             self.get_logger().error(f"💥 Error reading Rigid message: {e}")
