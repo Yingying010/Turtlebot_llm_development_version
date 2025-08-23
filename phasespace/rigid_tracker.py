@@ -45,11 +45,11 @@ class RigidTracker(Node):
                 else:
                     self.position_cache[self.robot_name] = data
 
-                # self.get_logger().info(
-                #     f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
-                #     f"qx={msg.qx:.2f}, qy={msg.qy:.2f}, qz={msg.qz:.2f}, qw={msg.qw:.2f}, "
-                #     f"heading_y={heading_y:.2f}, cond={cond:.2f}"
-                # )
+                self.get_logger().info(
+                    f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
+                    f"qx={msg.qx:.2f}, qy={msg.qy:.2f}, qz={msg.qz:.2f}, qw={msg.qw:.2f}, "
+                    f"heading_y={heading_y:.2f}, cond={cond:.2f}"
+                )
 
         except Exception as e:
             self.get_logger().error(f"💥 Error reading Rigid message: {e}")
@@ -66,7 +66,7 @@ def main():
     position_cache = {}
     position_lock = threading.Lock()
  
-    # 创建 robot2 的跟踪器
+    # 创建 robot1 的跟踪器
     tracker = RigidTracker(position_cache, "robot1", position_lock)
  
     executor = MultiThreadedExecutor()
@@ -77,9 +77,9 @@ def main():
         thread = threading.Thread(target=executor.spin, daemon=True)
         thread.start()
  
-        print("📡 Listening for robot2's position updates... (Ctrl+C to stop)")
+        print("📡 Listening for robot1's position updates... (Ctrl+C to stop)")
  
-        # 循环打印 robot2 位置信息
+        # 循环打印 robot1 位置信息
         while rclpy.ok():
             with position_lock:
                 if "robot1" in position_cache:
