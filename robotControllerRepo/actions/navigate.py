@@ -453,7 +453,7 @@ def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
  
  
 def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
-                               tolerance: float = 20.0, max_acceptable_angle_error: float = 25.0, semantic_threshold = 0.0):
+                               tolerance: float = 10.0, max_acceptable_angle_error: float = 25.0, semantic_threshold = 0.0):
     x_target, y_target = target["x"], target["y"]
 
     print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
@@ -626,7 +626,7 @@ def main():
     executor_thread.start()
 
     robot_name = "robot1"
-    target = {"x": 120.0, "y": 120.0, "heading_deg": 45.0}
+    target = {"x": 50.0, "y": 50.0, "heading_deg": 45.0}
 
     try:
         print(f"🚀 Starting navigation test for {robot_name}...")
