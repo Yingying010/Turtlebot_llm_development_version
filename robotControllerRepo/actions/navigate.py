@@ -609,3 +609,32 @@ def print_navigation_status():
         status_str = intention["status"]
         print(f"  {robot}: → ({target['x']:.1f}, {target['y']:.1f}) [{status_str}]")
     print("="*50 + "\n")
+
+
+def main():
+    import rclpy
+    from rclpy.executors import MultiThreadedExecutor
+
+    rclpy.init()
+    node = rclpy.create_node("navigation_tester")
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+
+    # === 这里修改参数进行测试 ===
+    robot_name = "robot1"
+    # 目标点，可以用语义位置（"table"）或者直接用坐标
+    target = {"x": 500.0, "y": -500.0}
+
+    try:
+        print(f"🚀 Starting navigation test for {robot_name}...")
+        success = navigate_to(node, executor, robot_name, target)
+        print(f"\n✅ Navigation success: {success}")
+    except KeyboardInterrupt:
+        print("\n🛑 Interrupted by user")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
