@@ -15,7 +15,7 @@ from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.collect import collect_item
 from robotControllerRepo.actions.deliver import deliver_item
 from robotControllerRepo.actions.find import run_action as run_find 
-from robotControllerRepo.actions.find import execute_find_with_llm_replanning
+from robotControllerRepo.actions.find import execute_find_with_llm_replanning, create_llm_replanning_function
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
 from llmParserRepo.gpt_yolo_localParser import detect_once, HistoryStore, MEMORY_PATH
@@ -275,19 +275,22 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
     
     try:
         # 创建LLM重规划函数
-        llm_replanning_fn = execute_find_with_llm_replanning()
+        llm_replanning_fn = create_llm_replanning_function()
         
         # 获取历史存储实例
+        from llmParserRepo.gpt_yolo_localParser import HistoryStore, MEMORY_PATH
         history_store = HistoryStore(MEMORY_PATH)
         
-        # 调用find动作
-        result = run_find(
-            node,
-            task,
+        # 🔥 修正：直接调用 execute_find_with_llm_replanning 并传递正确参数
+        result = execute_find_with_llm_replanning(
+            node=node,                    # 传递 node
+            robot_name=robot,             # 传递 robot_name  
+            params=params,                # 传递 params
+            # 传递上下文函数作为关键字参数
             detect_fn=detect_once,
-            rotate_fn=lambda robot, deg: rotate_deg(node, robot, deg),
-            navigate_to_fn=lambda robot, target: navigate_to(node, executor, robot, target),
-            event_pub=None,
+            rotate_fn=lambda robot_name, deg: rotate_deg(node, robot_name, deg),
+            navigate_to_fn=lambda robot_name, target: navigate_to(node, executor, robot_name, target),
+            event_pub=None,  # 可以传递事件发布器，如果有的话
             llm_replanning_fn=llm_replanning_fn,
             history_store=history_store
         )
@@ -312,7 +315,10 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
         
     except Exception as e:
         logger.error(f"Find action error: {e}")
+        import traceback
+        traceback.print_exc()
         return False, []
+
 
 
 def execute_robot_commands(node:Node, robot_id: str, commands: List[Dict], robot_position_cache):
