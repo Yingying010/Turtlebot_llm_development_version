@@ -499,14 +499,46 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     distance = math.hypot(dx, dy)
  
     print(f"\n🧭 NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f}) | dist={distance:.2f}")
- 
+    
+    # step 1
     rotate_to_face_target(node, robot_name, target)
+
+    # step 2
     move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
+
+    # Step 3: 精细靠近（固定距离直行，不再依赖 PhaseSpace）
+    fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.05)
+
  
     if "heading_deg" in target:
         rotate_to_final_heading(node, robot_name, target["heading_deg"])
  
     print(f"✅ {robot_name} navigation complete.")
+
+
+def fine_approach_to_target(node: Node, robot_name: str, target: Dict[str, float], speed_m_per_s: float = 0.05):
+    """根据当前坐标推算与目标的距离，然后直行该距离"""
+    x_now, y_now, heading_y = get_current_position(robot_name)
+    x_target = target["x"]
+    y_target = target["y"]
+
+    dx = x_target - x_now
+    dy = y_target - y_now
+    distance_mm = math.hypot(dx, dy)
+    duration_sec = distance_mm / (speed_m_per_s * 1000)
+
+    twist = Twist()
+    twist.linear.x = speed_m_per_s
+    safe_publish_twist(node, robot_name, twist)
+
+    print(f"🚗 精细阶段：当前在 ({x_now:.1f}, {y_now:.1f})，目标 ({x_target:.1f}, {y_target:.1f})")
+    print(f"🚶 推算直线距离：{distance_mm:.1f} mm，预计时间 {duration_sec:.2f}s")
+
+    time.sleep(duration_sec)
+
+    safe_publish_twist(node, robot_name, Twist())
+    print("✅ 精细推进完成")
+
  
  
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
@@ -571,9 +603,9 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
         print(f"🎯 {robot_name} 开始导航到分配目标: ({actual_target['x']:.1f}, {actual_target['y']:.1f})")
         if "heading_deg" in actual_target:
             print(f"📐 Target includes heading: {actual_target['heading_deg']}°")
-        
+
         navigate_to_position(node, robot_name, actual_target)
-        
+
         # Step 6: 导航完成，清理意图
         cleanup_navigation_intent(robot_name)
         
