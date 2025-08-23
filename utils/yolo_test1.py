@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-实时YOLO稳态检测（含类别名）：
+实时YOLO稳态检测（含类别名与打印）：
 - One-Euro风格自适应EMA滤波（首帧即稳定）
 - 极简IoU多目标跟踪（保ID，短丢帧不抖）
 - 类别稳态：多数投票，输出稳定的**类名**
 - 尺寸变化约束：抑制忽大忽小
-- 保留/显示“物品名字”（YOLO的class name）
-环境变量（可选）：
-  YOLO_SRC, YOLO_MODEL, YOLO_IMGSZ, YOLO_CONF, YOLO_NMS_IOU
+- 控制台打印：Detect: bottle, Confidence: 0.93
+
+可选环境变量：
+  YOLO_SRC      输入源（默认：UDP示例，可改为0/RTSP/文件）
+  YOLO_MODEL    权重（默认 yolov8n.pt）
+  YOLO_IMGSZ    输入尺寸（默认 640）
+  YOLO_CONF     置信度阈值（默认 0.5）
+  YOLO_NMS_IOU  NMS IoU（默认 0.45）
 """
 
 import os
@@ -17,7 +22,6 @@ import time
 import math
 import collections
 from typing import List, Tuple, Dict, Any
-
 from ultralytics import YOLO
 
 # ======================
@@ -114,7 +118,7 @@ class Track:
     def __init__(self, bbox, cls_id, cls_name, score, t):
         self.id = Track._next_id; Track._next_id += 1
 
-        self.cls_hist = collections.deque(maxlen=5)  # 短窗多数投票
+        self.cls_hist = collections.deque(maxlen=5)   # 名称投票
         self.cls_id_hist = collections.deque(maxlen=5)
         self.cls_hist.append(cls_name)
         self.cls_id_hist.append(int(cls_id))
@@ -134,15 +138,17 @@ class Track:
         return cnt.most_common(1)[0][0]
 
     def update(self, bbox, cls_id, cls_name, score, t):
+        # 尺寸约束 + 平滑
         bbox_c = clamp_size_change(self.box, bbox, max_scale=MAX_SCALE_CHANGE)
         self.box = self.filter.update_vec(list(bbox_c), t)
 
+        # 类别稳态
         self.cls_hist.append(cls_name)
         self.cls_id_hist.append(int(cls_id))
-        # 稳态输出：多数投票
         self.cls_name = self._majority(self.cls_hist) or cls_name
-        self.cls_id = self._majority(self.cls_id_hist) or int(cls_id)
+        self.cls_id   = self._majority(self.cls_id_hist) or int(cls_id)
 
+        # 置信度平滑
         self.score = 0.7 * self.score + 0.3 * float(score)
         self.last_t = t
         self.miss = 0
@@ -261,7 +267,12 @@ def main():
 
         tracker.update(dets, t)
 
-        # 可视化（显示类名）
+        # —— 控制台打印：Detect: name, Confidence: 0.93 ——
+        # 按track输出（稳定后的结果，推荐）
+        for tr in tracker.get():
+            print(f"Detect: {tr.cls_name}, Confidence: {tr.score:.2f}")
+
+        # 可视化
         vis = frame.copy()
         for tr in tracker.get():
             x1, y1, x2, y2 = [int(v) for v in tr.box]
@@ -270,7 +281,7 @@ def main():
             cv2.putText(vis, label, (x1, max(0, y1 - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        cv2.imshow("YOLO stabilized (with names)", vis)
+        cv2.imshow("YOLO stabilized (with names + print)", vis)
 
         frames += 1
         if frames % 30 == 0:
