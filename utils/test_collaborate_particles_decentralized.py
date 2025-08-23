@@ -6,7 +6,7 @@ Collaborative Transport with PhaseSpace (using navigate.py)
 流程:
   Phase1: 根据微粒点与目标点计算两车编队位置和整体朝向
   Phase2: 两车分别调用 navigate.py 导航到编队位置并调整角度
-  Phase3: 两车背靠背同步直线运输，robot1 前进、robot2 后退
+  Phase3: 两车背靠背同步直线运输, robot1 前进、robot2 后退
 
 运行:
   robot1:
@@ -24,7 +24,7 @@ from std_msgs.msg import String
 import math, time, json, argparse, threading
 
 # === 导入你现有的导航函数 ===
-from navigate import navigate_to_target
+from robotControllerRepo.actions.navigate import navigate_to_target
 
 # === 全局参数（直接改这里就行） ===
 PARTICLE = (0.0, 0.0)     # 微粒点
