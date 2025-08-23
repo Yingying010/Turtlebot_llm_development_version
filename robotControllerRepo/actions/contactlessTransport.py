@@ -37,7 +37,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target
 # ===== 全局参数（直接改这里就行） =====
 PARTICLE = (0.0, -1000.0)     # 微粒点坐标
 TARGET   = (1500.0, -1500.0)    # 目标点坐标
-BASELINE = 760           # 两车中心间距 38cm
+BASELINE = 700           # 两车中心间距 38cm
 SPEED    = 0.02          # 运输速度 (m/s)
 
 # 超时配置（秒）
@@ -72,7 +72,7 @@ class Motion:
     def drive_constant(self, forward: bool, dist: float, speed: float):
         dur = dist / max(speed, 1e-6)
         tw = Twist()
-        tw.linear.x = speed if forward else -speed
+        tw.linear.x = -speed if forward else speed
         t0 = time.time()
         while time.time() - t0 < dur:
             self.pub.publish(tw)
