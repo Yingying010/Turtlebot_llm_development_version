@@ -28,7 +28,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target
 
 # === 全局参数（直接改这里就行） ===
 PARTICLE = (0.0, 0.0)     # 微粒点
-TARGET   = (5.0, -5.0)    # 目标点
+TARGET   = (500.0, -500.0)    # 目标点
 BASELINE = 0.38           # 两车间距
 SPEED    = 0.06           # 运输速度
 
