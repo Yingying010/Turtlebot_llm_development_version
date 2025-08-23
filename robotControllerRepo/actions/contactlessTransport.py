@@ -46,17 +46,23 @@ WAIT_READY_TIMEOUT_SEC   = 30.0   # 等对方 READY 的超时
 WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
 
 # ===== 工具函数 =====
+# robot 1 在右边
 def plan_formation(particle_xy, target_xy, baseline):
     px, py = particle_xy
     tx, ty = target_xy
+
+    # 左正右负的坐标系 → 需要在角度计算时取负
     phi = -math.atan2(ty - py, tx - px)
-    
-    # 关键补偿：坐标系中 x 是反的
+
+    # 基于反转后的朝向，计算方向向量
     ux, uy = math.cos(phi), math.sin(phi)
 
     half = 0.5 * baseline
-    r2 = (px + half * ux, py - half * uy, -(phi + math.pi))           # robot1
-    r1 = (px - half * ux, py + half * uy, -phi) # robot2
+
+    # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
+    r1 = (px - half * ux, py - half * uy, phi + math.pi)
+    r2 = (px + half * ux, py + half * uy, phi)
+
     path_len = math.hypot(tx - px, ty - py)
     return phi, r1, r2, path_len
 
