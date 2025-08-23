@@ -626,7 +626,7 @@ def main():
     executor_thread.start()
 
     robot_name = "robot1"
-    target = {"x": 500.0, "y": -500.0}
+    target = {"x": 100.0, "y": -100.0, "heading_deg": 45.0}
 
     try:
         print(f"🚀 Starting navigation test for {robot_name}...")
