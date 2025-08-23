@@ -224,7 +224,7 @@ def _test_camera_simple() -> bool:
 def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
                                   target_class: str, 
                                   conf_thres: float,
-                                  num_frames: int = 5,
+                                  num_frames: int,
                                   frame_interval: float = 0.3) -> Optional[Dict]:
     """使用摄像头进行多帧检测，提高检测稳定性"""
     if not detector.available:
@@ -382,7 +382,7 @@ def _group_detections_by_position(detections: List[Dict],
 # -------- 兼容性包装器 --------
 def _detect_with_camera(detector: StandaloneYOLODetector, target_class: str, conf_thres: float) -> Optional[Dict]:
     """兼容旧接口的包装器，默认使用多帧检测"""
-    return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames=5)
+    return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames=3)
 
 # -------- 分步旋转扫描 --------
 def _rotate_scan_stepwise(robot_name: str,
@@ -444,7 +444,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     waypoints: List[Any] = params.get("search_waypoints", [])
     
     # === 多帧检测参数 ===
-    num_frames: int = int(params.get("detection_frames", 5))  # 默认3帧
+    num_frames: int = int(params.get("detection_frames", 3))  # 默认3帧
     frame_interval: float = float(params.get("frame_interval", 0.3))  # 帧间间隔0.3秒
 
     # === 系统优化参数 ===

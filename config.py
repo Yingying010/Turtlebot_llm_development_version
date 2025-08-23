@@ -10,11 +10,11 @@ DEFAULT_CONFIG = {
     "isConversation": True,
     "chat_or_instruct": False,
     "semantic_locations": {
-        "lucy": {"x": 1000, "y": 1000, "heading": None},
+        "lucy": {"x": -1000, "y": -1000, "heading": None},
         "table": {"x": 0, "y": 0, "heading": None},
         "robot2": {"x": -500, "y": -500, "heading": None},
         "corner": {"x": 1000, "y": 1000, "heading": None},
-        "shelf": {"x": -1000, "y": -1000, "heading": None},
+        "shelf": {"x": 1000, "y": -1000, "heading": None},
     }
 }
 
