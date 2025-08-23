@@ -30,6 +30,8 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 # ===== 使用你现有的导航函数 =====
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from robotControllerRepo.actions.navigate import navigate_to_target
 
 # ===== 全局参数（直接改这里就行） =====
