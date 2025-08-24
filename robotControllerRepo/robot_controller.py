@@ -19,20 +19,11 @@ from robotControllerRepo.actions.find import run_action as run_find
 from robotControllerRepo.actions.find import execute_find_with_llm_replanning, create_llm_replanning_function
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
-# 🔥 新增：导入协作运输模块（如果存在）
-try:
-    from robotControllerRepo.actions.contactlessTransport import TransportManager
-    HAS_CONTACTLESS_TRANSPORT = True
-except ImportError:
-    HAS_CONTACTLESS_TRANSPORT = False
-    logger.warning("ContactlessTransport module not found, disabling contactless transport features")
-
-# 🔥 修正：导入独立的YOLO感知模块 - 修正路径
-# 由于yolo_perception.py在llmParserRepo下，需要从项目根目录导入
-sys.path.append(os.path.join(PROJECT_ROOT, "llmParserRepo"))
-from yolo_perception import detect_once
-
-import time
+# 🔥 新增：导入协作运输模块
+from robotControllerRepo.actions.contactlessTransport import TransportManager
+# 🔥 修正：导入独立的YOLO感知模块
+from llmParserRepo.yolo_perception import detect_once
+from llmParserRepo.gpt_localParser import HistoryStore, MEMORY_PATH
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
