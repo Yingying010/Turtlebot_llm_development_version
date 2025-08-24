@@ -492,29 +492,50 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         time.sleep(0.1)
  
  
-def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
-    x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_name)
-    dx = x_target - x_now
-    dy = y_target - y_now
-    distance = math.hypot(dx, dy)
- 
-    print(f"\n🧭 NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f}) | dist={distance:.2f}")
+# ================== Fine-tune ======================
+def fine_rotate_to_target_angle(node: Node, robot_name: str, target_angle_deg: float, 
+                                angular_speed_deg_per_s: float = 5.0, tolerance_deg: float = 2.0):
+    """
+    精细化转弯：根据当前朝向和目标角度计算需要转动的角度，然后执行精确转动
     
-    # step 1
-    rotate_to_face_target(node, robot_name, target)
-
-    # step 2
-    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
-
-    # Step 3: 精细靠近（固定距离直行，不再依赖 PhaseSpace）
-    fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.05)
-
- 
-    if "heading_deg" in target:
-        rotate_to_final_heading(node, robot_name, target["heading_deg"])
- 
-    print(f"✅ {robot_name} navigation complete.")
+    Args:
+        node: ROS节点
+        robot_name: 机器人名称
+        target_angle_deg: 目标朝向角度（度）
+        angular_speed_deg_per_s: 转动速度（度/秒）
+        tolerance_deg: 角度容差（度）
+    """
+    _, _, current_heading = get_current_position(robot_name)
+    
+    # 计算需要转动的角度（考虑360度循环）
+    angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
+    
+    # 如果角度差已经在容差范围内，直接返回
+    if abs(angle_diff) <= tolerance_deg:
+        print(f"🎯 角度已对齐：当前 {current_heading:.1f}°，目标 {target_angle_deg:.1f}°，差值 {angle_diff:.1f}°")
+        return
+    
+    # 计算转动时间
+    duration_sec = abs(angle_diff) / angular_speed_deg_per_s
+    
+    # 设置转动方向和速度
+    twist = Twist()
+    angular_speed_rad_per_s = math.radians(angular_speed_deg_per_s)
+    twist.angular.z = angular_speed_rad_per_s if angle_diff > 0 else -angular_speed_rad_per_s
+    
+    direction = "左" if angle_diff > 0 else "右"
+    print(f"🔄 精细转动：当前 {current_heading:.1f}°，目标 {target_angle_deg:.1f}°")
+    print(f"   需转动 {abs(angle_diff):.1f}° 向{direction}，预计时间 {duration_sec:.2f}s")
+    
+    # 执行转动
+    safe_publish_twist(node, robot_name, twist)
+    time.sleep(duration_sec)
+    safe_publish_twist(node, robot_name, Twist())
+    
+    # 验证转动结果
+    _, _, final_heading = get_current_position(robot_name)
+    final_diff = (target_angle_deg - final_heading + 180) % 360 - 180
+    print(f"✅ 精细转动完成：最终朝向 {final_heading:.1f}°，剩余偏差 {final_diff:.1f}°")
 
 
 def fine_approach_to_target(node: Node, robot_name: str, target: Dict[str, float], speed_m_per_s: float = 0.05):
@@ -532,16 +553,124 @@ def fine_approach_to_target(node: Node, robot_name: str, target: Dict[str, float
     twist.linear.x = speed_m_per_s
     safe_publish_twist(node, robot_name, twist)
 
-    # print(f"🚗 精细阶段：当前在 ({x_now:.1f}, {y_now:.1f})，目标 ({x_target:.1f}, {y_target:.1f})")
-    print(f"🚶 推算直线距离：{distance_mm:.1f} mm，预计时间 {duration_sec:.2f}s")
+    print(f"🚶 精细前进：距离 {distance_mm:.1f}mm，预计时间 {duration_sec:.2f}s")
 
     time.sleep(duration_sec)
 
     safe_publish_twist(node, robot_name, Twist())
-    # print("✅ 精细推进完成")
+    print("✅ 精细前进完成")
+
+
+def calculate_target_angle(current_pos: Tuple[float, float, float], target_pos: Dict[str, float]) -> float:
+    """计算从当前位置到目标位置需要的朝向角度"""
+    x_now, y_now, _ = current_pos
+    x_target, y_target = target_pos["x"], target_pos["y"]
+    
+    dx = x_target - x_now
+    dy = y_target - y_now
+    
+    # 使用atan2计算角度，并转换为度数
+    target_angle = math.degrees(math.atan2(dx, dy)) % 360
+    return target_angle
+
+
+def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
+    """
+    增强版导航函数：粗调 + 精调的两阶段导航
+    """
+    x_target, y_target = target["x"], target["y"]
+    x_now, y_now, _ = get_current_position(robot_name)
+    dx = x_target - x_now
+    dy = y_target - y_now
+    distance = math.hypot(dx, dy)
+ 
+    print(f"\n🧭 NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f}) | dist={distance:.2f}mm")
+    
+    # ===== 阶段1：粗调导航 =====
+    print("📍 阶段1：粗调导航")
+    
+    # Step 1: 粗略转向目标
+    rotate_to_face_target(node, robot_name, target)
+
+    # Step 2: 粗略前进到目标附近
+    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
+
+    # ===== 阶段2：精细调整 =====
+    print("🎯 阶段2：精细调整")
+    
+    # Step 3: 精细化朝向调整
+    current_pos = get_current_position(robot_name)
+    target_angle = calculate_target_angle(current_pos, target)
+    fine_rotate_to_target_angle(node, robot_name, target_angle, angular_speed_deg_per_s=3.0)
+
+    # Step 4: 精细化前进（基于坐标计算的固定距离）
+    fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.03)
+
+    # ===== 阶段3：最终朝向调整 =====
+    if "heading_deg" in target:
+        print("🧭 阶段3：最终朝向调整")
+        fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], angular_speed_deg_per_s=2.0)
+ 
+    print(f"✅ {robot_name} 精细化导航完成")
+
+
+# 可选：更保守的导航版本，适用于高精度要求的场景
+# def navigate_to_position_ultra_precise(node: Node, robot_name: str, target: Dict[str, float]):
+#     """
+#     超精确导航版本：多轮迭代调整，直到达到期望精度
+#     """
+#     x_target, y_target = target["x"], target["y"]
+#     max_iterations = 3  # 最大迭代次数
+#     position_tolerance = 50.0  # 位置容差（毫米）
+    
+#     print(f"\n🎯 ULTRA-PRECISE NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f})")
+    
+#     for iteration in range(max_iterations):
+#         print(f"\n🔄 迭代 {iteration + 1}/{max_iterations}")
+        
+#         # 检查当前位置
+#         x_now, y_now, heading_now = get_current_position(robot_name)
+#         dx = x_target - x_now
+#         dy = y_target - y_now
+#         current_distance = math.hypot(dx, dy)
+        
+#         print(f"📍 当前位置: ({x_now:.1f}, {y_now:.1f}), 距目标: {current_distance:.1f}mm")
+        
+#         # 如果已经足够接近，退出循环
+#         if current_distance <= position_tolerance:
+#             print(f"🎉 已达到精度要求 ({current_distance:.1f}mm ≤ {position_tolerance}mm)")
+#             break
+        
+#         # 计算需要的朝向角度
+#         target_angle = calculate_target_angle((x_now, y_now, heading_now), target)
+        
+#         # 精细转向
+#         fine_rotate_to_target_angle(node, robot_name, target_angle, 
+#                                    angular_speed_deg_per_s=2.0, tolerance_deg=1.0)
+        
+#         # 精细前进
+#         fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.02)
+        
+#         # 短暂等待让位置稳定
+#         time.sleep(0.5)
+    
+#     # 最终朝向调整
+#     if "heading_deg" in target:
+#         print("🧭 最终朝向调整")
+#         fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], 
+#                                    angular_speed_deg_per_s=1.0, tolerance_deg=0.5)
+    
+#     # 最终位置报告
+#     x_final, y_final, heading_final = get_current_position(robot_name)
+#     final_distance = math.hypot(x_target - x_final, y_target - y_final)
+#     print(f"✅ 超精确导航完成")
+#     print(f"   最终位置: ({x_final:.1f}, {y_final:.1f}), 朝向: {heading_final:.1f}°")
+#     print(f"   最终精度: {final_distance:.1f}mm")
+
+
 
  
- 
+# ================== main ====================
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
     """
     导航到目标，包含分布式协商机制
