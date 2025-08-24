@@ -709,9 +709,10 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
             Important Rules
             ========================
             - When the user says "bring to me" or "deliver to <person>", the action sequence MUST be:
-            1) pickup the item  
-            2) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
-            3) dropoff the item  
+            1) navigate to the item
+            2) pickup the item  
+            3) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
+            4) dropoff the item  
 
             - Do NOT skip the navigate step before dropoff.
             - The output must always follow strict JSON format:
