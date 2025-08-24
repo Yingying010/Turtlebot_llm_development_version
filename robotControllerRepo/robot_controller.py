@@ -69,7 +69,7 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
             return execute_contactless_transport(node, executor, robot, params)
 
         elif action == "find":
-            result = run_find(node, robot, params)
+            result = run_find(node, robot, params["item"])
             return result.get("ok", False)
 
         elif action == "wait":
