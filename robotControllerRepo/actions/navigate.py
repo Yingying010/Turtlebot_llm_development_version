@@ -192,14 +192,12 @@ def calculate_target_angle(current_pos: Tuple[float, float, float],
 def precision_rotate(node: Node, robot_name: str, target_angle_deg: float, 
                     angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 1.0):
     
+    """Execute precision rotation using time-based control"""
+    _, _, current_heading = get_current_position(robot_name)
     # initial error compatible
     angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
     if robot_name == "robot1":
         angle_diff += 5.0 if angle_diff > 0 else -5.0
-
-    """Execute precision rotation using time-based control"""
-    _, _, current_heading = get_current_position(robot_name)
-    angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
     if abs(angle_diff) <= tolerance_deg:
         print(f"[PRECISION_ROTATE] Already aligned: current={current_heading:.1f}deg, "
