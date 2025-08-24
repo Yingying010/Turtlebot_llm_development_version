@@ -849,7 +849,7 @@ def execute_find_with_llm_replanning(
     return basic
 
 # ========= 对外入口 =========
-def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
+def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
     # 自动注入历史：只读 memory.chattinglog.json；不存在就不用历史（不兜底）
     history_store = _FileHistoryStore(_HISTORY_PATH) if os.path.exists(_HISTORY_PATH) else None
 
@@ -877,7 +877,7 @@ def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
             if action == "navigate":
                 target = params.get("target")
                 if target:
-                    navigate_after_follow(node, robot_name, target)
+                    navigate_after_follow(node, robot_name, target, executor)
                 else:
                     logger.warning("[find] navigate missing target")
             elif action == "pickup":
