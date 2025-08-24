@@ -168,6 +168,44 @@ class TransportManager:
         self.worker = threading.Thread(target=self._main, daemon=True)
         self.worker.start()
 
+    def on_bus(self, msg: String):
+        try:
+            d = json.loads(msg.data)
+        except Exception:
+            return
+        typ = d.get("type")
+        who = d.get("who")
+
+        if typ == MSG_SYN and who != self.robot_id:
+            self._publish(MSG_ACK, {"who": self.robot_id})
+
+        elif typ == MSG_ACK and who == self.peer_id:
+            self.have_ack = True
+            self.ack_event.set()
+            logger.info("ready1")
+
+        elif typ == MSG_READY and who == self.peer_id:
+            self.peer_ready = True
+            self.peer_ready_event.set()
+            logger.info("ready2")
+
+        elif typ == MSG_GO:
+            self.start_at = float(d["start_at"])
+            if "dist" in d:
+                self.path_len = float(d["dist"])
+            self.go_event.set()
+            logger.info("go")
+
+        elif typ == MSG_ABORT:
+            self.aborted = True
+            self.abort_event.set()
+            self.motion.stop()
+            self.ack_event.set()
+            self.peer_ready_event.set()
+            self.go_event.set()
+            logger.warning("Received ABORT from other robots. Stopping...")
+
+
     # ... 其他方法保持不变 ...
 
     def _main(self):
