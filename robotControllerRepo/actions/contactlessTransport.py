@@ -54,11 +54,11 @@ def plan_formation(particle_xy, target_xy):
     px, py = particle_xy
     tx, ty = target_xy
 
-    phi = math.atan2(ty - py, tx - px) # 45 degree
+    phi = -math.atan2(ty - py, tx - px) # 45 degree
 
     r1_x = GAP + LENGTH/2 - px
     r1_y = -(GAP + WIDTH/2 -py)
-    r1_heading = phi
+    r1_heading = phi + math.pi
 
     r2_x = -(GAP + LENGTH/2 - px)
     r2_y = GAP + WIDTH/2 -py
