@@ -168,6 +168,22 @@ class TransportManager:
         self.worker = threading.Thread(target=self._main, daemon=True)
         self.worker.start()
 
+    def _publish(self, typ, payload):
+        msg = String()
+        msg.data = json.dumps({"type": typ, **payload, "ts": time.time()})
+        self.pub.publish(msg)
+
+    def _abort(self, reason: str):
+        if not self.aborted:
+            self.aborted = True
+            self._publish(MSG_ABORT, {"who": self.robot_id, "reason": reason})
+            self.node.get_logger().error(f"ABORT: {reason}")
+        self.motion.stop()
+        self.abort_event.set()
+        self.ack_event.set()
+        self.peer_ready_event.set()
+        self.go_event.set()
+
     def on_bus(self, msg: String):
         try:
             d = json.loads(msg.data)
