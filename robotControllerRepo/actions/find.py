@@ -101,17 +101,33 @@ class SimpleDetectionFilter:
     def __init__(self, confidence_boost: float = 0.1):
         self.confidence_boost = confidence_boost
 
-    def pick_best(self, detections: List[Dict], item: str, conf_thres: float) -> Optional[Dict]:
-        cands = [d for d in detections if d.get("class") == item and d.get("conf", 0.0) >= conf_thres]
+    def pick_best(
+        self,
+        detections: List[Dict],
+        item: str,
+        conf_thres: float,
+        image_size: Optional[tuple] = None  # <-- 新增
+    ) -> Optional[Dict]:
+        # 严格等于匹配（不做任何归一化/别名）
+        cands = [
+            d for d in detections
+            if d.get("class") == item and d.get("conf", 0.0) >= conf_thres
+        ]
         if not cands:
             return None
 
-        image_center = [320, 240]
+        # 用真实图像中心（来自 yolo_perception 返回的 image.width/height）
+        if image_size and all(isinstance(v, (int, float)) for v in image_size):
+            image_center = [float(image_size[0]) / 2.0, float(image_size[1]) / 2.0]
+        else:
+            # 兜底值（不会影响匹配规则，只影响中心加分）
+            image_center = [320.0, 240.0]
+
         best, best_score = None, -1e9
         for d in cands:
             conf = float(d.get("conf", 0.0))
-            cx, cy = d.get("center_xy", [0, 0])
-            x1, y1, x2, y2 = d.get("bbox_xyxy", [0, 0, 0, 0])
+            cx, cy = d.get("center_xy", [0.0, 0.0])
+            x1, y1, x2, y2 = d.get("bbox_xyxy", [0.0, 0.0, 0.0, 0.0])
             w, h = max(0.0, x2 - x1), max(0.0, y2 - y1)
             area = w * h
 
@@ -119,9 +135,13 @@ class SimpleDetectionFilter:
             if conf > 0.8: score += 2 * self.confidence_boost
             elif conf > 0.6: score += self.confidence_boost
 
+            # 中心加分用真实分辨率的中心，避免 1640x1232 时中心偏移
+            # 归一化一下距离，避免分辨率不同带来的尺度差异
+            norm = max(image_center[0], image_center[1], 1e-6)
             center_dist = math.hypot(cx - image_center[0], cy - image_center[1])
-            score += max(0.0, (1.0 - center_dist / 200.0) * 0.1)
+            score += max(0.0, (1.0 - center_dist / norm) * 0.1)
 
+            # 尺寸/长宽比的轻微正则（不改你的门槛逻辑）
             if 500 < area < 50000: score += 0.05
             if h > 0:
                 ar = w / h
@@ -260,10 +280,23 @@ def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
         return None
 
     detections = result.get("result", {}).get("detections", []) or []
-    best = SimpleDetectionFilter(0.1).pick_best(detections, item=item, conf_thres=conf_thres)
+    img = result.get("result", {}).get("image", {}) or {}
+    image_size = (img.get("width"), img.get("height")) if ("width" in img and "height" in img) else None
+
+    # —— 调试：打印 top5 ——（严格显示 YOLO 返回的原始类名）
+    if detections:
+        top = sorted(detections, key=lambda d: d.get("conf", 0.0), reverse=True)[:5]
+        logger.info("[find] det top5: " + ", ".join(
+            f"{d.get('class','?')}@{d.get('conf',0.0):.2f}" for d in top
+        ))
+
+    best = SimpleDetectionFilter(0.1).pick_best(
+        detections, item=item, conf_thres=conf_thres, image_size=image_size
+    )
     if best:
         best["detection_method"] = "single_frame_filtered"
     return best
+
 
 # ========= find（仅三参，无 ctx） =========
 def execute_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
