@@ -40,7 +40,7 @@ PARTICLE = (0.0, -700.0)     # 微粒点坐标
 TARGET   = (700.0, -1400.0)    # 目标点坐标
 GAP = 76 
 LENGTH = 138
-WIDTH = 188
+WIDTH = 200
 SPEED    = 0.02
 
 # 超时配置（秒）
