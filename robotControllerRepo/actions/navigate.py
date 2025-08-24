@@ -606,6 +606,9 @@ def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, ta
     """Simplified navigation interface"""
     return navigate_to_target(node, executor, robot_name, target)
 
+# ============================================================================
+# Special navigation function for after follow
+# ============================================================================
 def navigate_after_follow(node: Node, robot_name: str, item: str, executor):
     """
     after find the item

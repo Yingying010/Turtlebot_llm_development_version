@@ -61,23 +61,23 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
             return face_run(node, robot, params["target"], executor)
 
         elif action == "pickup":
-            return pickup_item(node, robot, params["item"], executor)
+            return pickup_item(params["item"])
 
         elif action == "dropoff":
             return dropoff_item(params["item"])
-
-        elif action == "wait":
-            duration = params.get("duration_sec", 1.0)
-            logger.info(f"Waiting for {duration} seconds")
-            time.sleep(duration)
-            return True
-
+        
         elif action == "contactless_transport":
             return execute_contactless_transport(node, executor, robot, params)
 
         elif action == "find":
             result = execute_find(node, robot, params)
             return result.get("ok", False)
+
+        elif action == "wait":
+            duration = params.get("duration_sec", 1.0)
+            logger.info(f"Waiting for {duration} seconds")
+            time.sleep(duration)
+            return True
 
         else:
             logger.error(f"❌ Unknown action: {action}")

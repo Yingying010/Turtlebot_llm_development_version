@@ -1,17 +1,19 @@
 # find.py
 # -*- coding: utf-8 -*-
-import os
+import os, sys, time
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from ttsRepo.stream_tts import tts_manager
 import json
 import time
 import cv2
 import math
-import threading
 import subprocess
-import numpy as np
 from typing import Any, Dict, List, Optional
-from collections import Counter
 import config
 from ttsRepo.stream_tts import tts_manager
+from robotControllerRepo.actions.navigate import navigate_after_follow
+from robotControllerRepo.actions.pickup import pickup_item
+from robotControllerRepo.actions.dropoff import dropoff_item
 
 # 简单的日志工具
 class SimpleLogger:
@@ -911,5 +913,56 @@ def execute_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     if not robot:
         return {"ok": False, "reason": "robot name missing"}
     
-    # 使用智能LLM重规划版本
-    return execute_find_with_llm_replanning(node, robot, task.get("parameters", {}), **ctx)
+    # 得到LLM重规划版本
+    replanning_result = execute_find_with_llm_replanning(node, robot, task.get("parameters", {}), **ctx)
+
+    if not replanning_result.get("found", False):
+        return replanning_result
+    
+    follow_ups = replanning_result.get("follow_up_tasks", [])
+    if follow_ups:
+        logger.info(f"[find] Executing {len(follow_ups)} follow-up tasks for {robot}")
+        tts_manager.say("Now executing follow-up tasks")
+
+        for i, sub_task in enumerate(follow_ups, 1):
+            action = sub_task["action"]
+            parameters = sub_task["parameters"]
+            logger.info(f"[find] 📋 Follow-up {i}/{len(follow_ups)} → action={action} parameters={parameters}")
+
+            try:
+                if action == "navigate":
+                    target = parameters.get("target")
+                    if target is not None:
+                        logger.info(f"[find] 🚗 Navigating to {target}")
+                        navigate_after_follow(node, robot, target)
+
+                elif action == "pickup":
+                    item = parameters.get("item")
+                    if item:
+                        logger.info(f"[find] ✋ Pickup: {item}")
+                        success = pickup_item(item)
+                        if not success:
+                            logger.warning(f"[find] ❌ Pickup failed")
+                    else:
+                        logger.warning(f"[find] ⚠️ Pickup missing item name")
+
+                elif action == "dropoff":
+                    item = parameters.get("item")
+                    if item:
+                        logger.info(f"[find] 📦 Dropoff: {item}")
+                        success = dropoff_item(item)
+                        if not success:
+                            logger.warning(f"[find] ❌ Dropoff failed")
+                    else:
+                        logger.warning(f"[find] ⚠️ Dropoff missing item name")
+
+                else:
+                    logger.warning(f"[find] ⚠️ Unsupported follow-up action: {action}")
+
+            except Exception as e:
+                logger.exception(f"[find] ❌ Error during follow-up task: {e}")
+
+        tts_manager.say("All follow-up tasks completed")
+
+    return replanning_result
+
