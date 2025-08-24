@@ -36,12 +36,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from robotControllerRepo.actions.navigate import navigate_to_target, get_current_position
 
 # ===== 全局参数（直接改这里就行） =====
-PARTICLE = (0.0, -700.0)     # 微粒点坐标
-TARGET   = (700.0, -1400.0)    # 目标点坐标
+PARTICLE = (0.0, -500.0)     # 微粒点坐标
+TARGET   = (500.0, -1000.0)    # 目标点坐标
 GAP = 70 
 LENGTH = 138
 WIDTH = 178
-SPEED    = 0.1
+SPEED    = 0.05
 
 # 超时配置（秒）
 NAV_TIMEOUT_SEC          = 60.0   # Phase 2 导航总超时
