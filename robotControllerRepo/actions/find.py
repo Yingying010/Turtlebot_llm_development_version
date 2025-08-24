@@ -907,7 +907,7 @@ def create_llm_replanning_function():
     return llm_replanning_function
 
 # -------- 对外接口 --------
-def execute_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
+def run_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     """与 robot_controller 的单步接口保持一致"""
     robot = task.get("robot") or task.get("parameters", {}).get("robot")
     if not robot:

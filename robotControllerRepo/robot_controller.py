@@ -19,9 +19,8 @@ from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.pickup import pickup_item
 from robotControllerRepo.actions.dropoff import dropoff_item
-from robotControllerRepo.actions.find import execute_find
+from robotControllerRepo.actions.find import run_find
 from robotControllerRepo.actions.contactlessTransport import TransportManager
-from llmParserRepo.yolo_perception import detect_once
 
 # === Global ===
 _transport_managers = {}
@@ -70,7 +69,7 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
             return execute_contactless_transport(node, executor, robot, params)
 
         elif action == "find":
-            result = execute_find(node, robot, params)
+            result = run_find(node, robot, params)
             return result.get("ok", False)
 
         elif action == "wait":
