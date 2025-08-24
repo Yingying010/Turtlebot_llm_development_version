@@ -1,14 +1,5 @@
 # find.py
 # -*- coding: utf-8 -*-
-"""
-独立版通用"查找"动作模块 - 避免循环导入
-- 旋转扫描 + 多点搜索 + 智能摄像头处理
-- 🆕 添加单帧滤波机制，替代多帧检测提升速度
-- 智能LLM重规划：根据对话历史决定后续动作
-- 命中后把目标信息写入黑板（/tmp/robot_blackboard_<robot>.json）
-- 完全独立，不依赖其他模块的复杂导入
-"""
-
 import os
 import json
 import time
@@ -822,42 +813,47 @@ def create_llm_replanning_function():
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
-            2. Collect the object 
-            3. Collect and deliver the object to someone
+            2. pickup the object 
+            3. pickup and deliver the object to someone (requires navigate in between)
             4. Other specific actions
 
-            Use exact parameter format:
-            
-            For "collect" action:
-            {{
-                "action": "collect",
-                "parameters": {{
-                    "item": "<object_class>"
-                }}
-            }}
-            
-            For "deliver" action:
-            {{
-                "action": "deliver", 
-                "parameters": {{
-                    "item": "<object_class>"
-                }}
-            }}
+            ========================
+            Action Definitions
+            ========================
+            1. navigate  
+            - To a named target: {{"target": "<target_name>"}}  
+            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
 
-            Respond in JSON format:
+            2. pickup  
+            - Pick up an item: {{"item": "<item>"}}
+
+            3. dropoff  
+            - Drop off an item: {{"item": "<item>"}}
+
+            ========================
+            Important Rules
+            ========================
+            - When the user says "bring to me" or "deliver to <person>", the action sequence MUST be:
+            1) pickup the item  
+            2) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
+            3) dropoff the item  
+
+            - Do NOT skip the navigate step before dropoff.
+            - The output must always follow strict JSON format:
+
             {{
                 "action_needed": true/false,
                 "tasks": [
                     {{
-                        "action": "collect|deliver|navigate|face|wait",
+                        "action": "pickup|navigate|dropoff|wait",
                         "parameters": {{ ... }}
                     }}
                 ],
                 "reasoning": "Brief explanation"
             }}
 
-            When user says "bring to me", use "{get_master_name()}" as the target.
             """).strip()
+
 
             # 构建对话历史字符串
             history_text = ""

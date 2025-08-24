@@ -19,8 +19,18 @@ from robotControllerRepo.actions.navigate import navigate_to_target
 
 semantic_locations = config.get("semantic_locations")
 
+
+def execute_dropoff(item: str):
+    # simulation deliver part
+    is_successful = False
+    print(f"🗣️ Speaking: I am delivering {item}")
+    tts_manager.say_sync(f"I am delivering {item}")
+    time.sleep(3)  # 模拟送达时间
+    tts_manager.say_sync(f"{item} delivered successfully")
+    return is_successful
+
 # === 执行 deliver 行为 ===
-def deliver_item(node: Node, robot_name: str, item: str, executor):
+def dropoff_item(node: Node, robot_name: str, item: str, executor):
     """
     送达物品 - 自动导航到主人位置并送达
     
@@ -73,7 +83,7 @@ def deliver_item(node: Node, robot_name: str, item: str, executor):
     return True
 
 # === 🧪 独立测试主函数 ===
-def run_deliver_test():
+def run_dropoff_test():
     """运行 deliver 独立测试"""
     print("🤖 DELIVER.PY STANDALONE TEST")
     print("=" * 50)
@@ -107,7 +117,7 @@ def run_deliver_test():
         
         # 🔥 执行真实的deliver测试
         print(f"\n🧪 Starting deliver test...")
-        result = deliver_item(
+        result = dropoff_item(
             node=node,
             robot_name=robot_name,
             item=item_name,
@@ -164,5 +174,5 @@ if __name__ == "__main__":
     print("  2. Configure master_id in config.json")
     print("")
     
-    success = run_deliver_test()
+    success = run_dropoff_test()
     exit(0 if success else 1)

@@ -62,7 +62,7 @@ This approach ensures that follow-up actions are based on the actual object loca
 Semantic Mapping Rules for Spatial References
 ========================
 When processing spatial references in commands:
-- "here" / "come here" / "过来" → refers to the master's current location, use master's name as target
+- "here" / "come here"  → refers to the master's current location, use master's name as target
 - "there" / "go there" → requires specific location context
 - "my location" / "where I am" → refers to the master's current location
 - "your location" / "where you are" → refers to the robot's current location
@@ -128,10 +128,10 @@ Supported Actions and Parameters
 1. navigate  
    - To a named target: {"target": "<target_name>"}  
    - To coordinates: {"position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
-2. collect  
-   - Collect an item (robot should already be at the location): {"item": "<item>"}
-3. deliver  
-   - Deliver an item (robot should already be at the destination): {"item": "<item>"}
+2. pickup
+   - Pick up an item : {"item": "<item>"}
+3. dropoff  
+   - Drop off an item : {"item": "<item>"}
 4. find  
    - Search for an object: {
        "target_class": "<object_name>", 
@@ -161,7 +161,7 @@ Note:
 - Numeric values must match the text exactly (preserve signs)
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
-- The collect and deliver actions do not include any movement or navigation. If the robot is not already at the correct location (e.g., table, another robot, or the user), a separate navigate task must be added explicitly before the collect or deliver step.
+- The pickup and dropoff actions do not include any movement or navigation. If the robot is not already at the correct location (e.g., table, another robot, or the user), a separate navigate task must be added explicitly before the collect or deliver step.
 - If the user manual mentions the need for contactless transport of small items, then the operation is contactless_transport. And once contactless_transport is executed, it must be a synchronous task.
 - **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
