@@ -38,7 +38,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target, get_current
 # ===== 全局参数（直接改这里就行） =====
 PARTICLE = (0.0, -700.0)     # 微粒点坐标
 TARGET   = (700.0, -1400.0)    # 目标点坐标
-GAP = 70 
+GAP = 65 
 LENGTH = 138
 WIDTH = 178
 SPEED    = 0.02
