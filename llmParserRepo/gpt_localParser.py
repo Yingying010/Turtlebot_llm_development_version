@@ -15,7 +15,7 @@ from ttsRepo.stream_tts import tts_manager
 import config
 
 import robotControllerRepo.robot_scheduler as robot_scheduler
-from yolo_perception import detect_once as yolo_detect_once
+from llmParserRepo.yolo_perception import detect_once as yolo_detect_once
 
 
 
