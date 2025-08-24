@@ -38,13 +38,13 @@ class SimpleDetectionFilter:
         self.position_penalty_threshold = position_penalty_threshold
         logger.info(f"🔍 Simple filter initialized: boost={confidence_boost}, threshold={position_penalty_threshold}")
     
-    def filter_detections(self, detections: List[Dict], target_class: str, conf_thres: float) -> Optional[Dict]:
+    def filter_detections(self, detections: List[Dict], item: str, conf_thres: float) -> Optional[Dict]:
         """
         对单帧检测结果进行滤波
         
         Args:
             detections: 当前帧的所有检测结果
-            target_class: 目标类别
+            item: 目标类别
             conf_thres: 置信度阈值
         
         Returns:
@@ -53,7 +53,7 @@ class SimpleDetectionFilter:
         # 过滤出目标类别且满足置信度的检测
         valid_detections = [
             d for d in detections 
-            if d.get("class") == target_class and d.get("conf", 0) >= conf_thres
+            if d.get("class") == item and d.get("conf", 0) >= conf_thres
         ]
         
         if not valid_detections:
@@ -313,13 +313,13 @@ def _test_camera_simple() -> bool:
 # -------- 🆕 基于简单滤波的单帧检测 --------
 def _detect_with_simple_filter(detector: StandaloneYOLODetector,
                               filter_obj: SimpleDetectionFilter,
-                              target_class: str, 
+                              item: str, 
                               conf_thres: float) -> Optional[Dict]:
     """使用简单滤波器的单帧检测"""
     if not detector.available:
         return None
     
-    logger.debug(f"[find] 📷 Single-frame detection with simple filter for {target_class}")
+    logger.debug(f"[find] 📷 Single-frame detection with simple filter for {item}")
     
     # 获取单帧检测结果
     all_detections = _capture_and_detect(detector, conf_thres * 0.8)  # 稍微降低阈值让滤波器处理
@@ -329,7 +329,7 @@ def _detect_with_simple_filter(detector: StandaloneYOLODetector,
         return None
     
     # 通过简单滤波器处理
-    filtered_result = filter_obj.filter_detections(all_detections, target_class, conf_thres)
+    filtered_result = filter_obj.filter_detections(all_detections, item, conf_thres)
     
     if filtered_result:
         logger.info(f"[find] ✅ Filtered detection: conf={filtered_result.get('conf', 0):.3f}, "
@@ -384,7 +384,7 @@ def _capture_and_detect(detector: StandaloneYOLODetector, conf_thres: float) -> 
 
 # -------- 旧的多帧检测（作为备选） --------
 def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
-                                  target_class: str, 
+                                  item: str, 
                                   conf_thres: float,
                                   num_frames: int = 3,
                                   frame_interval: float = 0.3) -> Optional[Dict]:
@@ -392,7 +392,7 @@ def _detect_with_camera_multiframe(detector: StandaloneYOLODetector,
     if not detector.available:
         return None
     
-    logger.debug(f"[find] 📷 Multi-frame detection: {num_frames} frames for {target_class}")
+    logger.debug(f"[find] 📷 Multi-frame detection: {num_frames} frames for {item}")
     
     all_detections = []
     successful_frames = 0
@@ -401,7 +401,7 @@ def _detect_with_camera_multiframe(detector: StandaloneYOLODetector,
         logger.debug(f"[find] 📸 Capturing frame {frame_idx + 1}/{num_frames}")
         
         frame_detections = _capture_and_detect(detector, conf_thres)
-        targets = [d for d in frame_detections if d.get("class") == target_class and d.get("conf", 0) >= conf_thres]
+        targets = [d for d in frame_detections if d.get("class") == item and d.get("conf", 0) >= conf_thres]
         
         if targets:
             for t in targets:
@@ -429,7 +429,7 @@ def _detect_with_camera_multiframe(detector: StandaloneYOLODetector,
 # -------- 检测方法选择器 --------
 def _detect_with_camera(detector: StandaloneYOLODetector,
                        simple_filter: SimpleDetectionFilter,
-                       target_class: str, 
+                       item: str, 
                        conf_thres: float,
                        use_filter: bool = True,
                        num_frames: int = 1) -> Optional[Dict]:
@@ -437,17 +437,17 @@ def _detect_with_camera(detector: StandaloneYOLODetector,
     if use_filter and num_frames == 1:
         # 🆕 使用简单滤波器的快速单帧检测
         logger.debug(f"[find] Using simple filtered single-frame detection")
-        return _detect_with_simple_filter(detector, simple_filter, target_class, conf_thres)
+        return _detect_with_simple_filter(detector, simple_filter, item, conf_thres)
     else:
         # 传统多帧检测
         logger.debug(f"[find] Using traditional multi-frame detection ({num_frames} frames)")
-        return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames)
+        return _detect_with_camera_multiframe(detector, item, conf_thres, num_frames)
 
 # -------- 分步旋转扫描 --------
 def _rotate_scan_stepwise(robot_name: str,
                          rotate_fn,
                          detect_fn,
-                         target_class: str,
+                         item: str,
                          *,
                          max_rot_deg: int = 360,
                          step_deg: int = 30,
@@ -459,9 +459,9 @@ def _rotate_scan_stepwise(robot_name: str,
     
     # 先检查当前视角
     logger.info(f"[find] 📷 Checking current view first...")
-    hit = detect_fn(target_class, conf_thres) if detect_fn else None
+    hit = detect_fn(item, conf_thres) if detect_fn else None
     if hit:
-        logger.info(f"[find] 🎯 Found {target_class} in current view!")
+        logger.info(f"[find] 🎯 Found {item} in current view!")
         return hit
 
     turned = 0
@@ -482,9 +482,9 @@ def _rotate_scan_stepwise(robot_name: str,
         
         # 检测当前视角
         logger.info(f"[find] 📷 Detecting after rotation...")
-        hit = detect_fn(target_class, conf_thres) if detect_fn else None
+        hit = detect_fn(item, conf_thres) if detect_fn else None
         if hit:
-            logger.info(f"[find] 🎯 Found {target_class} after {turned + step_deg}° rotation!")
+            logger.info(f"[find] 🎯 Found {item} after {turned + step_deg}° rotation!")
             return hit
             
         turned += step_deg
@@ -537,11 +537,11 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any]) -> Dict[str
     hit: Optional[Dict[str, Any]] = None
 
     # 创建检测函数
-    def detect_current_view(target_class: str, conf_threshold: float):
+    def detect_current_view(item: str, conf_threshold: float):
         return _detect_with_camera(
             detector=detector,
             simple_filter=simple_filter,
-            target_class=target_class,
+            item=item,
             conf_thres=conf_threshold,
             use_filter=use_filter,
             num_frames=num_frames
@@ -557,7 +557,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any]) -> Dict[str
             robot_name=robot_name,
             rotate_fn=rotate_fn,
             detect_fn=detect_current_view,
-            target_class=item,
+            item=item,
             conf_thres=conf_thres,
             max_rot_deg=max_rot_deg,
             step_deg=30,
@@ -607,7 +607,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any]) -> Dict[str
 
     # === 处理结果 ===
     if not hit:
-        tts_manager.say("I couldn't find it.")
+        tts_manager.say_sync("I couldn't find it.")
         payload = {"robot": robot_name, "target": item, "found": False, "ts": time.time()}
         if callable(event_pub):
             try:
@@ -644,7 +644,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any]) -> Dict[str
         except Exception as e:
             logger.warning(f"event_pub error: {e}")
 
-    tts_manager.say(f"I found the {item}.")
+    tts_manager.say_sync(f"I found the {item}.")
     logger.info(f"[find] found {item} (key={save_as}, conf={record['conf']:.3f})")
     
     # 🆕 显示滤波信息
@@ -662,7 +662,7 @@ def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[st
     basic_result = execute_find(node, robot_name, params, **ctx)
     
     if not basic_result.get("found", False):
-        logger.info(f"[find] {robot_name} didn't find {params.get('target_class')}, no follow-up actions needed")
+        logger.info(f"[find] {robot_name} didn't find {params.get('item')}, no follow-up actions needed")
         return basic_result
     
     # === find item and replanning ===
@@ -674,14 +674,14 @@ def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[st
         return execute_find_with_simple_replanning(node, robot_name, params, **ctx)
     
     # === 准备上下文信息 ===
-    target_class = params.get("target_class", "cup")
+    item = params.get("item", "cup")
     blackboard_key = basic_result.get("blackboard_key")
     record = basic_result.get("record", {})
     
     # 构建发现物体的上下文
     discovery_context = {
         "found_object": {
-            "class": target_class,
+            "class": item,
             "confidence": record.get("conf", 0.0),
             "position": record.get("center_xy", [0, 0]),
             "blackboard_key": blackboard_key,
@@ -704,7 +704,7 @@ def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[st
             logger.warning(f"[find] Failed to get chat history: {e}")
     
     logger.info(f"[find] Calling LLM for intelligent replanning...")
-    logger.info(f"[find] Context: found {target_class} with conf={record.get('conf', 0):.3f}")
+    logger.info(f"[find] Context: found {item} with conf={record.get('conf', 0):.3f}")
     
     try:
         # === 调用LLM进行智能规划 ===
@@ -764,6 +764,8 @@ def create_llm_replanning_function():
             # === 构建LLM提示 ===
             found_object = discovery_context["found_object"]
             
+            blackboard_key = found_object["blackboard_key"]
+
             system_prompt = dedent(f"""
             You are an intelligent robot task planner. A robot has just found an object and you need to decide what to do next.
 
@@ -771,7 +773,7 @@ def create_llm_replanning_function():
             Master: {get_master_name()}
             Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
             Detection Quality: {found_object["detection_quality"]}
-            Blackboard Key: {found_object["blackboard_key"]}
+            Blackboard Key: {blackboard_key}
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
@@ -783,13 +785,13 @@ def create_llm_replanning_function():
             Action Definitions
             ========================
             1) navigate
-            - To a named target: {"target": "<target_name>"}
+            - To a named target: {{"target": "<target_name>"}}
 
             2) pickup
-            - Pick up an item: {"item": "<item>"}
+            - Pick up an item: {{"item": "<item>"}}
 
             3) dropoff
-            - Drop off an item: {"item": "<item>"}
+            - Drop off an item: {{"item": "<item>"}}
 
             ========================
             Mandatory Planning Rules
@@ -800,7 +802,7 @@ def create_llm_replanning_function():
             B) pickup the item
             C) navigate to the RECIPIENT (person/location)
                 - For "bring to me", use the master name {get_master_name()}:
-                {"action": "navigate", "parameters": {"target": "{get_master_name()}"}}
+                {{"action": "navigate", "parameters": {{"target": "{get_master_name()}"}}}}
             D) dropoff the item
 
             - If the user only says "collect <item>" (no delivery target), the sequence is:
@@ -815,19 +817,19 @@ def create_llm_replanning_function():
             - Do NOT invent extra actions. Keep parameters EXACTLY as defined above.
             - Output strict JSON:
 
-            {
+            {{
             "action_needed": true/false,
             "tasks": [
-                {
+                {{
                 "action": "pickup|navigate|dropoff|wait",
-                "parameters": { ... }
-                }
+                "parameters": {{ ... }}
+                }}
             ],
             "reasoning": "Brief explanation"
-            }
+            }}
 
             When the user says "bring to me", use "{get_master_name()}" as the recipient target.
-            """).strip() % (found_object["blackboard_key"])
+            """).strip()
 
 
             # 构建对话历史字符串
@@ -922,7 +924,7 @@ def run_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     follow_ups = replanning_result.get("follow_up_tasks", [])
     if follow_ups:
         logger.info(f"[find] Executing {len(follow_ups)} follow-up tasks for {robot}")
-        tts_manager.say("Now executing follow-up tasks")
+        tts_manager.say_sync("Now executing follow-up tasks")
 
         for i, sub_task in enumerate(follow_ups, 1):
             action = sub_task["action"]
@@ -962,7 +964,7 @@ def run_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
             except Exception as e:
                 logger.exception(f"[find] ❌ Error during follow-up task: {e}")
 
-        tts_manager.say("All follow-up tasks completed")
+        tts_manager.say_sync("All follow-up tasks completed")
 
     return replanning_result
 
