@@ -191,6 +191,11 @@ def calculate_target_angle(current_pos: Tuple[float, float, float],
 
 def precision_rotate(node: Node, robot_name: str, target_angle_deg: float, 
                     angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 1.0):
+    
+    # initial error compatible
+    if robot_name == "robot1":
+        target_angle_deg += 5.0
+
     """Execute precision rotation using time-based control"""
     _, _, current_heading = get_current_position(robot_name)
     angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
@@ -199,16 +204,10 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
         print(f"[PRECISION_ROTATE] Already aligned: current={current_heading:.1f}deg, "
               f"target={target_angle_deg:.1f}deg, error={angle_diff:.1f}deg")
         return
-    
-    r1_error = 10
-    r2_error = 0
 
-    if robot_name == "robot1":
-        duration_sec = abs(angle_diff)+r1_error / angular_speed_deg_per_s
 
-    if robot_name == "robot2":
-        duration_sec = abs(angle_diff)+r2_error / angular_speed_deg_per_s
-    
+    duration_sec = abs(angle_diff) / angular_speed_deg_per_s
+
     angular_speed_rad_per_s = math.radians(angular_speed_deg_per_s)
     
     twist = Twist()
