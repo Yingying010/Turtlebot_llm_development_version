@@ -37,7 +37,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target, get_current
 
 # ===== 全局参数（直接改这里就行） =====
 PARTICLE = (0.0, -500.0)     # 微粒点坐标
-TARGET   = (1000.0, -1000.0)    # 目标点坐标
+TARGET   = (500.0, -1000.0)    # 目标点坐标
 GAP = 80 
 LENGTH = 138
 WIDTH = 178
@@ -54,7 +54,7 @@ def plan_formation(particle_xy, target_xy):
     px, py = particle_xy
     tx, ty = target_xy
 
-    phi = -math.atan2(ty - py, tx - px) # -45 degree
+    phi = -math.atan2(ty - py, tx - px)
 
     r1_x = GAP + LENGTH/2 - px
     r1_y = py  - (GAP + WIDTH/2)
