@@ -601,7 +601,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     # Step 3: 精细化朝向调整
     current_pos = get_current_position(robot_name)
     target_angle = calculate_target_angle(current_pos, target)
-    fine_rotate_to_target_angle(node, robot_name, target_angle, angular_speed_deg_per_s=3.0)
+    fine_rotate_to_target_angle(node, robot_name, target_angle, angular_speed_deg_per_s=10.0)
 
     # Step 4: 精细化前进（基于坐标计算的固定距离）
     fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.03)
@@ -609,7 +609,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     # ===== 阶段3：最终朝向调整 =====
     if "heading_deg" in target:
         print("🧭 阶段3：最终朝向调整")
-        fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], angular_speed_deg_per_s=2.0)
+        fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], angular_speed_deg_per_s=10.0)
  
     print(f"✅ {robot_name} 精细化导航完成")
 
