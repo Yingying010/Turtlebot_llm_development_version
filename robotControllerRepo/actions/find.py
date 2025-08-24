@@ -52,6 +52,18 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
 # === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
 _HISTORY_PATH = "memory.chattinglog.json"
 
+def get_last_user_message_from_jsonlog(json_path="memory.chattinglog.json") -> str:
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in reversed(lines):
+            data = json.loads(line.strip())
+            if data.get("type") == "user":
+                return data.get("content", "")
+    except Exception as e:
+        print(f"[find.py] Failed to load user message from log: {e}")
+    return ""
+
 def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
     """
     读取最后 max_turns 条 user/assistant 类型的对话，返回
@@ -542,12 +554,6 @@ def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
 
 # ========= find（仅三参，无 ctx） =========
 def execute_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
-    """
-    工作流程：
-      1) 单帧检测
-      2) 若未命中且允许旋转 -> 分步旋转扫描
-      3) 若仍未命中且配置了 waypoints -> 逐点导航 + 单帧检测（必要时半圈扫描）
-    """
     if not item:
         return {"ok": False, "found": False, "reason": "no item"}
 
@@ -647,8 +653,17 @@ def _on_found(robot_name: str, item: str, hit: Dict[str, Any]) -> Dict[str, Any]
     return {"ok": True, "found": True, "blackboard_key": item, "record": record}
 
 # ========= LLM 重规划（与之前相同） =========
-def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str], Dict]:
-    def llm_replanning_function(discovery_context: Dict, chat_history: List[Dict], robot_name: str) -> Dict:
+# find.py
+# ...前面保持不变，略...
+
+# ========= LLM 重规划（已改支持 original_user_command ）=========
+def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], Dict]:
+    def llm_replanning_function(
+        discovery_context: Dict,
+        chat_history: List[Dict],
+        robot_name: str,
+        original_user_command: str
+    ) -> Dict:
         try:
             import os, json
             import openai
@@ -692,10 +707,14 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str], Dict]:
                     f"{m.get('role','unknown')}: {m.get('content','')}" for m in chat_history[-6:]
                 )
 
-            user_prompt = f"""{history_text}
+            user_prompt = dedent(f"""
+            The user originally said: \"{original_user_command}\"
 
-The robot has successfully found a {found_object["class"]}. What should it do next?
-"""
+            {history_text}
+
+            The robot has successfully found a {found_object["class"]}. Based on the user request, what should it do next?
+            """).strip()
+
             resp = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "system", "content": system_prompt},
@@ -729,11 +748,12 @@ The robot has successfully found a {found_object["class"]}. What should it do ne
             return {"success": False, "error": str(e)}
     return llm_replanning_function
 
+
 def execute_find_with_llm_replanning(
     node: Any,
     robot_name: str,
     item: str,
-    llm_replanning_fn: Optional[Callable[[Dict[str, Any], List[Dict[str, str]], str], Dict[str, Any]]] = None,
+    llm_replanning_fn: Optional[Callable[[Dict[str, Any], List[Dict[str, str]], str, str], Dict[str, Any]]] = None,
     history_store: Any = None
 ) -> Dict[str, Any]:
     basic = execute_find(node, robot_name, item)
@@ -767,11 +787,20 @@ def execute_find_with_llm_replanning(
         except Exception as e:
             logger.warning(f"[find] get chat history failed: {e}")
 
+    original_command = get_last_user_message_from_jsonlog()
+    if original_command:
+        logger.info(f"[find] Loaded original user command: {original_command}")
+    else:
+        logger.warning("[find] No recent user command found in chat log.")
+
     logger.info(f"[find] Calling LLM replanning...")
     try:
-        plan = llm_replanning_fn(discovery_context=discovery_context,
-                                 chat_history=chat_history,
-                                 robot_name=robot_name)
+        plan = llm_replanning_fn(
+            discovery_context=discovery_context,
+            chat_history=chat_history,
+            robot_name=robot_name,
+            original_user_command=original_command
+        )
         if plan.get("success") and plan.get("action_needed") and plan.get("tasks"):
             basic["follow_up_tasks"] = plan["tasks"]
             basic["replanning_success"] = True
