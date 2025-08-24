@@ -57,11 +57,11 @@ def plan_formation(particle_xy, target_xy):
     phi = -math.atan2(ty - py, tx - px) # -45 degree
 
     r1_x = GAP + LENGTH/2 - px
-    r1_y = py  - GAP + WIDTH/2
+    r1_y = py  - (GAP + WIDTH/2)
     r1_heading = phi + math.pi
 
     r2_x = -(GAP + LENGTH/2 - px)
-    r2_y = py + GAP + WIDTH/2
+    r2_y = py + (GAP + WIDTH/2)
     r2_heading = phi
 
     # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
