@@ -5,12 +5,14 @@ from typing import Any, Dict, List, Optional, Callable
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+import cv2
+import subprocess
 from loguru import logger
 from ttsRepo.stream_tts import tts_manager
 from robotControllerRepo.actions.navigate import navigate_after_follow
 from robotControllerRepo.actions.pickup import pickup_item
 from robotControllerRepo.actions.dropoff import dropoff_item
-from llmParserRepo.yolo_perception import detect_once as yolo_detect_once
+# from llmParserRepo.yolo_perception import detect_once as yolo_detect_once  # ← 已改为本文件内YOLO链路
 import config
 from geometry_msgs.msg import Twist
 
@@ -46,7 +48,6 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
     db = _bb_read(robot_name)
     db.setdefault("objects", {})[key] = value
     _bb_write(robot_name, db)
-
 
 # === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
 _HISTORY_PATH = "memory.chattinglog.json"
@@ -96,66 +97,288 @@ class _FileHistoryStore:
         return _recent_chat_messages_from_file(self.path, max_turns=max_turns)
 
 
-# ========= 简单单帧滤波器（不需要历史） =========
+# -------- 简单滤波器 --------
 class SimpleDetectionFilter:
-    def __init__(self, confidence_boost: float = 0.1):
+    """简单的单帧检测滤波器，不保存历史记录"""
+    
+    def __init__(self, confidence_boost: float = 0.1, position_penalty_threshold: float = 100.0):
+        """
+        Args:
+            confidence_boost: 对高置信度检测的额外加分
+            position_penalty_threshold: 位置偏差惩罚阈值(像素)
+        """
         self.confidence_boost = confidence_boost
-
-    def pick_best(
-        self,
-        detections: List[Dict],
-        item: str,
-        conf_thres: float,
-        image_size: Optional[tuple] = None  # <-- 新增
-    ) -> Optional[Dict]:
-        # 严格等于匹配（不做任何归一化/别名）
-        cands = [
-            d for d in detections
-            if d.get("class") == item and d.get("conf", 0.0) >= conf_thres
+        self.position_penalty_threshold = position_penalty_threshold
+        logger.info(f"🔍 Simple filter initialized: boost={confidence_boost}, threshold={position_penalty_threshold}")
+    
+    def filter_detections(self, detections: List[Dict], target_class: str, conf_thres: float) -> Optional[Dict]:
+        """
+        对单帧检测结果进行滤波
+        """
+        valid_detections = [
+            d for d in detections 
+            if d.get("class") == target_class and d.get("conf", 0) >= conf_thres
         ]
-        if not cands:
+        if not valid_detections:
             return None
-
-        # 用真实图像中心（来自 yolo_perception 返回的 image.width/height）
-        if image_size and all(isinstance(v, (int, float)) for v in image_size):
-            image_center = [float(image_size[0]) / 2.0, float(image_size[1]) / 2.0]
-        else:
-            # 兜底值（不会影响匹配规则，只影响中心加分）
-            image_center = [320.0, 240.0]
-
-        best, best_score = None, -1e9
-        for d in cands:
-            conf = float(d.get("conf", 0.0))
-            cx, cy = d.get("center_xy", [0.0, 0.0])
-            x1, y1, x2, y2 = d.get("bbox_xyxy", [0.0, 0.0, 0.0, 0.0])
-            w, h = max(0.0, x2 - x1), max(0.0, y2 - y1)
-            area = w * h
-
+        
+        logger.debug(f"🔍 Filter: Processing {len(valid_detections)} valid detections")
+        
+        if len(valid_detections) == 1:
+            result = valid_detections[0].copy()
+            result["filter_score"] = result.get("conf", 0)
+            result["filter_method"] = "single_detection"
+            return result
+        
+        best_detection = self._score_detections(valid_detections)
+        if best_detection:
+            logger.info(f"🎯 Filter selected: conf={best_detection.get('conf', 0):.3f}, "
+                       f"filter_score={best_detection.get('filter_score', 0):.3f}")
+        return best_detection
+    
+    def _score_detections(self, detections: List[Dict]) -> Optional[Dict]:
+        """对检测结果进行评分"""
+        image_center = [320, 240]  # 假设图像中心
+        
+        for det in detections:
+            conf = det.get("conf", 0)
+            center_xy = det.get("center_xy", [0, 0])
+            bbox_xyxy = det.get("bbox_xyxy", [0, 0, 0, 0])
+            
+            # 基础分数：置信度
             score = conf
-            if conf > 0.8: score += 2 * self.confidence_boost
-            elif conf > 0.6: score += self.confidence_boost
-
-            # 中心加分用真实分辨率的中心，避免 1640x1232 时中心偏移
-            # 归一化一下距离，避免分辨率不同带来的尺度差异
-            norm = max(image_center[0], image_center[1], 1e-6)
-            center_dist = math.hypot(cx - image_center[0], cy - image_center[1])
-            score += max(0.0, (1.0 - center_dist / norm) * 0.1)
-
-            # 尺寸/长宽比的轻微正则（不改你的门槛逻辑）
-            if 500 < area < 50000: score += 0.05
-            if h > 0:
-                ar = w / h
-                score += 0.05 if 0.3 < ar < 3.0 else -0.05
-
-            if score > best_score:
-                best_score = score
-                best = dict(d)
-                best["filter_score"] = score
-                best["filter_method"] = "single_frame_simple"
-
-        if best is None or best_score < 0.4:
+            
+            # 1) 高置信度加分
+            if conf > 0.8:
+                score += self.confidence_boost * 2
+            elif conf > 0.6:
+                score += self.confidence_boost
+            
+            # 2) 中心加分
+            center_distance = math.sqrt(
+                (center_xy[0] - image_center[0])**2 + 
+                (center_xy[1] - image_center[1])**2
+            )
+            center_bonus = max(0, (1 - center_distance / 200.0) * 0.1)
+            score += center_bonus
+            
+            # 3) 面积合理性
+            bbox_width = bbox_xyxy[2] - bbox_xyxy[0]
+            bbox_height = bbox_xyxy[3] - bbox_xyxy[1]
+            bbox_area = bbox_width * bbox_height
+            if 500 < bbox_area < 50000:
+                score += 0.05
+            elif bbox_area < 100 or bbox_area > 100000:
+                score -= 0.1
+            
+            # 4) 长宽比合理性
+            if bbox_height > 0:
+                aspect_ratio = bbox_width / bbox_height
+                if 0.3 < aspect_ratio < 3.0:
+                    score += 0.05
+                else:
+                    score -= 0.05
+            
+            det["filter_score"] = score
+            logger.debug(f"🔍 Detection score: conf={conf:.3f}, center_bonus={center_bonus:.3f}, "
+                        f"area={bbox_area:.0f}, final_score={score:.3f}")
+        
+        best_det = max(detections, key=lambda x: x.get("filter_score", 0))
+        if best_det.get("filter_score", 0) < 0.4:
+            logger.debug(f"🔍 Best detection score {best_det.get('filter_score', 0):.3f} below threshold 0.4")
             return None
-        return best
+        
+        best_det["filter_method"] = "scored_selection"
+        return best_det
+
+# -------- 独立的YOLO检测器 --------
+class StandaloneYOLODetector:
+    """独立的YOLO检测器，不依赖外部模块"""
+    def __init__(self, weights_path: str = "yolov8n.pt"):
+        try:
+            from ultralytics import YOLO
+            self.model = YOLO(weights_path)
+            self.available = True
+            logger.info(f"YOLO model loaded: {weights_path}")
+        except Exception as e:
+            logger.error(f"Failed to load YOLO: {e}")
+            self.model = None
+            self.available = False
+    
+    def detect_objects(self, image_path_or_array, conf_threshold: float = 0.5) -> List[Dict]:
+        """检测图像中的物体"""
+        if not self.available:
+            return []
+        
+        try:
+            results = self.model.predict(
+                source=image_path_or_array,
+                conf=conf_threshold,
+                verbose=False
+            )[0]
+            
+            detections = []
+            names = results.names
+            
+            for box in getattr(results, "boxes", []):
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = float(box.conf[0])
+                cls_id = int(box.cls[0])
+                cx = (x1 + x2) / 2.0
+                cy = (y1 + y2) / 2.0
+                cls_name = names.get(cls_id, str(cls_id)).lower()
+                
+                detections.append({
+                    "class": cls_name,
+                    "conf": conf,
+                    "center_xy": [cx, cy],
+                    "bbox_xyxy": [x1, y1, x2, y2]
+                })
+            
+            return detections
+            
+        except Exception as e:
+            logger.error(f"YOLO detection failed: {e}")
+            return []
+
+def _create_video_capture(video_source: int = 0):
+    """尝试打开摄像头（多后端），返回可用的 cap 或 None"""
+    backends = [cv2.CAP_V4L2, cv2.CAP_GSTREAMER, cv2.CAP_FFMPEG, cv2.CAP_ANY]
+    for be in backends:
+        cap = cv2.VideoCapture(video_source, be)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                return cap
+            cap.release()
+    return None
+
+def _capture_and_detect(detector: StandaloneYOLODetector, conf_thres: float) -> List[Dict]:
+    """拍照并检测，返回所有检测结果"""
+    # 优先使用rpicam-still拍照（针对树莓派）
+    try:
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        img_path = f"/tmp/find_frame_{ts}.jpg"
+        
+        subprocess.run([
+            "rpicam-still", "-t", "300",  # 快速拍照
+            "--width", "640", "--height", "480",
+            "-o", img_path
+        ], capture_output=True, check=True, timeout=2)
+        
+        if os.path.exists(img_path):
+            all_detections = detector.detect_objects(img_path, conf_thres)
+            os.remove(img_path)  # 清理临时文件
+            return all_detections
+        
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        logger.debug(f"[find] rpicam-still failed, trying OpenCV...")
+        
+        # 回退到OpenCV
+        cap = _create_video_capture(0)
+        if cap:
+            try:
+                # 少读几帧加快速度
+                for _ in range(2):
+                    cap.read()
+                    
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    all_detections = detector.detect_objects(frame, conf_thres)
+                    return all_detections
+            finally:
+                cap.release()
+    
+    return []
+
+def _detect_with_simple_filter(detector: StandaloneYOLODetector,
+                              filter_obj: SimpleDetectionFilter,
+                              target_class: str, 
+                              conf_thres: float) -> Optional[Dict]:
+    """使用简单滤波器的单帧检测"""
+    if not detector.available:
+        return None
+    
+    logger.debug(f"[find] 📷 Single-frame detection with simple filter for {target_class}")
+    
+    # 获取单帧检测结果（稍微放宽阈值，让滤波器打分挑选）
+    all_detections = _capture_and_detect(detector, conf_thres * 0.8)
+    if not all_detections:
+        logger.debug(f"[find] 📷 No raw detections in current frame")
+        return None
+    
+    # 通过简单滤波器处理
+    filtered_result = filter_obj.filter_detections(all_detections, target_class, conf_thres)
+    
+    if filtered_result:
+        logger.info(f"[find] ✅ Filtered detection: conf={filtered_result.get('conf', 0):.3f}, "
+                   f"filter_score={filtered_result.get('filter_score', 0):.3f}")
+        filtered_result["detection_method"] = "single_frame_filtered"
+        filtered_result["filter_used"] = True
+        return filtered_result
+    
+    logger.debug(f"[find] 🔍 Filter rejected all detections")
+    return None
+
+def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
+                                  target_class: str, 
+                                  conf_thres: float,
+                                  num_frames: int = 3,
+                                  frame_interval: float = 0.3) -> Optional[Dict]:
+    """传统多帧检测（备选方法）"""
+    if not detector.available:
+        return None
+    
+    logger.debug(f"[find] 📷 Multi-frame detection: {num_frames} frames for {target_class}")
+    
+    all_detections = []
+    successful_frames = 0
+    
+    for frame_idx in range(num_frames):
+        logger.debug(f"[find] 📸 Capturing frame {frame_idx + 1}/{num_frames}")
+        
+        frame_detections = _capture_and_detect(detector, conf_thres)
+        targets = [d for d in frame_detections if d.get("class") == target_class and d.get("conf", 0) >= conf_thres]
+        
+        if targets:
+            for t in targets:
+                t["frame_idx"] = frame_idx
+            all_detections.extend(targets)
+            successful_frames += 1
+            
+        if frame_idx < num_frames - 1:
+            time.sleep(frame_interval)
+    
+    logger.info(f"[find] 📊 Multi-frame: {successful_frames}/{num_frames} frames, {len(all_detections)} detections")
+    
+    if not all_detections:
+        return None
+    
+    best_detection = max(all_detections, key=lambda x: x.get("conf", 0))
+    best_detection["detection_method"] = "multiframe"
+    best_detection["detection_count"] = len(all_detections)
+    best_detection["successful_frames"] = successful_frames
+    return best_detection
+
+def _detect_with_camera(detector: StandaloneYOLODetector,
+                       simple_filter: SimpleDetectionFilter,
+                       target_class: str, 
+                       conf_thres: float,
+                       use_filter: bool = True,
+                       num_frames: int = 1) -> Optional[Dict]:
+    """检测方法选择器"""
+    if use_filter and num_frames == 1:
+        logger.debug(f"[find] Using simple filtered single-frame detection")
+        return _detect_with_simple_filter(detector, simple_filter, target_class, conf_thres)
+    else:
+        logger.debug(f"[find] Using traditional multi-frame detection ({num_frames} frames)")
+        return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames)
+
+
 
 # ========= 参数优化 =========
 def get_optimized_params(item: str) -> float:
@@ -270,32 +493,51 @@ def _rotate_scan_stepwise(node: Any,
     return None
 
 # ========= 单帧检测 =========
+_DETECTOR_SINGLETON: Optional[StandaloneYOLODetector] = None
+_FILTER_SINGLETON: Optional[SimpleDetectionFilter] = None
+
+def _get_detector() -> StandaloneYOLODetector:
+    global _DETECTOR_SINGLETON
+    if _DETECTOR_SINGLETON is None:
+        _DETECTOR_SINGLETON = StandaloneYOLODetector()
+    return _DETECTOR_SINGLETON
+
+def _get_filter() -> SimpleDetectionFilter:
+    global _FILTER_SINGLETON
+    if _FILTER_SINGLETON is None:
+        _FILTER_SINGLETON = SimpleDetectionFilter(confidence_boost=0.1)
+    return _FILTER_SINGLETON
+
 def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
-    if yolo_detect_once is None:
-        logger.error("❌ detect_once 不可用（未能导入 yolo_perception）")
+    """
+    使用 StandaloneYOLODetector 拍一帧并通过 SimpleDetectionFilter 选出最佳目标。
+    （取代 yolo_perception.detect_once 方案）
+    """
+    detector = _get_detector()
+    if not detector.available:
+        logger.error("❌ YOLO detector unavailable")
         return None
 
-    result = yolo_detect_once()
-    if not result:
-        return None
-
-    detections = result.get("result", {}).get("detections", []) or []
-    img = result.get("result", {}).get("image", {}) or {}
-    image_size = (img.get("width"), img.get("height")) if ("width" in img and "height" in img) else None
-
-    # —— 调试：打印 top5 ——（严格显示 YOLO 返回的原始类名）
-    if detections:
-        top = sorted(detections, key=lambda d: d.get("conf", 0.0), reverse=True)[:5]
-        logger.info("[find] det top5: " + ", ".join(
-            f"{d.get('class','?')}@{d.get('conf',0.0):.2f}" for d in top
-        ))
-
-    best = SimpleDetectionFilter(0.1).pick_best(
-        detections, item=item, conf_thres=conf_thres, image_size=image_size
+    # 直接走“单帧 + 简单滤波”的检测路径
+    hit = _detect_with_simple_filter(
+        detector=detector,
+        filter_obj=_get_filter(),
+        target_class=item,
+        conf_thres=conf_thres
     )
-    if best:
-        best["detection_method"] = "single_frame_filtered"
-    return best
+
+    # 调试日志：若没命中，打印这一帧 top5（原始类名，便于排查）
+    if hit is None:
+        dets = _capture_and_detect(detector, conf_thres * 0.8) or []
+        if dets:
+            top = sorted(dets, key=lambda d: d.get("conf", 0.0), reverse=True)[:5]
+            logger.info("[find] det top5: " + ", ".join(
+                f"{d.get('class','?')}@{d.get('conf',0.0):.2f}" for d in top
+            ))
+    else:
+        hit["detection_method"] = "single_frame_filtered"
+
+    return hit
 
 
 # ========= find（仅三参，无 ctx） =========
