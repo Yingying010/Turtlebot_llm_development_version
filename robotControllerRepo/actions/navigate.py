@@ -194,7 +194,7 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
     
     # initial error compatible
     if robot_name == "robot1":
-        target_angle_deg += 5.0
+        target_angle_deg -= 5.0
 
     """Execute precision rotation using time-based control"""
     _, _, current_heading = get_current_position(robot_name)
