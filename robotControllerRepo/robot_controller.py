@@ -1,3 +1,4 @@
+# 在文件顶部添加导入
 import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
@@ -18,27 +19,35 @@ from robotControllerRepo.actions.find import run_action as run_find
 from robotControllerRepo.actions.find import execute_find_with_llm_replanning, create_llm_replanning_function
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
+# 🔥 新增：导入协作运输模块
+from robotControllerRepo.actions.contactlessTransport import TransportManager
 from llmParserRepo.gpt_yolo_localParser import detect_once, HistoryStore, MEMORY_PATH
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
-def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
+# 🔥 新增：全局存储运输管理器实例，避免重复创建
+_transport_managers = {}
+
+def normalize_task_parameters(task: Dict) -> Dict:
     """
     标准化LLM生成的任务参数格式，确保与robot_controller兼容
-    
-    Args:
-        task: LLM生成的任务 {"action": "...", "parameters": {...}}
-        robot_name: 机器人名称
-    
-    Returns:
-        标准化后的任务
     """
     action = task.get("action", "")
     params = task.get("parameters", {}).copy()
     
-    # 🔧 collect动作参数标准化 - 只保留item参数
-    if action == "collect":
+    # 🔥 新增：contactless_transport动作参数标准化
+    if action == "contactless_transport":
+        # 确保必要的参数存在
+        if "item" not in params:
+            params["item"] = "unknown_item"
+        if "start_position" not in params:
+            params["start_position"] = "table"  # 默认值
+        if "goal_position" not in params:
+            params["goal_position"] = "lucy"   # 默认值
+    
+    # 📧 collect动作参数标准化 - 只保留item参数
+    elif action == "collect":
         # LLM可能生成的格式 → 标准格式
         if "object_id" in params and "item" not in params:
             params["item"] = params.pop("object_id")
@@ -51,7 +60,7 @@ def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
         if "target" in params:
             logger.debug(f"[NORMALIZE] Removing target from collect params: {params.pop('target')}")
     
-    # 🔧 deliver动作参数标准化 - 只保留item参数  
+    # 📧 deliver动作参数标准化 - 只保留item参数  
     elif action == "deliver":
         # LLM可能生成的格式 → 标准格式
         if "object_id" in params and "item" not in params:
@@ -71,21 +80,21 @@ def normalize_task_parameters(task: Dict, robot_name: str) -> Dict:
         if "destination" in params:
             logger.debug(f"[NORMALIZE] Removing destination from deliver params: {params.pop('destination')}")
     
-    # 🔧 navigate动作参数标准化
+    # 📧 navigate动作参数标准化
     elif action == "navigate":
         if "destination" in params and "target" not in params:
             params["target"] = params.pop("destination")
         if "location" in params and "target" not in params:
             params["target"] = params.pop("location")
     
-    # 🔧 face动作参数标准化
+    # 📧 face动作参数标准化
     elif action == "face":
         if "object" in params and "target" not in params:
             params["target"] = params.pop("object")
         if "direction" in params and "target" not in params:
             params["target"] = params.pop("direction")
     
-    # 🔧 wait动作参数标准化
+    # 📧 wait动作参数标准化
     elif action == "wait":
         if "duration" in params and "duration_sec" not in params:
             params["duration_sec"] = params.pop("duration")
@@ -158,6 +167,10 @@ def execute_action(node, executor, task: Dict):
         time.sleep(params["duration_sec"])
         is_successful = True
 
+    # 🔥 新增：协作运输动作处理
+    elif action == "contactless_transport":
+        is_successful = execute_contactless_transport(node, executor, robot, params)
+
     elif action == "find":
         # 🔥 增强版find处理：支持LLM智能重规划和后续任务执行
         is_successful, follow_up_tasks = execute_find_with_followup(node, executor, task)
@@ -170,8 +183,8 @@ def execute_action(node, executor, task: Dict):
             for i, follow_task in enumerate(follow_up_tasks, 1):
                 logger.info(f"📋 Follow-up task {i}/{len(follow_up_tasks)}: {follow_task['action']}")
                 
-                # 🔧 标准化任务参数格式
-                normalized_task = normalize_task_parameters(follow_task, robot)
+                # 📧 标准化任务参数格式
+                normalized_task = normalize_task_parameters(follow_task)
                 
                 # 构建完整的任务对象
                 full_follow_task = {
@@ -258,8 +271,89 @@ def execute_action_single(node, executor, task: Dict):
         time.sleep(duration)
         return True
 
+    # 🔥 新增：协作运输动作处理（单一版本）
+    elif action == "contactless_transport":
+        return execute_contactless_transport(node, executor, robot, params)
+
     else:
         logger.error(f"[SINGLE] Unknown action: {action}")
+        return False
+
+
+# 🔥 新增：协作运输执行函数
+def execute_contactless_transport(node, executor, robot_name: str, params: Dict) -> bool:
+    """
+    执行协作运输任务
+    
+    Args:
+        node: ROS节点
+        executor: ROS执行器
+        robot_name: 机器人名称 (robot1 或 robot2)
+        params: 参数字典，包含 item, start_position, goal_position
+    
+    Returns:
+        bool: 执行是否成功
+    """
+    global _transport_managers
+    
+    try:
+        item = params.get("item", "unknown_item")
+        start_pos = params.get("start_position", "table")
+        goal_pos = params.get("goal_position", "lucy")
+        
+        logger.info(f"🚛 {robot_name}: Starting contactless transport")
+        logger.info(f"   📦 Item: {item}")
+        logger.info(f"   🏁 From: {start_pos} → To: {goal_pos}")
+        
+        tts_manager.say(f"Starting collaborative transport of {item}")
+        
+        # 检查是否已有运输管理器实例
+        transport_key = f"{robot_name}_transport"
+        
+        if transport_key not in _transport_managers:
+            # 创建新的运输管理器实例
+            logger.info(f"🔧 Creating new transport manager for {robot_name}")
+            transport_manager = TransportManager(node, executor, robot_name)
+            _transport_managers[transport_key] = transport_manager
+            
+            # 等待运输完成（检查工作线程状态）
+            # TransportManager的工作线程会自动处理整个流程
+            logger.info(f"⏳ {robot_name}: Waiting for transport completion...")
+            
+            # 等待工作线程完成（最多等待5分钟）
+            transport_manager.worker.join(timeout=300)  
+            
+            if transport_manager.worker.is_alive():
+                logger.error(f"❌ {robot_name}: Transport timeout after 5 minutes")
+                tts_manager.say("Transport operation timed out")
+                return False
+            
+            # 清理管理器实例
+            del _transport_managers[transport_key]
+            
+            if transport_manager.aborted:
+                logger.error(f"❌ {robot_name}: Transport was aborted")
+                tts_manager.say("Transport operation was aborted")
+                return False
+            
+        else:
+            logger.warning(f"⚠️ Transport manager already exists for {robot_name}")
+        
+        logger.info(f"✅ {robot_name}: Contactless transport completed successfully")
+        tts_manager.say(f"Collaborative transport of {item} completed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ {robot_name}: Contactless transport failed: {e}")
+        import traceback
+        traceback.print_exc()
+        tts_manager.say("Transport operation failed due to an error")
+        
+        # 清理失败的管理器实例
+        transport_key = f"{robot_name}_transport"
+        if transport_key in _transport_managers:
+            del _transport_managers[transport_key]
+        
         return False
 
 
@@ -318,7 +412,6 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
         import traceback
         traceback.print_exc()
         return False, []
-
 
 
 def execute_robot_commands(node:Node, robot_id: str, commands: List[Dict], robot_position_cache):

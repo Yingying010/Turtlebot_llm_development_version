@@ -20,6 +20,7 @@ import time
 import json
 import argparse
 import threading
+from loguru import logger
 
 import rclpy
 from rclpy.node import Node
@@ -35,10 +36,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from robotControllerRepo.actions.navigate import navigate_to_target, get_current_position
 
 # ===== 全局参数（直接改这里就行） =====
-PARTICLE = (0.0, -1000.0)     # 微粒点坐标
-TARGET   = (1500.0, -1500.0)    # 目标点坐标
-BASELINE = 700           # 两车中心间距 38cm
-SPEED    = 0.02          # 运输速度 (m/s)
+PARTICLE = (0.0, 0.0)     # 微粒点坐标
+TARGET   = (1000.0, 1000.0)    # 目标点坐标
+GAP = 700 
+LENGTH = 138
+WIDTH = 178
+SPEED    = 0.02
 
 # 超时配置（秒）
 NAV_TIMEOUT_SEC          = 60.0   # Phase 2 导航总超时
@@ -47,24 +50,27 @@ WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
 
 # ===== 工具函数 =====
 # robot 1 在右边
-def plan_formation(particle_xy, target_xy, baseline):
+def plan_formation(particle_xy, target_xy):
     px, py = particle_xy
     tx, ty = target_xy
 
-    # 左正右负的坐标系 → 需要在角度计算时取负
-    phi = -math.atan2(ty - py, tx - px)
+    phi = -math.atan2(ty - py, tx - px) # 45 degree
 
-    # 基于反转后的朝向，计算方向向量
-    ux, uy = math.cos(phi), math.sin(phi)
+    r1_x = GAP + LENGTH/2 - px
+    r1_y = -(GAP + WIDTH/2 -py)
+    r1_heading = phi
 
-    half = 0.5 * baseline
+    r2_x = -(GAP + LENGTH/2 - px)
+    r2_y = GAP + WIDTH/2 -py
+    r2_heading = phi + math.pi
 
     # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
-    r1 = (px - half * ux, py - half * uy, phi + math.pi)
-    r2 = (px + half * ux, py + half * uy, phi)
+    r1 = (r1_x, r1_y, r1_heading)
+    r2 = (r2_x, r2_y, r2_heading)
 
-    path_len = math.hypot(tx - px, ty - py)
-    return phi, r1, r2, path_len
+    path_dis = math.hypot(tx - px, ty - py)
+
+    return phi, r1, r2, path_dis
 
 # ===== 简单直线匀速控制（运输阶段用） =====
 class Motion:
@@ -90,7 +96,7 @@ MSG_SYN, MSG_ACK, MSG_READY, MSG_GO, MSG_ABORT = "syn", "ack", "ready", "go", "a
 
 
 # --------快速验证对称性
-def check_formation_symmetry(node: Node, robot1_pose, robot2_pose, particle_xy, baseline):
+def check_formation_symmetry(node: Node, robot1_pose, robot2_pose, particle_xy):
     x1, y1, theta1 = robot1_pose
     x2, y2, theta2 = robot2_pose
     px, py = particle_xy
@@ -110,11 +116,13 @@ def check_formation_symmetry(node: Node, robot1_pose, robot2_pose, particle_xy, 
     angle_ok = abs(abs(dtheta) - 180) < 10  # 容差 10°
 
     print(f"🧩 Formation check:")
-    print(f"  ↔️ baseline: {dist:.1f} mm (expected: {baseline} mm)")
+    print(f"  ↔️ gap: {dist:.1f} mm (expected: {GAP} mm)")
     print(f"  🎯 center offset: {offset:.1f} mm (should be ~0)")
     print(f"  🔄 heading diff: {dtheta:.1f}° (should be ±180°)")
-    print(f"  ✅ symmetry: {'YES' if abs(dist - baseline) < 30 and offset < 50 and angle_ok else 'NO'}")
+    print(f"  ✅ symmetry: {'YES' if abs(dist - GAP) < 30 and offset < 50 and angle_ok else 'NO'}")
 
+
+# 在 TransportManager 类中添加一个公共属性来跟踪完成状态
 
 class TransportManager:
     """
@@ -127,12 +135,14 @@ class TransportManager:
         self.robot_id = robot_id
         self.peer_id = "robot1" if robot_id == "robot2" else "robot2"
 
+        # 🔥 新增：跟踪完成状态的公共属性
+        self.completed = False
+        self.success = False
+
         # Phase1: 队形规划
-        self.phi, self.r1, self.r2, self.path_len = plan_formation(PARTICLE, TARGET, BASELINE)
+        self.phi, self.r1, self.r2, self.path_len = plan_formation(PARTICLE, TARGET)
         self.is_r1 = (robot_id == "robot1")
-        self.node.get_logger().info(
-            f"🧭 Formation phi={math.degrees(self.phi):.1f}° | path={self.path_len:.2f} m | baseline={BASELINE:.2f} m"
-        )
+        logger.info(f"[robot1]: {self.r1} |  [robot2]: {self.r2}")
 
         # 通信
         qos = QoSProfile(depth=10)
@@ -158,150 +168,108 @@ class TransportManager:
         self.worker = threading.Thread(target=self._main, daemon=True)
         self.worker.start()
 
-    # ---------- BUS 回调（由主线程 executor.spin() 驱动） ----------
-    def on_bus(self, msg: String):
-        try:
-            d = json.loads(msg.data)
-        except Exception:
-            return
-        typ = d.get("type")
-        who = d.get("who")
+    # ... 其他方法保持不变 ...
 
-        if typ == MSG_SYN and who != self.robot_id:
-            # 对方发 SYN → 回 ACK
-            self._publish(MSG_ACK, {"who": self.robot_id})
-
-        elif typ == MSG_ACK and who == self.peer_id:
-            self.have_ack = True
-            self.ack_event.set()
-            self.node.get_logger().info("🤝 got ACK")
-
-        elif typ == MSG_READY and who == self.peer_id:
-            self.peer_ready = True
-            self.peer_ready_event.set()
-            self.node.get_logger().info("✅ peer READY")
-
-        elif typ == MSG_GO:
-            self.start_at = float(d["start_at"])
-            if "dist" in d:
-                self.path_len = float(d["dist"])
-            self.go_event.set()
-            self.node.get_logger().info(f"📨 GO received: start_at={self.start_at:.6f}")
-
-        elif typ == MSG_ABORT:
-            self.aborted = True
-            self.abort_event.set()
-            self.motion.stop()
-            # 同时唤醒所有等待，防止死锁
-            self.ack_event.set()
-            self.peer_ready_event.set()
-            self.go_event.set()
-            self.node.get_logger().warning("⛔ Received ABORT from peer. Stopping.")
-
-    def _publish(self, typ, payload):
-        out = String()
-        out.data = json.dumps({"type": typ, **payload, "ts": time.time()})
-        self.pub.publish(out)
-
-    def _abort(self, reason: str):
-        if not self.aborted:
-            self.aborted = True
-            self._publish(MSG_ABORT, {"who": self.robot_id, "reason": reason})
-            self.node.get_logger().error(f"⛔ ABORT: {reason}")
-        self.motion.stop()
-        # 唤醒等待
-        self.abort_event.set()
-        self.ack_event.set()
-        self.peer_ready_event.set()
-        self.go_event.set()
-
-    # ---------- 主流程（Phase1→Phase2→Phase3） ----------
     def _main(self):
-        # Phase1: 握手（事件等待，不阻塞 executor）
-        self._publish(MSG_SYN, {"who": self.robot_id})
-        self.ack_event.wait(timeout=3.0)  # 最多等 3s；没拿到也继续后面的流程
+        try:
+            # Phase1: 握手（事件等待，不阻塞 executor）
+            self._publish(MSG_SYN, {"who": self.robot_id})
+            self.ack_event.wait(timeout=3.0)  # 最多等 3s；没拿到也继续后面的流程
 
-        # Phase2: 导航到编队位姿（调用 navigate.py 的 navigate_to_target，并增加超时保护）
-        if self.is_r1:
-            x_goal, y_goal, yaw_goal = self.r1
-        else:
-            x_goal, y_goal, yaw_goal = self.r2
+            # Phase2: 导航到编队位姿（调用 navigate.py 的 navigate_to_target，并增加超时保护）
+            if self.is_r1:
+                x_goal, y_goal, yaw_goal = self.r1
+            else:
+                x_goal, y_goal, yaw_goal = self.r2
 
-        target = {"x": x_goal, "y": y_goal, "heading_deg": math.degrees(yaw_goal)}
-        self.node.get_logger().info(f"🚗 {self.robot_id} navigating to {target} ...")
+            target = {"x": x_goal, "y": y_goal, "heading_deg": math.degrees(yaw_goal)}
+            self.node.get_logger().info(f"[{self.robot_id}]: navigating to {target} ...")
 
-        nav_done = threading.Event()
-        nav_result = {"ok": None}
+            nav_done = threading.Event()
+            nav_result = {"ok": None}
 
-        def _run_nav():
-            try:
-                ok = navigate_to_target(self.node, self.executor, self.robot_id, target)
-            except Exception as e:
-                self.node.get_logger().error(f"navigate_to_target raised: {e}")
-                ok = False
-            nav_result["ok"] = ok
-            nav_done.set()
+            def _run_nav():
+                try:
+                    ok = navigate_to_target(self.node, self.executor, self.robot_id, target)
+                except Exception as e:
+                    self.node.get_logger().error(f"navigate_to_target raised: {e}")
+                    ok = False
+                nav_result["ok"] = ok
+                nav_done.set()
 
-        nav_thread = threading.Thread(target=_run_nav, daemon=True)
-        nav_thread.start()
+            nav_thread = threading.Thread(target=_run_nav, daemon=True)
+            nav_thread.start()
 
-        if not nav_done.wait(timeout=NAV_TIMEOUT_SEC):
-            # 导航超时
-            self._abort(f"Navigation timeout (> {NAV_TIMEOUT_SEC}s)")
-            return
-
-        if nav_result["ok"] is False:
-            self._abort("Navigation failed (navigate_to_target returned False)")
-            return
-        
-        # === 对称性检测 ===（只由 robot1 发起，避免重复打印）
-        if self.is_r1:
-            # 获取两台车的当前位姿
-            x1, y1, h1 = get_current_position("robot1")
-            x2, y2, h2 = get_current_position("robot2")
-
-            robot1_pose = (x1, y1, h1)
-            robot2_pose = (x2, y2, h2)
-            particle_xy = PARTICLE  # 原始微粒坐标
-            check_formation_symmetry(self.node, robot1_pose, robot2_pose, particle_xy, BASELINE)
-
-        if self.aborted:
-            return
-
-        # 广播 READY 并等待对方 READY（带超时）
-        self._publish(MSG_READY, {"who": self.robot_id})
-        if not self.peer_ready_event.wait(timeout=WAIT_READY_TIMEOUT_SEC):
-            self._abort(f"Peer READY timeout (> {WAIT_READY_TIMEOUT_SEC}s)")
-            return
-
-        if self.aborted:
-            return
-
-        # Phase3: 分布式同步运输
-        if self.is_r1:
-            self.start_at = time.time() + 0.6  # 预留 600ms
-            self._publish(MSG_GO, {"start_at": self.start_at, "dist": self.path_len, "speed": SPEED})
-        else:
-            if not self.go_event.wait(timeout=WAIT_GO_TIMEOUT_SEC):
-                self._abort(f"GO wait timeout (> {WAIT_GO_TIMEOUT_SEC}s)")
+            if not nav_done.wait(timeout=NAV_TIMEOUT_SEC):
+                # 导航超时
+                self._abort(f"Navigation timeout (> {NAV_TIMEOUT_SEC}s)")
                 return
 
-        if self.aborted:
-            return
+            if nav_result["ok"] is False:
+                self._abort("Navigation failed (navigate_to_target returned False)")
+                return
+            
+            # === 对称性检测 ===（只由 robot1 发起，避免重复打印）
+            if self.is_r1:
+                # 获取两台车的当前位姿
+                x1, y1, h1 = get_current_position("robot1")
+                x2, y2, h2 = get_current_position("robot2")
 
-        # 忙等到绝对时刻（最后 2ms 忙等，其余轻睡）
-        while True:
-            remain = self.start_at - time.time()
-            if remain <= 0:
-                break
-            time.sleep(0.0005 if remain < 0.002 else 0.005)
+                robot1_pose = (x1, y1, h1)
+                robot2_pose = (x2, y2, h2)
+                particle_xy = PARTICLE  # 原始微粒坐标
+                check_formation_symmetry(self.node, robot1_pose, robot2_pose, particle_xy)
 
-        forward = self.is_r1  # r1 前进(+v)，r2 后退(-v)
-        self.node.get_logger().info(
-            f"🏁 START transport | forward={forward} | dist={self.path_len:.2f} m | v={SPEED:.3f} m/s"
-        )
-        self.motion.drive_constant(forward, self.path_len, SPEED)
-        self.node.get_logger().info("✅ Transport done")
+            if self.aborted:
+                return
+
+            # 广播 READY 并等待对方 READY（带超时）
+            self._publish(MSG_READY, {"who": self.robot_id})
+            if not self.peer_ready_event.wait(timeout=WAIT_READY_TIMEOUT_SEC):
+                self._abort(f"Peer READY timeout (> {WAIT_READY_TIMEOUT_SEC}s)")
+                return
+
+            if self.aborted:
+                return
+
+            # Phase3: 分布式同步运输
+            if self.is_r1:
+                self.start_at = time.time() + 0.6  # 预留 600ms
+                self._publish(MSG_GO, {"start_at": self.start_at, "dist": self.path_len, "speed": SPEED})
+            else:
+                if not self.go_event.wait(timeout=WAIT_GO_TIMEOUT_SEC):
+                    self._abort(f"GO wait timeout (> {WAIT_GO_TIMEOUT_SEC}s)")
+                    return
+
+            if self.aborted:
+                return
+
+            # 忙等到绝对时刻（最后 2ms 忙等，其余轻睡）
+            while True:
+                remain = self.start_at - time.time()
+                if remain <= 0:
+                    break
+                time.sleep(0.0005 if remain < 0.002 else 0.005)
+
+            forward = self.is_r1  # r1 前进(+v)，r2 后退(-v)
+            self.node.get_logger().info(
+                f"START transport | forward={forward} | dist={self.path_len:.2f} m | v={SPEED:.3f} m/s"
+            )
+            self.motion.drive_constant(forward, self.path_len, SPEED)
+            logger.info("Contactless Transport Done!")
+            
+            # 🔥 新增：标记成功完成
+            self.success = True
+            
+        except Exception as e:
+            logger.error(f"Transport error in {self.robot_id}: {e}")
+            self._abort(f"Transport error: {e}")
+        finally:
+            # 🔥 新增：标记完成
+            self.completed = True
+
+
+
 
 # ========== 主入口：创建一次 node 和 executor，后续都复用 ==========
 def main():

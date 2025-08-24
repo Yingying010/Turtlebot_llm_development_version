@@ -17,6 +17,7 @@ import subprocess
 from WhisperRepo.whisper_recognizer import recognize
 from ttsRepo.stream_tts import tts_manager
 import config
+
 import robotControllerRepo.robot_scheduler as robot_scheduler
 
 
@@ -138,9 +139,6 @@ A task_object has the following structure:
 ========================
 Supported Actions and Parameters
 ========================
-========================
-Supported Actions and Parameters
-========================
 1. navigate  
    - To a named target: {"target": "<target_name>"}  
    - To coordinates: {"position": {"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}
@@ -155,21 +153,29 @@ Supported Actions and Parameters
        "timeout_sec": <number>,             // Optional, search time limit in seconds
        "search_waypoints": [<locations>]    // Optional, specific places to search
      }
-5. move  
+5.contactless_transport  // Specialized cooperative action (e.g., acoustic levitation)
+    {
+      "item": "<object_name>",
+      "start_position": "<named_location_or_person>",
+      "goal_position": "<named_location_or_person>",
+      "method": "acoustic" // Optional; include only if explicitly mentioned
+    }
+6. move  
    {"direction": "forward" or "backward", "value": <number>, "unit": "meter" or "second"}
-6. turn  
+7. turn  
    {"direction": "left" or "right", "value": <number>, "unit": "degree" or "second"}
-7. follow  
+8. follow  
    {"target": "<target_name>"}
-8. face  
+9. face  
    {"target": "<target_name>"}
-9. wait  
+10. wait  
    {"duration_sec": <number>}
 
 Note:
 - Numeric values must match the text exactly (preserve signs)
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
+- If the user manual mentions the need for contactless transport of small items, then the operation is contactless_transport. And once contactless_transport is executed, it must be a synchronous task.
 - **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
 - Do not add parameters not explicitly specified in the command
@@ -963,7 +969,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 if __name__ == "__main__":
     # 测试用例
     test_instructions = [
-        "Could you help me look around for my bottle? If you find it, could you bring it to me? If you don't find it, never mind"
+        "Robot1 and robot2, I'd like you both to help me get the pills off the table without contact."
     ]
     
     for instr in test_instructions:
