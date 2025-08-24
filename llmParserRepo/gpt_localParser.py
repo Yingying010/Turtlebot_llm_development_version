@@ -7,28 +7,20 @@ from collections import Counter
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
  
-import cv2
-import numpy as np
-from ultralytics import YOLO
 import openai
 from loguru import logger
-import subprocess 
  
 from WhisperRepo.whisper_recognizer import recognize
 from ttsRepo.stream_tts import tts_manager
 import config
 
 import robotControllerRepo.robot_scheduler as robot_scheduler
+from yolo_perception import YOLOPerceiver, detect_once as yolo_detect_once  # 导入独立的YOLO模块
 
 
 
 # ================== 配置 ==================
 DEFAULT_MODEL = "gpt-4o"
-YOLO_WEIGHTS = os.getenv("YOLO_WEIGHTS", "yolov8n.pt")
-YOLO_CONF   = float(os.getenv("YOLO_CONF", "0.25"))
-YOLO_IOU    = float(os.getenv("YOLO_IOU", "0.45"))
-
-YOLO_DEVICE = os.getenv("YOLO_DEVICE", None)
 
 SESSION_ID = os.getenv("SESSION_ID", "chattinglog")
 MEMORY_DIR = Path("./memory"); MEMORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,12 +28,6 @@ MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
  
 MAX_TURNS = int(os.getenv("MAX_TURNS", "8"))
 PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
-
-_video_env = os.getenv("VIDEO_SOURCE", "0")   # 树莓派默认用本地相机
-if _video_env.isdigit():
-    DEFAULT_SOURCE: Any = int(_video_env)
-else:
-    DEFAULT_SOURCE: Any = _video_env
 
 # ——统一输出提示词（在此基础上增加"可选历史输入"说明）——
 SYSTEM_PROMPT = dedent("""
@@ -259,21 +245,62 @@ def detect_once() -> List[Dict[str, Any]]:
     用于被 find 动作调用
     """
     try:
-        perceiver = YOLOPerceiver()
-
-        ts = time.strftime("%Y%m%d-%H%M%S")
-        img_path = f"/tmp/yolo_parser_frame_{ts}.jpg"
-        subprocess.run([
-            "rpicam-still", "-t", "1000",
-            "--width", "1640", "--height", "1232",
-            "-o", img_path
-        ], check=True)
-
-        _, det_json = perceiver.detect_photo(img_path)
-        detections = det_json.get("detections", [])
-        return detections
+        # 使用独立的YOLO模块
+        result = yolo_detect_once()
+        
+        if result and "result" in result:
+            # 假设result["result"]包含检测结果
+            # 需要根据yolo_perception.py的实际返回格式进行调整
+            yolo_data = result["result"]
+            detections = []
+            
+            # 🔥 修复：处理YOLO命令行返回的JSON格式
+            if isinstance(yolo_data, list):
+                # 如果直接是检测结果列表
+                detections = yolo_data
+            elif isinstance(yolo_data, dict):
+                # 如果是包含检测结果的字典
+                if "detections" in yolo_data:
+                    detections = yolo_data["detections"]
+                elif "predictions" in yolo_data:
+                    detections = yolo_data["predictions"]
+                else:
+                    # 尝试从其他可能的字段获取
+                    logger.warning(f"Unknown YOLO result format: {list(yolo_data.keys())}")
+                    detections = []
+            
+            # 🔥 确保检测结果格式正确
+            formatted_detections = []
+            for det in detections:
+                if isinstance(det, dict):
+                    # 标准化检测结果格式
+                    formatted_det = {
+                        "class": det.get("class", det.get("name", "unknown")).lower(),
+                        "conf": float(det.get("conf", det.get("confidence", 0.0))),
+                        "center_xy": det.get("center_xy", det.get("center", [0, 0])),
+                        "bbox_xyxy": det.get("bbox_xyxy", det.get("bbox", [0, 0, 0, 0]))
+                    }
+                    
+                    # 如果没有center_xy，从bbox计算
+                    if not formatted_det["center_xy"] or formatted_det["center_xy"] == [0, 0]:
+                        bbox = formatted_det["bbox_xyxy"]
+                        if len(bbox) == 4:
+                            cx = (bbox[0] + bbox[2]) / 2.0
+                            cy = (bbox[1] + bbox[3]) / 2.0
+                            formatted_det["center_xy"] = [cx, cy]
+                    
+                    formatted_detections.append(formatted_det)
+            
+            logger.info(f"🔍 Processed {len(formatted_detections)} detections")
+            return formatted_detections
+        else:
+            logger.warning("⚠️ No detection result from YOLO perceiver")
+            return []
+            
     except Exception as e:
         logger.warning(f"⚠️ detect_once failed: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -438,147 +465,6 @@ class HistoryStore:
         if self.path.exists():
             self.path.unlink()
 
-# ================== OpenCV 统一视频源（关键修正） ==================
-class GlobalVideoSource:
-    def __init__(self, source: Any):
-        self.source = source
-        if isinstance(source, int):
-            self.backend = cv2.CAP_V4L2
-        elif isinstance(source, str) and "appsink" in source:
-            self.backend = cv2.CAP_GSTREAMER
-        else:
-            self.backend = cv2.CAP_FFMPEG
-        self.cap = None
-        self.lock = threading.Lock()
-        self.ready = False
-
-    def open(self):
-        with self.lock:
-            if self.cap is None:
-                self.cap = cv2.VideoCapture(self.source, self.backend)
-                try:
-                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                except Exception:
-                    pass
-                if not self.cap.isOpened():
-                    raise RuntimeError(f"Can't open video source: {self.source}")
-                deadline = time.time() + 5.0
-                ok_cnt = 0
-                while time.time() < deadline and ok_cnt < 10:
-                    ok, _ = self.cap.read()
-                    if ok:
-                        ok_cnt += 1
-                    else:
-                        time.sleep(0.03)
-                self.ready = ok_cnt > 0
-
-    def read(self, drop_n=5, timeout=2.0):
-        if self.cap is None or not self.ready:
-            self.open()
-        for _ in range(max(0, drop_n)):
-            self.cap.read()
-
-        t0 = time.time()
-        while time.time() - t0 < timeout:
-            ok, frame = self.cap.read()
-            if not ok or frame is None:
-                time.sleep(0.01)
-                continue
-            m = float(frame.mean()); v = float(frame.var())
-            h, w = frame.shape[:2]
-            if h < 32 or w < 32:
-                continue
-            if m < 1.0 or v < 5.0:
-                continue
-            return frame
-        raise RuntimeError("Reading video frame timeout/valid frame not arrived")
-    
-    @staticmethod
-    def grab_one_frame_once(source: Any, warmup_frames: int = 8, open_timeout_sec: float = 8.0) -> np.ndarray:
-        if isinstance(source, int):
-            backend = cv2.CAP_V4L2
-        elif isinstance(source, str) and "appsink" in source:
-            backend = cv2.CAP_GSTREAMER
-        else:
-            backend = cv2.CAP_FFMPEG
-        cap = cv2.VideoCapture(source, backend)
-
-        t0 = time.time()
-
-        while time.time() - t0 < open_timeout_sec:
-            ok, _ = cap.read()
-            if ok:
-                break
-            time.sleep(0.05)
-
-        got = 0
-        for _ in range(warmup_frames):
-            ok, _ = cap.read()
-            if ok:
-                got += 1
-            else:
-                time.sleep(0.02)
-
-        ok, frame = cap.read()
-        cap.release()
-        if not ok or frame is None:
-            raise RuntimeError("Unable to read valid frame")
-        return frame
-
-
-    def release(self):
-        with self.lock:
-            if self.cap is not None:
-                self.cap.release()
-                self.cap = None
-                self.ready = False
-
-
-# ================== YOLO 感知 ==================
-class YOLOPerceiver:
-    def __init__(self,
-                 weights: str = YOLO_WEIGHTS,
-                 conf: float = YOLO_CONF,
-                 iou: float = YOLO_IOU,
-                 device: Optional[str] = YOLO_DEVICE):
-        
-        self.model = YOLO(weights)
-        self.conf = conf
-        self.iou = iou
-        self.device = device
-
-    def detect_photo(self, img_path: str) -> Tuple[np.ndarray, Dict]:
-        frame = cv2.imread(img_path)
-        if frame is None:
-            raise RuntimeError(f"Unable to read image: {img_path}")
-
-        res = self.model.predict(
-            source=frame, conf=self.conf, iou=self.iou, device=self.device, verbose=False
-        )[0]
-
-        annotated = res.plot()
-
-        h, w = res.orig_shape
-        detections: List[Dict] = []
-        names = res.names
-
-        for b in getattr(res, "boxes", []):
-            x1, y1, x2, y2 = b.xyxy[0].tolist()
-            conf = float(b.conf[0])
-            cls_id = int(b.cls[0])
-            cx = (x1 + x2) / 2.0
-            cy = (y1 + y2) / 2.0
-            cls_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
-            detections.append({
-                "class": cls_name.lower(),
-                "conf": round(conf, 4),
-                "bbox_xyxy": [x1, y1, x2, y2],
-                "center_xy": [cx, cy]
-            })
-
-        return annotated, {"image": {"width": int(w), "height": int(h)},"detections": detections}
-
-
 
 # ================== 感知上下文构造 ==================
 def _assign_ids(dets: List[Dict], topk: int = 3):
@@ -594,6 +480,7 @@ def _assign_ids(dets: List[Dict], topk: int = 3):
     return objs
 
 def build_perception_context(det_json: Dict, topk: int = 3) -> str:
+    """构造感知上下文文本"""
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,
@@ -606,6 +493,7 @@ def build_perception_context(det_json: Dict, topk: int = 3) -> str:
     return "CURRENT_PERCEPTION:\n" + json.dumps(ctx, ensure_ascii=False)
 
 def build_perception_summary(det_json: Dict, topk: int = 3) -> Dict:
+    """构造感知摘要（用于历史存储）"""
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,
@@ -620,6 +508,7 @@ def build_perception_summary(det_json: Dict, topk: int = 3) -> Dict:
     return {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "summary": summary, "objects": objs}
 
 def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
+    """构造感知历史文本"""
     if not summaries:
         return None
     return "PERCEPTION_HISTORY:\n" + json.dumps(summaries, ensure_ascii=False)
@@ -694,7 +583,7 @@ class PerceptionAwareLLM:
                 )
                 
                 raw_output = resp.choices[0].message.content.strip()
-                logger.info(f"🔄 Attempt {attempt + 1} - Raw output length: {len(raw_output)}")
+                logger.info(f"📄 Attempt {attempt + 1} - Raw output length: {len(raw_output)}")
                 
                 # 验证输出不为空且不是错误
                 if not raw_output or "error" in raw_output.lower()[:100]:
@@ -725,7 +614,6 @@ class PerceptionAwareLLM:
         return "{}"
 
 # ================== 一次性：感知 + 解析 + 历史写入 ==================
-VIDEO = GlobalVideoSource(DEFAULT_SOURCE)
 def perceive_and_parse(user_instruction: str,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
@@ -741,36 +629,34 @@ def perceive_and_parse(user_instruction: str,
     )
 
     try:
-        perceiver = YOLOPerceiver()
-
-        ts = time.strftime("%Y%m%d-%H%M%S")
-        img_path = f"/tmp/yolo_parser_frame_{ts}.jpg"
-        subprocess.run([
-            "rpicam-still", "-t", "1000",
-            "--width", "1640", "--height", "1232",
-            "-o", img_path
-        ], check=True)
-
-        annotated, det_json = perceiver.detect_photo(img_path)
-
-        print(f"[DEBUG] det_count={len(det_json.get('detections', []))}, image={det_json.get('image')}")
-        cv2.imwrite("/tmp/percep_annotated.jpg", annotated)
-
-        if show_window:
-            try:
-                cv2.imshow("Perception", annotated)
-                cv2.waitKey(800)
-                cv2.destroyAllWindows()
-            except Exception as _e:
-                logger.warning(f"GUI not available, skip imshow: {_e}")
-
-        if save_annotated:
-            cv2.imwrite(save_annotated, annotated)
-
-        perception_ctx = build_perception_context(det_json)
-
+        # 使用独立的YOLO感知模块
+        perception_result = yolo_detect_once()
+        
+        if perception_result and "result" in perception_result:
+            # 根据yolo_perception.py的返回格式来处理
+            yolo_data = perception_result["result"]
+            
+            # 构造兼容的det_json格式
+            if isinstance(yolo_data, dict):
+                det_json = yolo_data
+            elif isinstance(yolo_data, list):
+                # 如果是检测列表，包装成期望的格式
+                det_json = {"detections": yolo_data, "image": {"width": 640, "height": 480}}
+            
+            logger.info(f"🔍 Perception successful: {len(det_json.get('detections', []))} objects detected")
+            perception_ctx = build_perception_context(det_json)
+            
+            # 如果需要显示或保存图像，这里需要从perception_result中获取
+            if "frame_path" in perception_result and (show_window or save_annotated):
+                frame_path = perception_result["frame_path"]
+                # 这里可能需要额外的处理来显示或保存图像
+                logger.info(f"📸 Frame available at: {frame_path}")
+                
+        else:
+            logger.warning("⚠️ YOLO perception failed or returned no data")
+            
     except Exception as e:
-        logger.warning(f"⚠️ Camera or YOLO unavailable: {e}")
+        logger.warning(f"⚠️ Perception error: {e}")
         det_json = {"detections": [], "image": {}}
         perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
             {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False

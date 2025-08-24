@@ -81,10 +81,18 @@ class Motion:
     def stop(self):
         self.pub.publish(Twist())
 
-    def drive_constant(self, forward: bool, dist: float, speed: float):
-        dur = dist / max(speed, 1e-6)
+    def drive_constant(self, forward: bool, dist_mm: float, speed_mps: float):
+        """
+        以 mm 为单位的距离控制，速度单位为 m/s。
+        :param dist_mm: 移动距离，单位：毫米（mm）
+        :param speed_mps: 移动速度，单位：米每秒（m/s）
+        """
+        dist_m = dist_mm / 1000.0  # 转换为米
+        dur = dist_m / max(speed_mps, 1e-6)
+
         tw = Twist()
-        tw.linear.x = speed if forward else -speed
+        tw.linear.x = speed_mps if forward else -speed_mps
+
         t0 = time.time()
         while time.time() - t0 < dur:
             self.pub.publish(tw)

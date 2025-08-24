@@ -6,7 +6,7 @@ import config
 from WhisperRepo.whisper_recognizer import conversation_active, recognize
 # from llmParserRepo.qwen3_parser import run_conversation_loop
 # from llmParserRepo.gpt_yolo_parser import run_conversation_loop
-from llmParserRepo.gpt_yolo_localParser import run_conversation_loop
+from llmParserRepo.gpt_localParser import run_conversation_loop
 # import TinyLlama_Chat
 import time
 import re
@@ -15,7 +15,7 @@ from loguru import logger
 import traceback
 import argparse
 from pathlib import Path
-from llmParserRepo.gpt_yolo_localParser import HistoryStore
+from llmParserRepo.gpt_localParser import HistoryStore
 
 running = False
 actived = 0

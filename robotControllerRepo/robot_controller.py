@@ -19,14 +19,24 @@ from robotControllerRepo.actions.find import run_action as run_find
 from robotControllerRepo.actions.find import execute_find_with_llm_replanning, create_llm_replanning_function
 from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
-# 🔥 新增：导入协作运输模块
-from robotControllerRepo.actions.contactlessTransport import TransportManager
-from llmParserRepo.gpt_yolo_localParser import detect_once, HistoryStore, MEMORY_PATH
+# 🔥 新增：导入协作运输模块（如果存在）
+try:
+    from robotControllerRepo.actions.contactlessTransport import TransportManager
+    HAS_CONTACTLESS_TRANSPORT = True
+except ImportError:
+    HAS_CONTACTLESS_TRANSPORT = False
+    logger.warning("ContactlessTransport module not found, disabling contactless transport features")
+
+# 🔥 修正：导入独立的YOLO感知模块 - 修正路径
+# 由于yolo_perception.py在llmParserRepo下，需要从项目根目录导入
+sys.path.append(os.path.join(PROJECT_ROOT, "llmParserRepo"))
+from yolo_perception import detect_once
+
 import time
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
-# 🔥 新增：全局存储运输管理器实例，避免重复创建
+# 全局存储运输管理器实例，避免重复创建
 _transport_managers = {}
 
 def normalize_task_parameters(task: Dict) -> Dict:
@@ -371,8 +381,8 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
         # 创建LLM重规划函数
         llm_replanning_fn = create_llm_replanning_function()
         
-        # 获取历史存储实例
-        from llmParserRepo.gpt_yolo_localParser import HistoryStore, MEMORY_PATH
+        # 🔥 修正：使用正确的导入路径获取历史存储
+        from llmParserRepo.gpt_localParser import HistoryStore, MEMORY_PATH
         history_store = HistoryStore(MEMORY_PATH)
         
         # 🔥 修正：直接调用 execute_find_with_llm_replanning 并传递正确参数
@@ -381,7 +391,7 @@ def execute_find_with_followup(node, executor, task: Dict) -> tuple:
             robot_name=robot,             # 传递 robot_name  
             params=params,                # 传递 params
             # 传递上下文函数作为关键字参数
-            detect_fn=detect_once,
+            detect_fn=detect_once,        # 🔥 修正：使用来自 yolo_perception 的 detect_once
             rotate_fn=lambda robot_name, deg: rotate_deg(node, robot_name, deg),
             navigate_to_fn=lambda robot_name, target: navigate_to(node, executor, robot_name, target),
             event_pub=None,  # 可以传递事件发布器，如果有的话
