@@ -684,22 +684,51 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
             Master: {get_master_name()}
             Found Object: {found_object["class"]} (confidence: {found_object["confidence"]:.3f})
             Detection Quality: {found_object["detection_quality"]}
-            Blackboard Key: {blackboard_key}
+            Blackboard Key: {found_object["blackboard_key"]}
 
-            If user asked to "bring/deliver to me":
-              navigate (to blackboard key) -> pickup -> navigate (to {get_master_name()}) -> dropoff
-            If user asked only "collect":
-              navigate (to blackboard key) -> pickup
-            If only "find":
-              no further actions.
+            Based on the conversation history, decide if the robot should:
+            1. Just report finding the object (no further action)
+            2. pickup the object 
+            3. pickup and deliver the object to someone (requires navigate in between)
+            4. Other specific actions
 
-            Strict JSON:
+            ========================
+            Action Definitions
+            ========================
+            1. navigate  
+            - To a named target: {{"target": "<target_name>"}}  
+            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
+
+            2. pickup  
+            - Pick up an item: {{"item": "<item>"}}
+
+            3. dropoff  
+            - Drop off an item: {{"item": "<item>"}}
+
+            ========================
+            Important Rules
+            ========================
+            - When the user says "bring to me" or "deliver to <person>", the action sequence MUST be:
+            1) pickup the item  
+            2) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
+            3) dropoff the item  
+
+            - Do NOT skip the navigate step before dropoff.
+            - The output must always follow strict JSON format:
+
             {{
-              "action_needed": true/false,
-              "tasks": [{{"action": "navigate|pickup|dropoff|wait", "parameters": {{...}} }}],
-              "reasoning": "brief"
+                "action_needed": true/false,
+                "tasks": [
+                    {{
+                        "action": "pickup|navigate|dropoff|wait",
+                        "parameters": {{ ... }}
+                    }}
+                ],
+                "reasoning": "Brief explanation"
             }}
+
             """).strip()
+
 
             history_text = "No recent conversation history available."
             if chat_history:
