@@ -247,6 +247,18 @@ def precision_approach(node: Node, robot_name: str, target: Dict[str, float],
 
 def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_deg: float):
     """Multi-stage heading alignment with increasing precision"""
+    # 🔥 修复：检查 target_heading_deg 是否为 None
+    if target_heading_deg is None:
+        print("[HEADING_ALIGN] Target heading is None, skipping alignment")
+        return
+    
+    # 🔥 修复：确保是数值类型
+    try:
+        target_heading_deg = float(target_heading_deg)
+    except (TypeError, ValueError):
+        print(f"[HEADING_ALIGN] Invalid target heading: {target_heading_deg}, skipping alignment")
+        return
+    
     print(f"[HEADING_ALIGN] Target heading: {target_heading_deg:.1f} degrees")
     
     # Stage 1: Coarse alignment
@@ -298,9 +310,13 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     precision_approach(node, robot_name, target, speed_m_per_s=0.03)
 
     # Stage 3: Final heading alignment
-    if "heading_deg" in target:
+        # 🔥 修复：检查 heading_deg 键是否存在且不为 None
+    target_heading = target.get("heading_deg")
+    if target_heading is not None:
         print("[NAVIGATE] Stage 3: Final heading alignment")
-        multi_stage_heading_alignment(node, robot_name, target["heading_deg"])
+        multi_stage_heading_alignment(node, robot_name, target_heading)
+    else:
+        print("[NAVIGATE] Stage 3: Skipped (no target heading specified)")
 
     print(f"[NAVIGATE] Navigation completed for {robot_name}")
 
