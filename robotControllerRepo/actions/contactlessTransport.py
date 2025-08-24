@@ -38,7 +38,7 @@ from robotControllerRepo.actions.navigate import navigate_to_target, get_current
 # ===== 全局参数（直接改这里就行） =====
 PARTICLE = (0.0, 0.0)     # 微粒点坐标
 TARGET   = (1000.0, 1000.0)    # 目标点坐标
-GAP = 70 
+GAP = 80 
 LENGTH = 138
 WIDTH = 178
 SPEED    = 0.02
@@ -62,7 +62,7 @@ def plan_formation(particle_xy, target_xy):
 
     r2_x = -(GAP + LENGTH/2 - px)
     r2_y = GAP + WIDTH/2 -py
-    r2_heading = phi + 2 * math.pi
+    r2_heading = -phi
 
     # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
     r1 = (r1_x, r1_y, r1_heading)
