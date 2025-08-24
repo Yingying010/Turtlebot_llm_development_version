@@ -2,8 +2,8 @@
 
 import os, sys, math, time, threading
 from typing import Dict, Optional, Tuple, List
-# 允许从项目根目录导入
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
@@ -16,58 +16,305 @@ from phasespace.rigid_tracker import RigidTracker
 import config
 from ttsRepo.stream_tts import tts_manager
 
+# Configuration
 semantic_locations = config.get("semantic_locations")
- 
-# === 全局缓存 + 锁 ===
+
+# Global state management
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
-# === 新增：导航协商机制 ===
-# 导航意图广播: {robot_name: {"target": target_dict, "timestamp": time, "status": "announcing/confirmed"}}
+# Navigation coordination state
 navigation_intentions: Dict[str, Dict] = {}
 intentions_lock = threading.Lock()
-
-# ROS消息发布器和订阅器
 navigation_coordinator_pub: Optional[Publisher] = None
-navigation_responses: Dict[str, List[Dict]] = {}  # {requesting_robot: [response1, response2, ...]}
+navigation_responses: Dict[str, List[Dict]] = {}
 responses_lock = threading.Lock()
-
-# 当前机器人名称（需要在navigate_to_target中设置）
 current_robot_name: str = ""
 
+# ============================================================================
+# CORE POSITION AND CONTROL FUNCTIONS
+# ============================================================================
 
 def get_current_robot_name() -> str:
-    """获取当前机器人名称"""
+    """Get current robot name for coordination"""
     return current_robot_name
 
-
 def set_current_robot_name(robot_name: str):
-    """设置当前机器人名称"""
+    """Set current robot name for coordination"""
     global current_robot_name
     current_robot_name = robot_name
 
+def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+    """Initialize position tracking for specified robot"""
+    rigid_node = RigidTracker(
+        position_cache=robot_position_cache,
+        robot_name=robot_name,
+        position_lock=cache_lock,
+    )
+    executor.add_node(rigid_node)
+    print(f"[POSITION] Initializing tracker for {robot_name}")
+    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
+    
+    for _ in range(50):  # 10 second timeout
+        with cache_lock:
+            if robot_name in robot_position_cache:
+                print(f"[POSITION] Position data acquired for {robot_name}")
+                tts_manager.say(f"Position data acquired for {robot_name}.")
+                return rigid_node
+        time.sleep(0.2)
+    
+    print(f"[ERROR] Position tracking timeout for {robot_name}")
+    return None
+
+def get_current_position(robot_name: str) -> Tuple[float, float, float]:
+    """Get current position of specified robot"""
+    with cache_lock:
+        rigid = robot_position_cache.get(robot_name)
+        if rigid:
+            return rigid["x"], rigid["z"], rigid["heading_y"]
+    
+    print(f"[WARNING] No position data available for {robot_name}")
+    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    return 0.0, 0.0, 0.0
+
+def _ensure_publisher(node: Node, robot_name: str) -> Publisher:
+    """Ensure publisher exists for robot command velocity"""
+    key = (id(node), robot_name)
+    pub = publisher_dict.get(key)
+    if pub is None:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+    return pub
+
+def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
+    """Safely publish twist command with error handling"""
+    key = (id(node), robot_name)
+    pub = _ensure_publisher(node, robot_name)
+    try:
+        pub.publish(twist)
+    except InvalidHandle:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+        pub.publish(twist)
+
+# ============================================================================
+# BASIC MOVEMENT PRIMITIVES
+# ============================================================================
+
+def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
+                          angle_tolerance_deg: float = 5.0):
+    """Rotate robot to face target position using feedback control"""
+    x_target, y_target = target["x"], target["y"]
+    x_now, y_now, _ = get_current_position(robot_id)
+    dx = x_target - x_now
+    dz = y_target - y_now
+    target_angle = math.degrees(math.atan2(dx, dz)) % 360
+
+    print(f"[ROTATE] Target: ({x_target:.1f}, {y_target:.1f}) -> {target_angle:.1f} degrees")
+
+    while True:
+        _, _, heading_y_now = get_current_position(robot_id)
+        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
+
+        if abs(angle_error) < angle_tolerance_deg:
+            print("[ROTATE] Target orientation achieved")
+            break
+
+        direction = 1 if angle_error > 0 else -1
+        twist = Twist()
+
+        # Adaptive angular velocity based on error magnitude
+        if abs(angle_error) > 25:
+            twist.angular.z = 0.5 * direction
+        elif abs(angle_error) > 10:
+            twist.angular.z = 0.3 * direction
+        else:
+            twist.angular.z = 0.15 * direction
+
+        safe_publish_twist(node, robot_id, twist)
+        print(f"[ROTATE] Current: {heading_y_now:.1f}deg, Target: {target_angle:.1f}deg, "
+              f"Error: {angle_error:.1f}deg, Speed: {twist.angular.z:.2f}rad/s")
+
+        time.sleep(0.1)
+
+    safe_publish_twist(node, robot_id, Twist())
+    time.sleep(0.2)
+
+def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
+                               tolerance: float = 10.0, max_acceptable_angle_error: float = 25.0, 
+                               semantic_threshold: float = 0.0):
+    """Move forward to target with continuous heading correction"""
+    x_target, y_target = target["x"], target["y"]
+    print(f"[MOVE] Approaching target ({x_target:.1f}, {y_target:.1f})")
+
+    while True:
+        x_now, y_now, heading_y_now = get_current_position(robot_name)
+        dx = x_target - x_now
+        dz = y_target - y_now
+        distance = math.hypot(dx, dz)
+
+        if distance < tolerance or (semantic_threshold > 0 and distance < semantic_threshold):
+            print("[MOVE] Target reached")
+            break
+
+        target_angle = math.degrees(math.atan2(dx, dz)) % 360
+        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
+
+        if abs(angle_error) > max_acceptable_angle_error:
+            print(f"[MOVE] Angle correction required: {angle_error:.1f} degrees")
+            rotate_to_face_target(node, robot_name, target)
+            continue
+
+        twist = Twist()
+        twist.linear.x = 0.1
+        safe_publish_twist(node, robot_name, twist)
+        print(f"[MOVE] Distance: {distance:.2f}mm, Heading: {heading_y_now:.1f}deg, "
+              f"Target angle: {target_angle:.1f}deg, Error: {angle_error:.1f}deg")
+
+        time.sleep(0.2)
+        safe_publish_twist(node, robot_name, Twist())
+        time.sleep(0.1)
+
+# ============================================================================
+# PRECISION MOVEMENT FUNCTIONS
+# ============================================================================
+
+def calculate_target_angle(current_pos: Tuple[float, float, float], 
+                          target_pos: Dict[str, float]) -> float:
+    """Calculate required heading angle from current position to target"""
+    x_now, y_now, _ = current_pos
+    x_target, y_target = target_pos["x"], target_pos["y"]
+    dx = x_target - x_now
+    dy = y_target - y_now
+    return math.degrees(math.atan2(dx, dy)) % 360
+
+def precision_rotate(node: Node, robot_name: str, target_angle_deg: float, 
+                    angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 1.0):
+    """Execute precision rotation using time-based control"""
+    _, _, current_heading = get_current_position(robot_name)
+    angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
+
+    if abs(angle_diff) <= tolerance_deg:
+        print(f"[PRECISION_ROTATE] Already aligned: current={current_heading:.1f}deg, "
+              f"target={target_angle_deg:.1f}deg, error={angle_diff:.1f}deg")
+        return
+
+    duration_sec = abs(angle_diff) / angular_speed_deg_per_s
+    angular_speed_rad_per_s = math.radians(angular_speed_deg_per_s)
+    
+    twist = Twist()
+    twist.angular.z = angular_speed_rad_per_s if angle_diff > 0 else -angular_speed_rad_per_s
+
+    direction = "left" if angle_diff > 0 else "right"
+    print(f"[PRECISION_ROTATE] Rotating {abs(angle_diff):.1f}deg {direction}, "
+          f"duration: {duration_sec:.2f}s")
+
+    safe_publish_twist(node, robot_name, twist)
+    time.sleep(duration_sec)
+    safe_publish_twist(node, robot_name, Twist())
+
+    # Verify result
+    _, _, final_heading = get_current_position(robot_name)
+    final_diff = (target_angle_deg - final_heading + 180) % 360 - 180
+    print(f"[PRECISION_ROTATE] Final heading: {final_heading:.1f}deg, "
+          f"residual error: {final_diff:.1f}deg")
+
+def precision_approach(node: Node, robot_name: str, target: Dict[str, float], 
+                      speed_m_per_s: float = 0.03):
+    """Execute precision approach using calculated distance and time"""
+    x_now, y_now, _ = get_current_position(robot_name)
+    x_target, y_target = target["x"], target["y"]
+
+    dx = x_target - x_now
+    dy = y_target - y_now
+    distance_mm = math.hypot(dx, dy)
+    duration_sec = distance_mm / (speed_m_per_s * 1000)
+
+    print(f"[PRECISION_APPROACH] Distance: {distance_mm:.1f}mm, "
+          f"duration: {duration_sec:.2f}s, speed: {speed_m_per_s:.3f}m/s")
+
+    twist = Twist()
+    twist.linear.x = speed_m_per_s
+    safe_publish_twist(node, robot_name, twist)
+    time.sleep(duration_sec)
+    safe_publish_twist(node, robot_name, Twist())
+
+    print("[PRECISION_APPROACH] Approach completed")
+
+def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_deg: float):
+    """Multi-stage heading alignment with increasing precision"""
+    print(f"[HEADING_ALIGN] Target heading: {target_heading_deg:.1f} degrees")
+    
+    # Stage 1: Coarse alignment
+    precision_rotate(node, robot_name, target_heading_deg, 
+                    angular_speed_deg_per_s=8.0, tolerance_deg=2.0)
+    
+    time.sleep(0.3)  # Allow stabilization
+    
+    # Check if fine adjustment needed
+    _, _, current_heading = get_current_position(robot_name)
+    angle_error = abs((target_heading_deg - current_heading + 180) % 360 - 180)
+    
+    if angle_error > 1.0:
+        print(f"[HEADING_ALIGN] Fine adjustment required, error: {angle_error:.1f} degrees")
+        precision_rotate(node, robot_name, target_heading_deg,
+                        angular_speed_deg_per_s=4.0, tolerance_deg=0.5)
+        
+        # Final verification
+        time.sleep(0.2)
+        _, _, final_heading = get_current_position(robot_name)
+        final_error = abs((target_heading_deg - final_heading + 180) % 360 - 180)
+        print(f"[HEADING_ALIGN] Final heading: {final_heading:.1f}deg, error: {final_error:.1f}deg")
+    else:
+        print(f"[HEADING_ALIGN] Heading achieved within tolerance, error: {angle_error:.1f}deg")
+
+# ============================================================================
+# MAIN NAVIGATION FUNCTION
+# ============================================================================
+
+def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
+    """Execute complete navigation to target position with multi-stage precision"""
+    x_target, y_target = target["x"], target["y"]
+    x_now, y_now, _ = get_current_position(robot_name)
+    initial_distance = math.hypot(x_target - x_now, y_target - y_now)
+
+    print(f"[NAVIGATE] Robot: {robot_name}, Target: ({x_target:.1f}, {y_target:.1f}), "
+          f"Distance: {initial_distance:.1f}mm")
+
+    # Stage 1: Coarse navigation
+    print("[NAVIGATE] Stage 1: Coarse navigation")
+    rotate_to_face_target(node, robot_name, target)
+    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
+
+    # Stage 2: Precision adjustment
+    print("[NAVIGATE] Stage 2: Precision adjustment")
+    current_pos = get_current_position(robot_name)
+    target_angle = calculate_target_angle(current_pos, target)
+    precision_rotate(node, robot_name, target_angle, angular_speed_deg_per_s=8.0)
+    precision_approach(node, robot_name, target, speed_m_per_s=0.03)
+
+    # Stage 3: Final heading alignment
+    if "heading_deg" in target:
+        print("[NAVIGATE] Stage 3: Final heading alignment")
+        multi_stage_heading_alignment(node, robot_name, target["heading_deg"])
+
+    print(f"[NAVIGATE] Navigation completed for {robot_name}")
+
+# ============================================================================
+# NAVIGATION COORDINATION (DISTRIBUTED CONFLICT RESOLUTION)
+# ============================================================================
 
 def setup_navigation_coordinator(node: Node):
-    """初始化导航协调的ROS通信"""
+    """Initialize navigation coordination communication"""
     global navigation_coordinator_pub
-    
-    # 发布导航意图的topic
-    navigation_coordinator_pub = node.create_publisher(
-        String, '/navigation_coordination', 10
-    )
-    
-    # 订阅其他机器人的导航意图
-    node.create_subscription(
-        String, '/navigation_coordination', 
-        navigation_coordination_callback, 10
-    )
-    
-    print("🤝 Navigation coordinator initialized")
-
+    navigation_coordinator_pub = node.create_publisher(String, '/navigation_coordination', 10)
+    node.create_subscription(String, '/navigation_coordination', 
+                           navigation_coordination_callback, 10)
+    print("[COORDINATION] Navigation coordinator initialized")
 
 def navigation_coordination_callback(msg):
-    """处理其他机器人的导航协调消息"""
+    """Handle navigation coordination messages"""
     try:
         data = json.loads(msg.data)
         msg_type = data.get("type")
@@ -80,20 +327,17 @@ def navigation_coordination_callback(msg):
             handle_navigation_confirmed(data)
             
     except json.JSONDecodeError:
-        print(f"⚠️ Invalid navigation coordination message: {msg.data}")
-
+        print(f"[ERROR] Invalid coordination message: {msg.data}")
 
 def handle_navigation_request(data):
-    """处理其他机器人的导航请求"""
+    """Process navigation request from other robots"""
     requesting_robot = data["robot_name"]
     target = data["target"]
     request_id = data["request_id"]
-    
-    # 检查所有机器人的导航意图（包括自己）
+
     with intentions_lock:
         all_intentions = navigation_intentions.copy()
-    
-    # 检查是否有冲突的目标
+
     conflicting_targets = []
     for robot_name, intention in all_intentions.items():
         if (robot_name != requesting_robot and 
@@ -104,29 +348,25 @@ def handle_navigation_request(data):
                 "target": intention["target"],
                 "timestamp": intention["timestamp"]
             })
-    
-    # 发送响应 - 注意：这里需要知道当前机器人的名称
-    # 从全局变量或其他方式获取当前机器人名称
-    current_robot_name = get_current_robot_name()
-    
+
+    current_robot = get_current_robot_name()
     response = {
         "type": "navigation_response",
         "request_id": request_id,
-        "responding_robot": current_robot_name,
+        "responding_robot": current_robot,
         "conflicts": conflicting_targets
     }
-    
+
     if navigation_coordinator_pub:
         navigation_coordinator_pub.publish(String(data=json.dumps(response)))
-        print(f"📤 回复导航请求给 {requesting_robot}: {len(conflicting_targets)} 个冲突")
-
+        print(f"[COORDINATION] Response sent to {requesting_robot}: {len(conflicting_targets)} conflicts")
 
 def handle_navigation_response(data):
-    """处理其他机器人对我们导航请求的响应"""
+    """Process navigation response from other robots"""
     request_id = data["request_id"]
     responding_robot = data["responding_robot"]
     conflicts = data["conflicts"]
-    
+
     with responses_lock:
         if request_id not in navigation_responses:
             navigation_responses[request_id] = []
@@ -134,46 +374,37 @@ def handle_navigation_response(data):
             "robot": responding_robot,
             "conflicts": conflicts
         })
-    
-    print(f"📥 收到 {responding_robot} 的导航响应: {len(conflicts)} 个冲突")
 
+    print(f"[COORDINATION] Response received from {responding_robot}: {len(conflicts)} conflicts")
 
 def handle_navigation_confirmed(data):
-    """处理其他机器人的导航确认"""
+    """Process navigation confirmation from other robots"""
     robot_name = data["robot_name"]
     target = data["target"]
-    
+
     with intentions_lock:
         navigation_intentions[robot_name] = {
             "target": target,
             "timestamp": time.time(),
             "status": "confirmed"
         }
-    
-    print(f"✅ {robot_name} 确认导航到 ({target['x']:.1f}, {target['y']:.1f})")
 
+    print(f"[COORDINATION] {robot_name} confirmed navigation to ({target['x']:.1f}, {target['y']:.1f})")
 
 def targets_are_same(target1: Dict, target2: Dict, tolerance: float = 10.0) -> bool:
-    """判断两个目标是否是同一个位置"""
+    """Check if two targets represent the same location"""
     dx = abs(target1.get("x", 0) - target2.get("x", 0))
     dy = abs(target1.get("y", 0) - target2.get("y", 0))
     return dx <= tolerance and dy <= tolerance
 
-
-def broadcast_navigation_request(robot_name: str, target: Dict[str, float], timeout: float = 3.0) -> List[Dict]:
-    """
-    广播导航意图，询问其他机器人是否有冲突
-    
-    Returns:
-        List of conflicting robots and their targets
-    """
+def broadcast_navigation_request(robot_name: str, target: Dict[str, float], 
+                                timeout: float = 3.0) -> List[Dict]:
+    """Broadcast navigation intent and collect conflict responses"""
     request_id = f"{robot_name}_{int(time.time() * 1000)}"
-    
-    # 清空之前的响应
+
     with responses_lock:
         navigation_responses[request_id] = []
-    
-    # 发布导航请求
+
     request = {
         "type": "navigation_request",
         "robot_name": robot_name,
@@ -181,601 +412,203 @@ def broadcast_navigation_request(robot_name: str, target: Dict[str, float], time
         "request_id": request_id,
         "timestamp": time.time()
     }
-    
+
     if navigation_coordinator_pub:
         navigation_coordinator_pub.publish(String(data=json.dumps(request)))
-        print(f"📢 {robot_name} 广播导航意图: 目标 ({target['x']:.1f}, {target['y']:.1f})")
-    
-    # 等待响应
+        print(f"[COORDINATION] Broadcasting navigation intent to ({target['x']:.1f}, {target['y']:.1f})")
+
+    # Wait for responses
     start_time = time.time()
     while time.time() - start_time < timeout:
         time.sleep(0.1)
-    
-    # 收集所有冲突
+
+    # Collect all conflicts
     all_conflicts = []
     with responses_lock:
         for response in navigation_responses.get(request_id, []):
             all_conflicts.extend(response["conflicts"])
-    
-    # 同时检查当前已记录的导航意图（防止消息丢失）
+
+    # Check local intentions for consistency
     with intentions_lock:
         current_intentions = navigation_intentions.copy()
-    
+
     for other_robot, intention in current_intentions.items():
         if (other_robot != robot_name and 
             intention["status"] in ["announcing", "confirmed"] and 
             targets_are_same(intention["target"], target)):
             
-            # 检查是否已经在冲突列表中
-            already_exists = any(c["robot_name"] == other_robot for c in all_conflicts)
-            if not already_exists:
+            if not any(c["robot_name"] == other_robot for c in all_conflicts):
                 all_conflicts.append({
                     "robot_name": other_robot,
                     "target": intention["target"],
                     "timestamp": intention["timestamp"]
                 })
-                print(f"🔍 检测到本地记录的冲突: {other_robot}")
-    
-    print(f"📊 {robot_name} 收到 {len(all_conflicts)} 个冲突响应")
+
+    print(f"[COORDINATION] Collected {len(all_conflicts)} conflict responses")
     return all_conflicts
 
-
-def resolve_navigation_conflicts(robot_name: str, target: Dict[str, float], conflicts: List[Dict]) -> Dict[str, float]:
-    """
-    解决导航冲突，分配新的目标点
-    
-    Args:
-        robot_name: 当前机器人名称
-        target: 原始目标
-        conflicts: 冲突的机器人列表
-        
-    Returns:
-        分配给当前机器人的新目标点
-    """
+def resolve_navigation_conflicts(robot_name: str, target: Dict[str, float], 
+                                conflicts: List[Dict]) -> Dict[str, float]:
+    """Resolve navigation conflicts using distributed positioning"""
     if not conflicts:
-        # 没有冲突，使用原始目标
-        print(f"✅ {robot_name} 无冲突，使用原始目标")
+        print(f"[CONFLICT_RESOLUTION] No conflicts detected for {robot_name}")
         return target
-    
-    # 收集所有要去这个目标的机器人（包括自己）
+
     all_robots = [robot_name]
     for conflict in conflicts:
         if conflict["robot_name"] not in all_robots:
             all_robots.append(conflict["robot_name"])
-    
-    print(f"🎯 检测到 {len(all_robots)} 个机器人要去相同目标: {all_robots}")
-    print(f"🔍 冲突详情:")
-    for conflict in conflicts:
-        print(f"  - {conflict['robot_name']}: ({conflict['target']['x']:.1f}, {conflict['target']['y']:.1f})")
-    
-    # 根据时间戳或名称排序，确保分配的一致性
+
+    print(f"[CONFLICT_RESOLUTION] {len(all_robots)} robots targeting same location: {all_robots}")
+
+    # Deterministic ordering for consistent resolution
     all_robots.sort()
-    
-    # 计算当前机器人在列表中的索引
     robot_index = all_robots.index(robot_name)
-    print(f"📍 {robot_name} 在排序列表中的索引: {robot_index}")
+
+    center_x, center_y = target["x"], target["y"]
     
-    # 使用圆形分布算法
-    center_x = target["x"]
-    center_y = target["y"]
-    radius = 200.0  # 分布半径
-    num_robots = len(all_robots)
+    if len(all_robots) == 1:
+        return target
     
-    if num_robots == 1:
-        # 只有自己，使用原始目标
-        new_target = target.copy()
-        print(f"🎯 {robot_name} 独自导航，使用原始目标")
-    else:
-        # 分布在圆周上
-        angle_step = 360.0 / num_robots
-        angle_deg = robot_index * angle_step
-        angle_rad = math.radians(angle_deg)
-        
-        new_x = center_x + radius * math.cos(angle_rad)
-        new_y = center_y + radius * math.sin(angle_rad)
-        
-        # 计算朝向目标中心的角度
-        heading_to_center = math.degrees(math.atan2(center_x - new_x, center_y - new_y)) % 360
-        
-        new_target = {
-            "x": new_x,
-            "y": new_y,
-            "heading_deg": heading_to_center
-        }
-        
-        print(f"🎯 {robot_name} 分布式分配:")
-        print(f"  - 原始目标: ({center_x:.1f}, {center_y:.1f})")
-        print(f"  - 分配角度: {angle_deg:.1f}°")
-        print(f"  - 新目标: ({new_x:.1f}, {new_y:.1f})")
-        print(f"  - 朝向角度: {heading_to_center:.1f}°")
+    # Circular distribution algorithm
+    radius = 200.0
+    angle_step = 360.0 / len(all_robots)
+    angle_deg = robot_index * angle_step
+    angle_rad = math.radians(angle_deg)
+    
+    new_x = center_x + radius * math.cos(angle_rad)
+    new_y = center_y + radius * math.sin(angle_rad)
+    heading_to_center = math.degrees(math.atan2(center_x - new_x, center_y - new_y)) % 360
+    
+    new_target = {
+        "x": new_x,
+        "y": new_y,
+        "heading_deg": heading_to_center
+    }
+    
+    print(f"[CONFLICT_RESOLUTION] {robot_name} assigned position: "
+          f"({new_x:.1f}, {new_y:.1f}), heading: {heading_to_center:.1f}deg")
     
     return new_target
 
-
 def confirm_navigation_intent(robot_name: str, target: Dict[str, float]):
-    """确认导航意图，通知其他机器人"""
+    """Confirm navigation intent to coordination system"""
     with intentions_lock:
         navigation_intentions[robot_name] = {
             "target": target,
             "timestamp": time.time(),
             "status": "confirmed"
         }
-    
-    # 广播确认消息
+
     confirmation = {
         "type": "navigation_confirmed",
         "robot_name": robot_name,
         "target": target,
         "timestamp": time.time()
     }
-    
+
     if navigation_coordinator_pub:
         navigation_coordinator_pub.publish(String(data=json.dumps(confirmation)))
-        print(f"✅ {robot_name} 确认导航意图")
-
+        print(f"[COORDINATION] {robot_name} navigation intent confirmed")
 
 def cleanup_navigation_intent(robot_name: str):
-    """清理导航意图（导航完成后调用）"""
+    """Clean up navigation intent after completion"""
     with intentions_lock:
         if robot_name in navigation_intentions:
             del navigation_intentions[robot_name]
-            print(f"🗑️ {robot_name} 清理导航意图")
+            print(f"[COORDINATION] {robot_name} navigation intent cleaned up")
 
+# ============================================================================
+# MAIN NAVIGATION INTERFACE
+# ============================================================================
 
-# === 原有函数保持不变 ===
-
-def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
-    rigid_node = RigidTracker(
-        position_cache=robot_position_cache,
-        robot_name=robot_name,
-        position_lock=cache_lock,
-    )
-    executor.add_node(rigid_node)
-    print(f"⏳ Waiting for position data of {robot_name}...")
-    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
-    for _ in range(50):  # ~10s
-        with cache_lock:
-            ok = robot_name in robot_position_cache
-        if ok:
-            print(f"✅ Got position data for {robot_name}.")
-            tts_manager.say(f"Position data acquired for {robot_name}.")
-            return rigid_node
-        time.sleep(0.2)
-    print(f"❌ Timeout: No position data for {robot_name}")
-    return None
-
-def get_current_position(robot_name: str) -> tuple:
-    with cache_lock:
-        rigid = robot_position_cache.get(robot_name)
-        if rigid:
-            x = rigid["x"]
-            y = rigid["z"]
-            heading_y = rigid["heading_y"]
-            return x, y, heading_y
-    print(f"⚠️ No position data for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
-    return 0.0, 0.0, 0.0
- 
- 
-def _ensure_pub(node: Node, robot_name: str) -> Publisher:
-    key = (id(node), robot_name)
-    pub = publisher_dict.get(key)
-    if pub is None:
-        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
-        publisher_dict[key] = pub
-    return pub
- 
- 
-def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
-    key = (id(node), robot_name)
-    pub = _ensure_pub(node, robot_name)
-    try:
-        pub.publish(twist)
-    except InvalidHandle:
-        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
-        publisher_dict[key] = pub
-        pub.publish(twist)
- 
- 
-def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
-                          angle_tolerance_deg: float = 5.0):
-    x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_id)
-    dx = x_target - x_now
-    dz = y_target - y_now
-    target_angle = math.degrees(math.atan2(dx, dz)) % 360
- 
-    print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
- 
-    while True:
-        _, _, heading_y_now = get_current_position(robot_id)
-        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
-
-        if abs(angle_error) < angle_tolerance_deg:
-            print("✅ ROTATE done.")
-            break
- 
-        new_direction = 1 if angle_error > 0 else -1
-        twist = Twist()
-
-        if abs(angle_error) > 25:
-            twist.angular.z = 0.5 * new_direction
-        elif abs(angle_error) > 10:
-            twist.angular.z = 0.3 * new_direction
-        else:
-            twist.angular.z = 0.15 * new_direction
- 
-        safe_publish_twist(node, robot_id, twist)
-        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
-              f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
-
-        time.sleep(0.1)
- 
-    safe_publish_twist(node, robot_id, Twist())
-    time.sleep(0.2)
- 
- 
-def rotate_to_final_heading(node: Node, robot_name: str, heading_deg: float,
-                            angle_tolerance_deg: float = 5.0):
-    if heading_deg is None:
-        print("No final heading specified; skipping final rotate.")
-        return True
-
-    try:
-        heading_deg = float(heading_deg)
-    except (TypeError, ValueError):
-        print(f"⚠️ Invalid heading_deg: {heading_deg}, skipping final rotate.")
-        return True
-
-    print(f"🔄 ROTATE TO HEADING: {heading_deg:.1f}°")
-    while True:
-        _, _, heading_y_now = get_current_position(robot_name)
-        angle_error = (heading_deg - heading_y_now + 180) % 360 - 180
-        if abs(angle_error) < angle_tolerance_deg:
-            print("✅ Final heading aligned.")
-            break
-
-        direction = 1 if angle_error > 0 else -1
-        twist = Twist()
-
-        if abs(angle_error) > 25:
-            twist.angular.z = 0.5 * direction
-        elif abs(angle_error) > 10:
-            twist.angular.z = 0.3 * direction
-        else:
-            twist.angular.z = 0.15 * direction
- 
-        safe_publish_twist(node, robot_name, twist)
-        print(f"↪️ adjusting to heading {heading_deg:.1f}°, current={heading_y_now:.1f}°, error={angle_error:.1f}°")
-        time.sleep(0.1)
- 
-    safe_publish_twist(node, robot_name, Twist())
-    time.sleep(0.2)
- 
- 
-def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
-                               tolerance: float = 10.0, max_acceptable_angle_error: float = 25.0, semantic_threshold = 0.0):
-    x_target, y_target = target["x"], target["y"]
-
-    print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
-
-    while True:
-        x_now, y_now, heading_y_now = get_current_position(robot_name)
-        dx = x_target - x_now
-        dz = y_target - y_now
-        distance = math.hypot(dx, dz)
-
-        if distance < tolerance:
-            print("🎉 Reached target.")
-            break
-        
-        if distance < semantic_threshold:
-            print("🎉 Reached target.")
-            break
- 
-        target_angle = math.degrees(math.atan2(dx, dz)) % 360
-        angle_error = (target_angle - heading_y_now + 180) % 360 - 180
- 
-        if abs(angle_error) > max_acceptable_angle_error:
-            print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
-            rotate_to_face_target(node, robot_name, target)
-            continue
- 
-        twist = Twist()
-        twist.linear.x = 0.1
-        safe_publish_twist(node, robot_name, twist)
-        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, target={target_angle:.1f}°, "
-              f"error={angle_error:.1f}°")
-
-        time.sleep(0.2)
-        safe_publish_twist(node, robot_name, Twist())
-        time.sleep(0.1)
- 
- 
-# ================== Fine-tune ======================
-def fine_rotate_to_target_angle(node: Node, robot_name: str, target_angle_deg: float, 
-                                angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 2.0):
-    """
-    精细化转弯：根据当前朝向和目标角度计算需要转动的角度，然后执行精确转动
-    
-    Args:
-        node: ROS节点
-        robot_name: 机器人名称
-        target_angle_deg: 目标朝向角度（度）
-        angular_speed_deg_per_s: 转动速度（度/秒）
-        tolerance_deg: 角度容差（度）
-    """
-    _, _, current_heading = get_current_position(robot_name)
-    
-    # 计算需要转动的角度（考虑360度循环）
-    angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
-    
-    # 如果角度差已经在容差范围内，直接返回
-    if abs(angle_diff) <= tolerance_deg:
-        print(f"🎯 角度已对齐：当前 {current_heading:.1f}°，目标 {target_angle_deg:.1f}°，差值 {angle_diff:.1f}°")
-        return
-    
-    # 计算转动时间
-    duration_sec = abs(angle_diff) / angular_speed_deg_per_s
-    
-    # 设置转动方向和速度
-    twist = Twist()
-    angular_speed_rad_per_s = math.radians(angular_speed_deg_per_s)
-    twist.angular.z = angular_speed_rad_per_s if angle_diff > 0 else -angular_speed_rad_per_s
-    
-    direction = "左" if angle_diff > 0 else "右"
-    print(f"🔄 精细转动：当前 {current_heading:.1f}°，目标 {target_angle_deg:.1f}°")
-    print(f"   需转动 {abs(angle_diff):.1f}° 向{direction}，预计时间 {duration_sec:.2f}s")
-    
-    # 执行转动
-    safe_publish_twist(node, robot_name, twist)
-    time.sleep(duration_sec)
-    safe_publish_twist(node, robot_name, Twist())
-    
-    # 验证转动结果
-    _, _, final_heading = get_current_position(robot_name)
-    final_diff = (target_angle_deg - final_heading + 180) % 360 - 180
-    print(f"✅ 精细转动完成：最终朝向 {final_heading:.1f}°，剩余偏差 {final_diff:.1f}°")
-
-
-def fine_approach_to_target(node: Node, robot_name: str, target: Dict[str, float], speed_m_per_s: float = 0.05):
-    """根据当前坐标推算与目标的距离，然后直行该距离"""
-    x_now, y_now, heading_y = get_current_position(robot_name)
-    x_target = target["x"]
-    y_target = target["y"]
-
-    dx = x_target - x_now
-    dy = y_target - y_now
-    distance_mm = math.hypot(dx, dy)
-    duration_sec = distance_mm / (speed_m_per_s * 1000)
-
-    twist = Twist()
-    twist.linear.x = speed_m_per_s
-    safe_publish_twist(node, robot_name, twist)
-
-    print(f"🚶 精细前进：距离 {distance_mm:.1f}mm，预计时间 {duration_sec:.2f}s")
-
-    time.sleep(duration_sec)
-
-    safe_publish_twist(node, robot_name, Twist())
-    print("✅ 精细前进完成")
-
-
-def calculate_target_angle(current_pos: Tuple[float, float, float], target_pos: Dict[str, float]) -> float:
-    """计算从当前位置到目标位置需要的朝向角度"""
-    x_now, y_now, _ = current_pos
-    x_target, y_target = target_pos["x"], target_pos["y"]
-    
-    dx = x_target - x_now
-    dy = y_target - y_now
-    
-    # 使用atan2计算角度，并转换为度数
-    target_angle = math.degrees(math.atan2(dx, dy)) % 360
-    return target_angle
-
-
-def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
-    """
-    增强版导航函数：粗调 + 精调的两阶段导航
-    """
-    x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_name)
-    dx = x_target - x_now
-    dy = y_target - y_now
-    distance = math.hypot(dx, dy)
- 
-    print(f"\n🧭 NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f}) | dist={distance:.2f}mm")
-    
-    # ===== 阶段1：粗调导航 =====
-    print("📍 阶段1：粗调导航")
-    
-    # Step 1: 粗略转向目标
-    rotate_to_face_target(node, robot_name, target)
-
-    # Step 2: 粗略前进到目标附近
-    move_forward_until_reached(node, robot_name, target, semantic_threshold=300.0)
-
-    # ===== 阶段2：精细调整 =====
-    print("🎯 阶段2：精细调整")
-    
-    # Step 3: 精细化朝向调整
-    current_pos = get_current_position(robot_name)
-    target_angle = calculate_target_angle(current_pos, target)
-    fine_rotate_to_target_angle(node, robot_name, target_angle, angular_speed_deg_per_s=10.0)
-
-    # Step 4: 精细化前进（基于坐标计算的固定距离）
-    fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.03)
-
-    # ===== 阶段3：最终朝向调整 =====
-    if "heading_deg" in target:
-        print("🧭 阶段3：最终朝向调整")
-        fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], angular_speed_deg_per_s=10.0)
- 
-    print(f"✅ {robot_name} 精细化导航完成")
-
-
-# 可选：更保守的导航版本，适用于高精度要求的场景
-# def navigate_to_position_ultra_precise(node: Node, robot_name: str, target: Dict[str, float]):
-#     """
-#     超精确导航版本：多轮迭代调整，直到达到期望精度
-#     """
-#     x_target, y_target = target["x"], target["y"]
-#     max_iterations = 3  # 最大迭代次数
-#     position_tolerance = 50.0  # 位置容差（毫米）
-    
-#     print(f"\n🎯 ULTRA-PRECISE NAVIGATE {robot_name} → ({x_target:.1f}, {y_target:.1f})")
-    
-#     for iteration in range(max_iterations):
-#         print(f"\n🔄 迭代 {iteration + 1}/{max_iterations}")
-        
-#         # 检查当前位置
-#         x_now, y_now, heading_now = get_current_position(robot_name)
-#         dx = x_target - x_now
-#         dy = y_target - y_now
-#         current_distance = math.hypot(dx, dy)
-        
-#         print(f"📍 当前位置: ({x_now:.1f}, {y_now:.1f}), 距目标: {current_distance:.1f}mm")
-        
-#         # 如果已经足够接近，退出循环
-#         if current_distance <= position_tolerance:
-#             print(f"🎉 已达到精度要求 ({current_distance:.1f}mm ≤ {position_tolerance}mm)")
-#             break
-        
-#         # 计算需要的朝向角度
-#         target_angle = calculate_target_angle((x_now, y_now, heading_now), target)
-        
-#         # 精细转向
-#         fine_rotate_to_target_angle(node, robot_name, target_angle, 
-#                                    angular_speed_deg_per_s=2.0, tolerance_deg=1.0)
-        
-#         # 精细前进
-#         fine_approach_to_target(node, robot_name, target, speed_m_per_s=0.02)
-        
-#         # 短暂等待让位置稳定
-#         time.sleep(0.5)
-    
-#     # 最终朝向调整
-#     if "heading_deg" in target:
-#         print("🧭 最终朝向调整")
-#         fine_rotate_to_target_angle(node, robot_name, target["heading_deg"], 
-#                                    angular_speed_deg_per_s=1.0, tolerance_deg=0.5)
-    
-#     # 最终位置报告
-#     x_final, y_final, heading_final = get_current_position(robot_name)
-#     final_distance = math.hypot(x_target - x_final, y_target - y_final)
-#     print(f"✅ 超精确导航完成")
-#     print(f"   最终位置: ({x_final:.1f}, {y_final:.1f}), 朝向: {heading_final:.1f}°")
-#     print(f"   最终精度: {final_distance:.1f}mm")
-
-
-
- 
-# ================== main ====================
 def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
-    """
-    导航到目标，包含分布式协商机制
-    """
+    """Main navigation function with coordination and conflict resolution"""
     is_successful = False
 
-    # 0) 设置当前机器人名称
     set_current_robot_name(robot_name)
-    
-    # 1) 初始化导航协调器
     setup_navigation_coordinator(node)
-    
-    # 2) 确保位置跟踪节点已接入 executor 并数据就绪
+
+    # Initialize position tracking
     tracker_robot = getRobotPositionCache(robot_name, executor)
     if tracker_robot is None:
-        print("❌ Abort navigation due to missing pose.")
+        print(f"[ERROR] Position tracking failed for {robot_name}")
         tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
         return is_successful
- 
-    # 3) 解析语义位置或直接使用坐标
+
+    # Resolve target
     if isinstance(target, str):
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
             x, y, heading = get_current_position(target)
             resolved_target = {"x": x, "y": y, "heading": heading}
-            print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
+            print(f"[TARGET_RESOLUTION] Dynamic target '{target}' resolved to ({x:.1f}, {y:.1f})")
         else:
             if target in semantic_locations:
                 resolved_target = semantic_locations[target]
-                print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
+                print(f"[TARGET_RESOLUTION] Semantic target '{target}' resolved")
             else:
-                print(f"❌ Error: target '{target}' not found in semantic_locations")
-                tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
+                print(f"[ERROR] Target '{target}' not found")
+                tts_manager.say(f"Can't resolve target {target}")
                 return is_successful
     else:
         resolved_target = target
 
-    # 4) 分布式协商导航
-    if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
-        
-        # Step 1: 先记录自己的导航意图为"announcing"状态
-        with intentions_lock:
-            navigation_intentions[robot_name] = {
-                "target": resolved_target,
-                "timestamp": time.time(),
-                "status": "announcing"
-            }
-        
-        # Step 2: 广播导航意图，询问是否有冲突
-        print(f"\n🤝 {robot_name} 开始导航协商...")
-        conflicts = broadcast_navigation_request(robot_name, resolved_target)
-        
-        # Step 3: 根据冲突情况分配实际目标
-        actual_target = resolve_navigation_conflicts(robot_name, resolved_target, conflicts)
-        
-        # Step 4: 确认导航意图
-        confirm_navigation_intent(robot_name, actual_target)
-        
-        # Step 5: 执行导航
-        print(f"🎯 {robot_name} 开始导航到分配目标: ({actual_target['x']:.1f}, {actual_target['y']:.1f})")
-        if "heading_deg" in actual_target:
-            print(f"📐 Target includes heading: {actual_target['heading_deg']}°")
-
-        navigate_to_position(node, robot_name, actual_target)
-
-        # Step 6: 导航完成，清理意图
-        cleanup_navigation_intent(robot_name)
-        
-    else:
-        print(f"⚠️ Invalid resolved target: {resolved_target}")
+    if not (isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target):
+        print(f"[ERROR] Invalid target format: {resolved_target}")
         return is_successful
+
+    # Execute coordinated navigation
+    print(f"[COORDINATION] Starting navigation coordination for {robot_name}")
+    
+    with intentions_lock:
+        navigation_intentions[robot_name] = {
+            "target": resolved_target,
+            "timestamp": time.time(),
+            "status": "announcing"
+        }
+
+    conflicts = broadcast_navigation_request(robot_name, resolved_target)
+    actual_target = resolve_navigation_conflicts(robot_name, resolved_target, conflicts)
+    confirm_navigation_intent(robot_name, actual_target)
+
+    print(f"[NAVIGATION] Executing navigation to ({actual_target['x']:.1f}, {actual_target['y']:.1f})")
+    navigate_to_position(node, robot_name, actual_target)
+    cleanup_navigation_intent(robot_name)
 
     is_successful = True
     return is_successful
 
 def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
-    """
-    轻量包装：让签名更简单，内部复用 navigate_to_target
-    """
+    """Simplified navigation interface"""
     return navigate_to_target(node, executor, robot_name, target)
 
-
-# === 调试和监控函数 ===
+# ============================================================================
+# UTILITY AND DEBUG FUNCTIONS
+# ============================================================================
 
 def get_navigation_status() -> Dict:
-    """获取当前导航协商状态"""
+    """Get current navigation coordination status"""
     with intentions_lock:
         return navigation_intentions.copy()
 
-
 def print_navigation_status():
-    """打印当前导航状态"""
+    """Print current navigation status"""
     status = get_navigation_status()
     print("\n" + "="*50)
-    print("🤝 导航协商状态:")
+    print("NAVIGATION COORDINATION STATUS:")
     for robot, intention in status.items():
         target = intention["target"]
         status_str = intention["status"]
-        print(f"  {robot}: → ({target['x']:.1f}, {target['y']:.1f}) [{status_str}]")
+        print(f"  {robot}: -> ({target['x']:.1f}, {target['y']:.1f}) [{status_str}]")
     print("="*50 + "\n")
 
+# ============================================================================
+# TEST MAIN FUNCTION
+# ============================================================================
 
 def main():
     import rclpy
-    from rclpy.executors import MultiThreadedExecutor
     import threading
 
     rclpy.init()
@@ -783,25 +616,24 @@ def main():
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
-    # ✨ 添加这行让 RigidTracker 的回调能跑
     executor_thread = threading.Thread(target=executor.spin, daemon=True)
     executor_thread.start()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--robot_id", required=True, choices=["robot1", "robot2"])
     args = parser.parse_args()
-    target = {"x": 100.0, "y": 100.0, "heading_deg": 45.0}
+    
+    test_target = {"x": 100.0, "y": 100.0, "heading_deg": 45.0}
 
     try:
-        print(f"🚀 Starting navigation test for {args.robot_id}...")
-        success = navigate_to(node, executor, args.robot_id, target)
-        print(f"\n✅ Navigation success: {success}")
+        print(f"[TEST] Starting navigation test for {args.robot_id}")
+        success = navigate_to(node, executor, args.robot_id, test_target)
+        print(f"[TEST] Navigation result: {'SUCCESS' if success else 'FAILED'}")
     except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user")
+        print("[TEST] Interrupted by user")
     finally:
         node.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
