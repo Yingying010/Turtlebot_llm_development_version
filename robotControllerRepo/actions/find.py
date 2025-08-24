@@ -14,8 +14,6 @@ from llmParserRepo.yolo_perception import detect_once as yolo_detect_once
 import config
 from geometry_msgs.msg import Twist
 
-
-
 # ========= 工具 =========
 def get_robot_id() -> str:
     return config.get("robot_id")
@@ -48,6 +46,55 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
     db = _bb_read(robot_name)
     db.setdefault("objects", {})[key] = value
     _bb_write(robot_name, db)
+
+
+# === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
+_HISTORY_PATH = "memory.chattinglog.json"
+
+def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
+    """
+    读取最后 max_turns 条 user/assistant 类型的对话，返回
+    [{"role":"user|assistant","content":"..."}]
+    """
+    if not os.path.exists(path):
+        return []
+
+    msgs = []
+    try:
+        from collections import deque
+        with open(path, "r", encoding="utf-8") as f:
+            # 只保留最后 100 行，避免大文件内存占用；然后再挑 user/assistant
+            tail = deque(f, maxlen=100)
+        for line in tail:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+
+            typ = obj.get("type")
+            content = obj.get("content")
+            if typ in ("user", "assistant"):
+                # assistant 可能是 JSON 字符串，把它当纯文本传给 LLM
+                if isinstance(content, dict):
+                    content = json.dumps(content, ensure_ascii=False)
+                msgs.append({"role": "user" if typ == "user" else "assistant",
+                             "content": str(content) if content is not None else ""})
+        # 只取末尾 max_turns 条
+        return msgs[-max_turns:]
+    except Exception as e:
+        logger.warning(f"[find] read history failed: {e}")
+        return []
+
+class _FileHistoryStore:
+    """只实现 recent_chat_messages，用于 execute_find_with_llm_replanning"""
+    def __init__(self, path: str):
+        self.path = path
+    def recent_chat_messages(self, max_turns: int = 5):
+        return _recent_chat_messages_from_file(self.path, max_turns=max_turns)
+
 
 # ========= 简单单帧滤波器（不需要历史） =========
 class SimpleDetectionFilter:
@@ -470,7 +517,13 @@ def execute_find_with_llm_replanning(
 
 # ========= 对外入口 =========
 def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
-    result = execute_find_with_llm_replanning(node, robot_name, item)
+    # 自动注入历史：只读 memory.chattinglog.json；不存在就不用历史（不兜底）
+    history_store = _FileHistoryStore(_HISTORY_PATH) if os.path.exists(_HISTORY_PATH) else None
+
+    result = execute_find_with_llm_replanning(
+        node, robot_name, item,
+        history_store=history_store
+    )
 
     if not result.get("found"):
         return result
@@ -494,7 +547,6 @@ def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
                     navigate_after_follow(node, robot_name, target)
                 else:
                     logger.warning("[find] navigate missing target")
-
             elif action == "pickup":
                 obj = params.get("item")
                 if obj:
@@ -503,7 +555,6 @@ def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
                         logger.warning("[find] pickup failed")
                 else:
                     logger.warning("[find] pickup missing item")
-
             elif action == "dropoff":
                 obj = params.get("item")
                 if obj:
@@ -512,10 +563,8 @@ def run_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
                         logger.warning("[find] dropoff failed")
                 else:
                     logger.warning("[find] dropoff missing item")
-
             else:
                 logger.warning(f"[find] Unsupported follow-up action: {action}")
-
         except Exception as e:
             logger.exception(f"[find] Error during follow-up task: {e}")
 
