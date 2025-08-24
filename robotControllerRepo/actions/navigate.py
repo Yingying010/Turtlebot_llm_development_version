@@ -494,7 +494,7 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
  
 # ================== Fine-tune ======================
 def fine_rotate_to_target_angle(node: Node, robot_name: str, target_angle_deg: float, 
-                                angular_speed_deg_per_s: float = 5.0, tolerance_deg: float = 2.0):
+                                angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 2.0):
     """
     精细化转弯：根据当前朝向和目标角度计算需要转动的角度，然后执行精确转动
     
