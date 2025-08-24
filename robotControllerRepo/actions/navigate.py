@@ -15,6 +15,10 @@ import argparse
 from phasespace.rigid_tracker import RigidTracker
 import config
 from ttsRepo.stream_tts import tts_manager
+from robotControllerRepo.utils.coord_convert import resolve_object_position
+from robotControllerRepo.actions.rotate import rotate_deg
+from robotControllerRepo.actions.move import move
+
 
 # Configuration
 semantic_locations = config.get("semantic_locations")
@@ -601,6 +605,113 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
 def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
     """Simplified navigation interface"""
     return navigate_to_target(node, executor, robot_name, target)
+
+def navigate_after_follow(node: Node, robot_name: str, item: str, executor):
+    """
+    after find the item
+    """
+    # 候选的黑板key（按优先级排序）
+    candidate_keys = [
+        f"{item}_target",     # 标准格式：cup_target
+        f"{item}",           # 直接使用物品名：cup
+        f"found_{item}",     # found_cup
+        f"target_{item}",    # target_cup
+    ]
+    
+    target_position = None
+    used_key = None
+    
+    # 获取机器人当前位置
+    robot_x, robot_y, robot_heading = get_current_position(robot_name)
+    robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
+    print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
+    
+    # 尝试各个候选key
+    for key in candidate_keys:
+        print(f"🔑 Trying blackboard key: '{key}'")
+        map_position = resolve_object_position(robot_name, key, robot_pos)
+        if map_position:
+            print(f"✅ Found in blackboard with key '{key}':")
+            print(f"   📍 Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
+            print(f"   📏 Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
+            print(f"   🎯 Confidence: {map_position.get('confidence', 0):.2f}")
+            target_position = map_position
+            used_key = key
+            break
+    
+    # 如果黑板中没找到，尝试语义位置
+    if not target_position:
+        print(f"🔍 Not found in blackboard, checking semantic locations...")
+        semantic_candidates = [item, f"{item}_location", f"{item}_pos"]
+        
+        for semantic_key in semantic_candidates:
+            if semantic_key in semantic_locations:
+                semantic_pos = semantic_locations[semantic_key]
+                print(f"✅ Found in semantic locations with key '{semantic_key}':")
+                print(f"   📍 Coordinates: ({semantic_pos['x']:.2f}, {semantic_pos['y']:.2f})")
+                if 'heading_deg' in semantic_pos:
+                    print(f"   🧭 Heading: {semantic_pos['heading_deg']}°")
+                target_position = semantic_pos
+                used_key = semantic_key
+                break
+    
+    # 如果都没找到，报错
+    if not target_position:
+        print(f"❌ Could not find location for item '{item}'!")
+        print(f"💡 Tried blackboard keys: {candidate_keys}")
+        print(f"💡 Tried semantic keys: {[item, f'{item}_location', f'{item}_pos']}")
+        print(f"💡 Available semantic locations: {list(semantic_locations.keys())}")
+        tts_manager.say(f"Sorry, I cannot find the location of {item}")
+        return False
+    
+    print(f"🎯 Using location from: {used_key}")
+
+    # === 阶段 1：导航到目标位置 ===
+    print(f"\n🧭 Phase 1: Navigation to target")
+    
+    if isinstance(target_position, dict) and "estimated_distance" in target_position:
+        # 🎯 使用coord_convert的结果，但仍需要调整朝向
+        print(f"📏 Using coord_convert results")
+        print(f"🎯 Target coordinates: ({target_position['x']:.2f}, {target_position['y']:.2f})")
+        
+        # 计算朝向（coord_convert给的是绝对坐标，需要相对当前位置计算角度）
+        target_x, target_y = target_position["x"], target_position["y"]
+        dx = target_x - robot_x
+        dy = target_y - robot_y
+        current_distance = math.sqrt(dx*dx + dy*dy)
+        target_angle = math.degrees(math.atan2(dx, dy)) % 360
+        angle_diff = (target_angle - robot_heading + 180) % 360 - 180
+        
+        print(f"📏 Current distance to target: {current_distance:.2f}m")
+        print(f"🔄 Need to rotate: {angle_diff:.1f}°")
+        
+        # Step 1: 转向目标
+        if abs(angle_diff) > 3:  # 3度容差
+            print(f"🔄 Rotating {angle_diff:.1f}°...")
+            rotate_success = rotate_deg(node, robot_name, angle_diff)
+            if not rotate_success:
+                print(f"❌ Rotation failed!")
+                return False
+        else:
+            print(f"✅ Already facing target direction")
+        
+        # Step 2: 前进到目标
+        print(f"🚶 Moving forward {current_distance:.2f}m...")
+        is_successful = move(node, robot_name, "forward", current_distance, "meter")
+    else:
+        # 对于语义位置，使用完整导航
+        is_successful = navigate_to_target(node, executor, robot_name, target_position)
+    
+    if not is_successful:
+        print(f"❌ Navigation failed!")
+        tts_manager.say(f"Sorry, I could not reach the {item}")
+        return False
+        
+    print(f"✅ Navigation completed! Reached target location")
+    print(f"🎯 Ready to collect {item}...")
+
+    return True
+
 
 # ============================================================================
 # UTILITY AND DEBUG FUNCTIONS

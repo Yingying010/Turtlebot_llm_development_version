@@ -226,24 +226,24 @@ class StandaloneYOLODetector:
             return []
 
 # -------- 智能参数优化 --------
-def get_optimized_params(target_class: str, has_waypoints: bool) -> tuple:
+def get_optimized_params(item: str, has_waypoints: bool) -> tuple:
     """根据物体类型和搜索策略优化检测参数"""
     conf_thres = 0.5
     max_rot_deg = 360
     
     # 针对不同物体类型的优化
-    if target_class in ["cup", "bottle", "phone", "remote", "keys"]:  # 小物体
+    if item in ["cup", "bottle", "phone", "remote", "keys"]:  # 小物体
         conf_thres = 0.4  # 更宽松，避免漏检小物体
-    elif target_class in ["person", "chair", "table", "sofa", "bed"]:  # 大物体
+    elif item in ["person", "chair", "table", "sofa", "bed"]:  # 大物体
         conf_thres = 0.6   # 可以更严格，大物体通常检测置信度高
-    elif target_class in ["book", "laptop", "mouse", "keyboard"]:  # 中等物体
+    elif item in ["book", "laptop", "mouse", "keyboard"]:  # 中等物体
         conf_thres = 0.5   # 保持默认
     
     # 如果有多个搜索点，每个点只需半圈扫描（提高效率）
     if has_waypoints:
         max_rot_deg = 180  # 多点搜索时每点半圈即可
     
-    logger.debug(f"Optimized params for '{target_class}': conf_thres={conf_thres}, max_rot_deg={max_rot_deg}")
+    logger.debug(f"Optimized params for '{item}': conf_thres={conf_thres}, max_rot_deg={max_rot_deg}")
     return conf_thres, max_rot_deg
 
 # -------- 摄像头处理 --------
@@ -490,34 +490,25 @@ def _rotate_scan_stepwise(robot_name: str,
     logger.info(f"[find] 🛑 Scan complete: {step_count} steps, {turned}° total")
     return None
 
-# -------- 主要的find功能 --------
-def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
+# -------- find --------
+def execute_find(node: Any, robot_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """独立的查找动作：旋转扫描 + 🆕 简单滤波"""
     # === 解析参数 ===
-    target: str = params.get("target_class", "cup")
-    save_as: str = params.get("save_as", target)
-    timeout_sec: float = float(params.get("timeout_sec", 25))
-    use_spin: bool = bool(params.get("spin_scan", True))
-    waypoints: List[Any] = params.get("search_waypoints", [])
+    item: str = params.get("item")
+    save_as: str = params.get("save_as", item)  # 新增：用于黑板保存键名
+    timeout_sec = 25
+    use_spin = False
+    waypoints = []
+    rotate_fn = None
+    navigate_to_fn = None
+    event_pub = None
     
     # === 🆕 滤波相关参数 ===
     use_filter: bool = bool(params.get("use_filter", True))  # 默认开启滤波
     num_frames: int = int(params.get("detection_frames", 1 if use_filter else 3))  # 滤波时默认1帧
 
     # === 系统优化参数 ===
-    conf_thres, max_rot_deg = get_optimized_params(target, bool(waypoints))
-    
-    # === 获取上下文函数 ===
-    rotate_fn = ctx.get("rotate_fn")
-    navigate_to_fn = ctx.get("navigate_to_fn")
-    event_pub = ctx.get("event_pub")
-
-    if use_spin and not callable(rotate_fn):
-        logger.warning("spin_scan=True but rotate_fn missing, will skip spin scan.")
-        use_spin = False
-    if waypoints and not callable(navigate_to_fn):
-        logger.warning("search_waypoints provided but navigate_to_fn missing, will skip waypoint search.")
-        waypoints = []
+    conf_thres, max_rot_deg = get_optimized_params(item, bool(waypoints))
 
     # === 初始化检测器和滤波器 ===
     detector = StandaloneYOLODetector()
@@ -534,7 +525,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
 
     # === 开始搜索 ===
     t0 = time.time()
-    logger.info(f"[find] robot={robot_name} target={target} timeout={timeout_sec}s conf>={conf_thres}")
+    logger.info(f"[find] robot={robot_name} target={item} timeout={timeout_sec}s conf>={conf_thres}")
     
     if use_filter:
         logger.info(f"[find] 🔍 Using SIMPLE FILTER: {num_frames} frame, fast detection")
@@ -555,7 +546,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
         )
 
     # === 1. 当前帧检测 ===
-    hit = detect_current_view(target, conf_thres)
+    hit = detect_current_view(item, conf_thres)
 
     # === 2. 旋转扫描 ===
     if not hit and use_spin:
@@ -564,7 +555,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
             robot_name=robot_name,
             rotate_fn=rotate_fn,
             detect_fn=detect_current_view,
-            target_class=target,
+            target_class=item,
             conf_thres=conf_thres,
             max_rot_deg=max_rot_deg,
             step_deg=30,
@@ -589,9 +580,9 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
             time.sleep(1.0)  # 到达后等待稳定
             
             # 到达后先检测一次
-            hit = detect_current_view(target, conf_thres)
+            hit = detect_current_view(item, conf_thres)
             if hit:
-                logger.info(f"[find] 🎯 Found {target} at waypoint {wp}!")
+                logger.info(f"[find] 🎯 Found {item} at waypoint {wp}!")
                 break
 
             # 如果没找到，在这个位置做扫描
@@ -601,7 +592,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
                     robot_name=robot_name,
                     rotate_fn=rotate_fn,
                     detect_fn=detect_current_view,
-                    target_class=target,
+                    item=item,
                     conf_thres=conf_thres,
                     max_rot_deg=180,  # waypoint处只扫描半圈
                     step_deg=45,      # 更大步长
@@ -609,24 +600,24 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
                 )
 
             if hit:
-                logger.info(f"[find] 🎯 Found {target} during scan at waypoint {wp}!")
+                logger.info(f"[find] 🎯 Found {item} during scan at waypoint {wp}!")
                 break
 
     # === 处理结果 ===
     if not hit:
         tts_manager.say("I couldn't find it.")
-        payload = {"robot": robot_name, "target": target, "found": False, "ts": time.time()}
+        payload = {"robot": robot_name, "target": item, "found": False, "ts": time.time()}
         if callable(event_pub):
             try:
                 event_pub("find_result", payload)
             except Exception as e:
                 logger.warning(f"event_pub error: {e}")
-        logger.info(f"[find] not found: {target}")
+        logger.info(f"[find] not found: {item}")
         return {"ok": True, "found": False, "blackboard_key": save_as}
 
     # === 成功找到 ===
     record = {
-        "class": target,
+        "class": item,
         "center_xy": hit.get("center_xy"),
         "bbox_xyxy": hit.get("bbox_xyxy"),
         "map_xy": hit.get("map_xy") if "map_xy" in hit else None,
@@ -643,7 +634,7 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     }
     bb_set(robot_name, save_as, record)
 
-    payload = {"robot": robot_name, "target": target, "found": True,
+    payload = {"robot": robot_name, "target": item, "found": True,
                "key": save_as, "conf": record["conf"], "ts": record["timestamp"]}
     if callable(event_pub):
         try:
@@ -651,8 +642,8 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
         except Exception as e:
             logger.warning(f"event_pub error: {e}")
 
-    tts_manager.say(f"I found the {target}.")
-    logger.info(f"[find] found {target} (key={save_as}, conf={record['conf']:.3f})")
+    tts_manager.say(f"I found the {item}.")
+    logger.info(f"[find] found {item} (key={save_as}, conf={record['conf']:.3f})")
     
     # 🆕 显示滤波信息
     if record.get("filter_used"):
@@ -663,16 +654,16 @@ def execute_find(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> D
     
     return {"ok": True, "found": True, "blackboard_key": save_as, "record": record}
 
-# -------- 智能动态重规划 --------
+# -------- replan --------
 def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
-    """智能版：找到物体后调用LLM决定后续动作"""
+    # execute find and get result
     basic_result = execute_find(node, robot_name, params, **ctx)
     
     if not basic_result.get("found", False):
         logger.info(f"[find] {robot_name} didn't find {params.get('target_class')}, no follow-up actions needed")
         return basic_result
     
-    # === 获取LLM重规划功能 ===
+    # === find item and replanning ===
     llm_replanning_fn = ctx.get("llm_replanning_fn")
     history_store = ctx.get("history_store")
     
@@ -739,51 +730,20 @@ def execute_find_with_llm_replanning(node: Any, robot_name: str, params: Dict[st
             
     except Exception as e:
         logger.error(f"[find] LLM replanning error: {e}")
-    
-    # === 回退到简单模式 ===
-    logger.info("[find] Falling back to simple replanning")
-    return execute_find_with_simple_replanning(node, robot_name, params, **ctx)
 
-def execute_find_with_simple_replanning(node: Any, robot_name: str, params: Dict[str, Any], **ctx) -> Dict[str, Any]:
-    """简化版：找到物体后生成基本的后续任务（回退模式）"""
-    basic_result = execute_find(node, robot_name, params, **ctx)
-    
-    if not basic_result.get("found", False):
-        return basic_result
-    
-    # === 简单的后续任务生成 ===
-    target_class = params.get("target_class", "cup")
-    blackboard_key = basic_result.get("blackboard_key")
-    
-    # 生成标准的 collect + deliver 任务
-    follow_up_tasks = [
-        {
-            "action": "collect",
-            "parameters": {
-                "item": target_class,
-                "target": blackboard_key
-            }
-        },
-        {
-            "action": "deliver", 
-            "parameters": {
-                "item": target_class,
-                "target": "master"
-            }
-        }
-    ]
-    
-    basic_result["follow_up_tasks"] = follow_up_tasks
-    basic_result["replanning_success"] = True
-    basic_result["replanning_source"] = "simple_fallback"
-    
-    logger.info(f"[find] Generated {len(follow_up_tasks)} simple fallback tasks")
-    return basic_result
+# --------- no llm (backup) -------
+def execute_find_with_simple_replanning(node, robot_name, params, **ctx):
+    # If there is no LLM, only execute find, without adding any additional actions
+    logger.info(f"[find] Using simple replanning fallback — no actions will be added")
+    result = execute_find(node, robot_name, params, **ctx)
+    result["follow_up_tasks"] = []
+    result["replanning_success"] = False
+    result["replanning_source"] = "fallback"
+    result["replanning_reasoning"] = "No LLM available, so no follow-up tasks planned"
+    return result
 
 # -------- LLM重规划实现 --------
 def create_llm_replanning_function():
-    """创建LLM重规划函数，可以在robot_controller中注入"""
-    
     def llm_replanning_function(discovery_context: Dict, chat_history: List[Dict], robot_name: str) -> Dict:
         """调用LLM进行智能重规划"""
         try:
@@ -813,46 +773,59 @@ def create_llm_replanning_function():
 
             Based on the conversation history, decide if the robot should:
             1. Just report finding the object (no further action)
-            2. pickup the object 
-            3. pickup and deliver the object to someone (requires navigate in between)
+            2. pickup the object
+            3. pickup and deliver the object to someone
             4. Other specific actions
 
             ========================
             Action Definitions
             ========================
-            1. navigate  
-            - To a named target: {{"target": "<target_name>"}}  
-            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
+            1) navigate
+            - To a named target: {"target": "<target_name>"}
 
-            2. pickup  
-            - Pick up an item: {{"item": "<item>"}}
+            2) pickup
+            - Pick up an item: {"item": "<item>"}
 
-            3. dropoff  
-            - Drop off an item: {{"item": "<item>"}}
+            3) dropoff
+            - Drop off an item: {"item": "<item>"}
 
             ========================
-            Important Rules
+            Mandatory Planning Rules
             ========================
-            - When the user says "bring to me" or "deliver to <person>", the action sequence MUST be:
-            1) pickup the item  
-            2) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
-            3) dropoff the item  
+            - If the user asks to "bring"/"deliver" the found item to someone (e.g., the master), the REQUIRED sequence is:
+            A) navigate to the OBJECT location
+                - Use the provided Blackboard Key as the named target:
+            B) pickup the item
+            C) navigate to the RECIPIENT (person/location)
+                - For "bring to me", use the master name {get_master_name()}:
+                {"action": "navigate", "parameters": {"target": "{get_master_name()}"}}
+            D) dropoff the item
 
-            - Do NOT skip the navigate step before dropoff.
-            - The output must always follow strict JSON format:
+            - If the user only says "collect <item>" (no delivery target), the sequence is:
+            navigate (to object via blackboard key) -> pickup
 
-            {{
-                "action_needed": true/false,
-                "tasks": [
-                    {{
-                        "action": "pickup|navigate|dropoff|wait",
-                        "parameters": {{ ... }}
-                    }}
-                ],
-                "reasoning": "Brief explanation"
-            }}
+            - If the user only asked to find the object (no collect/deliver), then just report:
+            action_needed = false, tasks = []
 
-            """).strip()
+            - If the object was not found, do not plan pickup/navigate/dropoff:
+            action_needed = false
+
+            - Do NOT invent extra actions. Keep parameters EXACTLY as defined above.
+            - Output strict JSON:
+
+            {
+            "action_needed": true/false,
+            "tasks": [
+                {
+                "action": "pickup|navigate|dropoff|wait",
+                "parameters": { ... }
+                }
+            ],
+            "reasoning": "Brief explanation"
+            }
+
+            When the user says "bring to me", use "{get_master_name()}" as the recipient target.
+            """).strip() % (found_object["blackboard_key"])
 
 
             # 构建对话历史字符串
@@ -932,7 +905,7 @@ def create_llm_replanning_function():
     return llm_replanning_function
 
 # -------- 对外接口 --------
-def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
+def execute_find(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     """与 robot_controller 的单步接口保持一致"""
     robot = task.get("robot") or task.get("parameters", {}).get("robot")
     if not robot:
@@ -940,149 +913,3 @@ def run_action(node: Any, task: Dict[str, Any], **ctx) -> Dict[str, Any]:
     
     # 使用智能LLM重规划版本
     return execute_find_with_llm_replanning(node, robot, task.get("parameters", {}), **ctx)
-
-# -------- 独立运行的主函数 --------
-def run_standalone_test():
-    """独立运行find测试"""
-    import sys
-    
-    try:
-        import rclpy
-        from rclpy.node import Node
-        
-        # 初始化ROS
-        rclpy.init()
-        logger.info("🚀 ROS initialized")
-        
-        # 创建ROS节点
-        node = rclpy.create_node('standalone_find_test')
-        logger.info("🤖 ROS node created")
-        
-        # 获取参数
-        robot_name = sys.argv[1] if len(sys.argv) > 1 else "robot1"
-        target_class = sys.argv[2] if len(sys.argv) > 2 else "cup"
-        
-        logger.info(f"🎯 Test: robot={robot_name}, target={target_class}")
-        
-        # 模拟函数
-        def rotate_fn(robot, deg):
-            logger.info(f"🔄 Mock rotate: {robot} {deg}°")
-            time.sleep(0.5)
-            return True
-        
-        def nav_fn(robot, target):
-            logger.info(f"🚶 Mock navigate: {robot} -> {target}")
-            time.sleep(1.0)
-            return True
-        
-        def event_fn(kind, payload):
-            logger.info(f"📡 Event: {kind} -> {payload}")
-        
-        # 创建LLM重规划函数
-        llm_replanning_fn = create_llm_replanning_function()
-        
-        # 模拟历史存储
-        class MockHistoryStore:
-            def recent_chat_messages(self, max_turns=5):
-                return [
-                    {"role": "user", "content": f"Find my {target_class}"},
-                    {"role": "assistant", "content": f"I'll look for your {target_class}."}
-                ]
-        
-        mock_history = MockHistoryStore()
-        
-        print(f"🧪 Testing SIMPLE FILTER find for {robot_name}...")
-        print(f"🎯 Looking for: {target_class}")
-        print("🆕 SIMPLE FILTER: Single-frame + intelligent filtering")
-        print("⚠️  Make sure your robot/camera is ready!")
-        
-        input("Press Enter when ready, or Ctrl+C to cancel...")
-        
-        # 执行测试
-        res = execute_find_with_llm_replanning(
-            node=node,
-            robot_name=robot_name,
-            params={
-                "target_class": target_class,
-                "save_as": f"{target_class}_target",
-                "timeout_sec": 30,
-                "search_waypoints": [],
-                # 🆕 简单滤波参数
-                "use_filter": True,      # 启用简单滤波
-                "detection_frames": 1    # 单帧检测
-            },
-            rotate_fn=rotate_fn,
-            navigate_to_fn=nav_fn,
-            event_pub=event_fn,
-            llm_replanning_fn=llm_replanning_fn,
-            history_store=mock_history
-        )
-        
-        print("\n" + "="*50)
-        print("🎉 SIMPLE FILTER FIND TEST RESULT:")
-        print(f"✅ Success: {res.get('ok', False)}")
-        print(f"🎯 Found: {res.get('found', False)}")
-        
-        if res.get('found'):
-            record = res.get('record', {})
-            print(f"📦 Object: {res.get('blackboard_key')}")
-            print(f"🎯 Confidence: {record.get('conf', 0):.3f}")
-            
-            if record.get('filter_used'):
-                print(f"🔍 SIMPLE FILTER:")
-                print(f"   Filter Score: {record.get('filter_score', 0):.3f}")
-                print(f"   Filter Method: {record.get('filter_method', 'unknown')}")
-            else:
-                print(f"📷 MULTI-FRAME:")
-                print(f"   Frames: {record.get('detection_count', 1)}")
-            
-            # 显示重规划信息
-            if res.get('replanning_success'):
-                print(f"🧠 Replanning: {res.get('replanning_source', 'unknown')}")
-                follow_up_tasks = res.get('follow_up_tasks', [])
-                if follow_up_tasks:
-                    print(f"📋 Follow-up tasks: {len(follow_up_tasks)}")
-                    for i, task in enumerate(follow_up_tasks, 1):
-                        print(f"   {i}. {task.get('action')} -> {task.get('parameters', {})}")
-        
-        print("="*50)
-        return res
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Test cancelled by user")
-        return {"ok": False, "cancelled": True}
-        
-    except Exception as e:
-        logger.error(f"❌ Test failed: {e}")
-        return {"ok": False, "error": str(e)}
-        
-    finally:
-        try:
-            node.destroy_node()
-            rclpy.shutdown()
-            logger.info("🔚 ROS shutdown completed")
-        except:
-            pass
-
-# -------- 命令行测试 --------
-if __name__ == "__main__":
-    print("🤖 Simple Filtered Find.py")
-    print("Usage: python3 find.py [robot_name] [target_class]")
-    print("Example: python3 find.py robot1 cup")
-    print("")
-    print("🆕 SIMPLE FILTER FEATURES:")
-    print("  • Single-frame detection (fast)")
-    print("  • Confidence-based scoring")
-    print("  • Position and size validation") 
-    print("  • Center bias (objects in center more reliable)")
-    print("  • Aspect ratio checking")
-    print("")
-    
-    result = run_standalone_test()
-    
-    if result.get("ok"):
-        print("🎉 Test completed successfully!")
-        exit(0)
-    else:
-        print("❌ Test failed!")
-        exit(1)

@@ -133,12 +133,7 @@ Supported Actions and Parameters
 3. dropoff  
    - Drop off an item : {"item": "<item>"}
 4. find  
-   - Search for an object: {
-       "target_class": "<object_name>", 
-       "save_as": "<identifier>",           // Optional, defaults to target_class
-       "timeout_sec": <number>,             // Optional, search time limit in seconds
-       "search_waypoints": [<locations>]    // Optional, specific places to search
-     }
+   - Search for an object: {"item": "<item>"}
 5.contactless_transport  // Specialized cooperative action (e.g., acoustic levitation)
     {
       "item": "<object_name>",

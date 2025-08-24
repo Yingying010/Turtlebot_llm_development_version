@@ -19,7 +19,7 @@ from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.pickup import pickup_item
 from robotControllerRepo.actions.dropoff import dropoff_item
-from robotControllerRepo.actions.find import execute_find_with_llm_replanning, create_llm_replanning_function
+from robotControllerRepo.actions.find import execute_find
 from robotControllerRepo.actions.contactlessTransport import TransportManager
 from llmParserRepo.yolo_perception import detect_once
 
@@ -76,44 +76,8 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
             return execute_contactless_transport(node, executor, robot, params)
 
         elif action == "find":
-            # === 特殊处理：支持 follow_up_tasks ===
-            llm_replanning_fn = create_llm_replanning_function()
-            from llmParserRepo.gpt_localParser import HistoryStore, MEMORY_PATH
-            history_store = HistoryStore(MEMORY_PATH)
-
-            result = execute_find_with_llm_replanning(
-                node=node,
-                robot_name=robot,
-                params=params,
-                detect_fn=detect_once,
-                rotate_fn=lambda r, deg: rotate_deg(node, r, deg),
-                navigate_to_fn=lambda r, t: navigate_to(node, executor, r, t),
-                event_pub=None,
-                llm_replanning_fn=llm_replanning_fn,
-                history_store=history_store
-            )
-
-            if not result.get("ok", False):
-                logger.warning("Find failed: " + result.get("reason", "unknown"))
-                return False
-
-            follow_ups = result.get("follow_up_tasks", [])
-            if handle_follow_up and follow_ups:
-                logger.info(f"🔄 Executing {len(follow_ups)} follow-up tasks")
-                tts_manager.say("Now executing follow-up tasks")
-                for i, sub_task in enumerate(follow_ups, 1):
-                    full_task = {
-                        "robot": robot,
-                        "action": sub_task["action"],
-                        "parameters": sub_task["parameters"]
-                    }
-                    logger.info(f"📋 Follow-up task {i}/{len(follow_ups)}: {full_task}")
-                    success = execute_action(node, executor, full_task, handle_follow_up=False)
-                    if not success:
-                        logger.warning(f"⚠️ Follow-up task {i} failed")
-                tts_manager.say("All follow-up tasks completed")
-
-            return True
+            result = execute_find(node, robot, params)
+            return result.get("ok", False)
 
         else:
             logger.error(f"❌ Unknown action: {action}")
