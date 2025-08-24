@@ -23,7 +23,6 @@ from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
 from robotControllerRepo.actions.contactlessTransport import TransportManager
 # 🔥 修正：导入独立的YOLO感知模块
 from llmParserRepo.yolo_perception import detect_once
-from llmParserRepo.gpt_localParser import HistoryStore, MEMORY_PATH
 from typing import Dict, List
 from ttsRepo.stream_tts import tts_manager
 
