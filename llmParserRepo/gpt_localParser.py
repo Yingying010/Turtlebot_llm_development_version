@@ -15,7 +15,7 @@ from ttsRepo.stream_tts import tts_manager
 import config
 
 import robotControllerRepo.robot_scheduler as robot_scheduler
-from yolo_perception import YOLOPerceiver, detect_once as yolo_detect_once  # 导入独立的YOLO模块
+from yolo_perception import detect_once as yolo_detect_once
 
 
 
