@@ -134,7 +134,7 @@ Supported Actions and Parameters
    - Drop off an item : {"item": "<item>"}
 4. find  
    - Search for an object: {"item": "<item>"}
-5.contactless_transport  // Specialized cooperative action (e.g., acoustic levitation)
+5.contactless_transport
     {
       "item": "<object_name>",
       "start_position": "<named_location_or_person>",
@@ -157,7 +157,7 @@ Note:
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
 - The pickup and dropoff actions do not include any movement or navigation. If the robot is not already at the correct location (e.g., table, another robot, or the user), a separate navigate task must be added explicitly before the collect or deliver step.
-- If the user manual mentions the need for contactless transport of small items, then the operation is contactless_transport. And once contactless_transport is executed, it must be a synchronous task.
+- If the user command mentions the need for contactless transport of small items, the operation only needs to execute contactless_transport. Once contactless_transport is executed, it must be a synchronous task.
 - **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
 - Do not add parameters not explicitly specified in the command
