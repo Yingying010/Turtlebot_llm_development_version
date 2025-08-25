@@ -87,8 +87,8 @@ def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optiona
 
 # robot 1 在右边
 def plan_formation(particle_xy, target_xy):
-    px, py = particle_xy
-    tx, ty = target_xy
+    px, py = particle_xy.get("x"), particle_xy.get("y")
+    tx, ty = target_xy.get("x"), target_xy.get("y")
 
     phi = math.atan2(ty - py, tx - px)
 
