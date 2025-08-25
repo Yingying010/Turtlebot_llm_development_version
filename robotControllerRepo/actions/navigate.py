@@ -602,10 +602,6 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     is_successful = True
     return is_successful
 
-def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, target):
-    """Simplified navigation interface"""
-    return navigate_to_target(node, executor, robot_name, target)
-
 # ============================================================================
 # Special navigation function for after follow
 # ============================================================================
@@ -749,7 +745,7 @@ def main():
 
     try:
         print(f"[TEST] Starting navigation test for {args.robot_id}")
-        success = navigate_to(node, executor, args.robot_id, test_target)
+        success = navigate_to_target(node, executor, args.robot_id, test_target)
         print(f"[TEST] Navigation result: {'SUCCESS' if success else 'FAILED'}")
     except KeyboardInterrupt:
         print("[TEST] Interrupted by user")
