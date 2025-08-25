@@ -477,9 +477,10 @@ def _rotate_scan_stepwise(node: Any,
                           max_rot_deg: int = 360,
                           step_deg: int = 30,
                           pause: float = 0.5,
-                          conf_thres: float = 0.5) -> Optional[Dict]:
+                          conf_thres: float = 0.5) -> bool:
     """
     分步旋转 + 每步检测（轻量）
+    返回 bool：找到返回 True，没找到返回 False
     """
     logger.info(f"[find] 🔄 stepwise scan: max={max_rot_deg}°, step={step_deg}°, pause={pause}s")
 
@@ -487,7 +488,9 @@ def _rotate_scan_stepwise(node: Any,
     hit = detect_fn(item, conf_thres)
     if hit:
         logger.info(f"[find] 🎯 Found {item} in current view")
-        return hit
+        # 保存到黑板
+        _on_found_internal(robot_name, item, hit)
+        return True
 
     turned = 0
     while turned < max_rot_deg:
@@ -498,11 +501,13 @@ def _rotate_scan_stepwise(node: Any,
         hit = detect_fn(item, conf_thres)
         if hit:
             logger.info(f"[find] 🎯 Found {item} after ~{turned+step_deg}° rotation")
-            return hit
+            # 保存到黑板
+            _on_found_internal(robot_name, item, hit)
+            return True
         turned += step_deg
 
     logger.info("[find] 🛑 scan finished, no hit")
-    return None
+    return False
 
 # ========= 单帧检测 =========
 _DETECTOR_SINGLETON: Optional[StandaloneYOLODetector] = None
@@ -530,7 +535,7 @@ def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
         logger.error("❌ YOLO detector unavailable")
         return None
 
-    # 直接走“单帧 + 简单滤波”的检测路径
+    # 直接走"单帧 + 简单滤波"的检测路径
     hit = _detect_with_simple_filter(
         detector=detector,
         filter_obj=_get_filter(),
@@ -551,88 +556,8 @@ def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
 
     return hit
 
-
-# ========= find（仅三参，无 ctx） =========
-def execute_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
-    if not item:
-        return {"ok": False, "found": False, "reason": "no item"}
-
-    conf_thres = get_optimized_params(item)
-    logger.info(f"[find] robot={robot_name} target={item} conf>={conf_thres}")
-
-    # ---- 配置开关（可在 config 里覆盖）----
-    use_rotate_scan: bool = bool(config.get("find_use_rotate_scan", True))
-    rotate_step_deg: int  = int(config.get("find_rotate_step_deg", 30))
-    rotate_max_deg: int   = int(config.get("find_rotate_max_deg", 360))
-    rotate_pause_s: float = float(config.get("find_rotate_pause_s", 0.5))
-    # 多点搜索目标（命名地点或语义地点）
-    waypoints: List[str] = list(config.get("find_waypoints", []))  # 例如 ["table", "desk", "sofa"]
-
-    # ========== 1) 当前视角 ==========
-    hit = _single_frame_detect(item, conf_thres)
-    if hit:
-        return _on_found(robot_name, item, hit)
-
-    # ========== 2) 旋转扫描 ==========
-    if use_rotate_scan and Twist is not None:
-        logger.info("[find] 🔄 No hit → start rotate scan")
-        hit = _rotate_scan_stepwise(
-            node=node,
-            robot_name=robot_name,
-            detect_fn=lambda i, th: _single_frame_detect(i, th),
-            item=item,
-            max_rot_deg=rotate_max_deg,
-            step_deg=rotate_step_deg,
-            pause=rotate_pause_s,
-            conf_thres=conf_thres
-        )
-        if hit:
-            return _on_found(robot_name, item, hit)
-    else:
-        if Twist is None:
-            logger.warning("[find] ⚠️ Twist unavailable → skip rotate scan")
-        else:
-            logger.info("[find] ℹ️ Rotate scan disabled by config")
-
-    # ========== 3) 多点搜索 ==========
-    if waypoints:
-        logger.info(f"[find] 🗺️ Start waypoint search: {waypoints}")
-        for idx, target in enumerate(waypoints, 1):
-            try:
-                tts_manager.say(f"Moving to {target}")
-                navigate_to_target(node, robot_name, target)
-            except Exception as e:
-                logger.warning(f"[find] navigate_after_follow({target}) error: {e}")
-                continue
-
-            time.sleep(1.0)  # 稳定一下
-            # 3.1 该点单帧检测
-            hit = _single_frame_detect(item, conf_thres)
-            if hit:
-                return _on_found(robot_name, item, hit)
-
-            # 3.2 该点半圈扫描（提高召回）
-            if use_rotate_scan and Twist is not None:
-                logger.info(f"[find] 🔄 Half-scan at waypoint {target}")
-                hit = _rotate_scan_stepwise(
-                    node=node,
-                    robot_name=robot_name,
-                    detect_fn=lambda i, th: _single_frame_detect(i, th),
-                    item=item,
-                    max_rot_deg=180,
-                    step_deg=max(rotate_step_deg, 30),
-                    pause=rotate_pause_s,
-                    conf_thres=conf_thres
-                )
-                if hit:
-                    return _on_found(robot_name, item, hit)
-
-    # ========== 未找到 ==========
-    tts_manager.say_sync("I couldn't find it.")
-    logger.info(f"[find] not found: {item}")
-    return {"ok": True, "found": False, "blackboard_key": item}
-
-def _on_found(robot_name: str, item: str, hit: Dict[str, Any]) -> Dict[str, Any]:
+def _on_found_internal(robot_name: str, item: str, hit: Dict[str, Any]) -> None:
+    """内部使用：保存找到的物体到黑板，不返回值"""
     record = {
         "class": item,
         "center_xy": hit.get("center_xy"),
@@ -650,11 +575,94 @@ def _on_found(robot_name: str, item: str, hit: Dict[str, Any]) -> Dict[str, Any]
     bb_set(robot_name, item, record)
     tts_manager.say_sync(f"I found the {item}.")
     logger.info(f"[find] ✅ found {item} (key={item}, conf={record['conf']:.3f})")
-    return {"ok": True, "found": True, "blackboard_key": item, "record": record}
 
-# ========= LLM 重规划（与之前相同） =========
-# find.py
-# ...前面保持不变，略...
+# ========= find（返回bool） =========
+def execute_find(node: Any, robot_name: str, item: str) -> bool:
+    """
+    执行查找操作，统一返回 bool
+    True: 找到物体
+    False: 未找到物体
+    """
+    if not item:
+        logger.warning("[find] No item specified")
+        return False
+
+    conf_thres = get_optimized_params(item)
+    logger.info(f"[find] robot={robot_name} target={item} conf>={conf_thres}")
+
+    # ---- 配置开关（可在 config 里覆盖）----
+    use_rotate_scan: bool = bool(config.get("find_use_rotate_scan", True))
+    rotate_step_deg: int  = int(config.get("find_rotate_step_deg", 30))
+    rotate_max_deg: int   = int(config.get("find_rotate_max_deg", 360))
+    rotate_pause_s: float = float(config.get("find_rotate_pause_s", 0.5))
+    # 多点搜索目标（命名地点或语义地点）
+    waypoints: List[str] = list(config.get("find_waypoints", []))  # 例如 ["table", "desk", "sofa"]
+
+    # ========== 1) 当前视角 ==========
+    hit = _single_frame_detect(item, conf_thres)
+    if hit:
+        _on_found_internal(robot_name, item, hit)
+        return True
+
+    # ========== 2) 旋转扫描 ==========
+    if use_rotate_scan and Twist is not None:
+        logger.info("[find] 🔄 No hit → start rotate scan")
+        found = _rotate_scan_stepwise(
+            node=node,
+            robot_name=robot_name,
+            detect_fn=lambda i, th: _single_frame_detect(i, th),
+            item=item,
+            max_rot_deg=rotate_max_deg,
+            step_deg=rotate_step_deg,
+            pause=rotate_pause_s,
+            conf_thres=conf_thres
+        )
+        if found:
+            return True
+    else:
+        if Twist is None:
+            logger.warning("[find] ⚠️ Twist unavailable → skip rotate scan")
+        else:
+            logger.info("[find] ℹ️ Rotate scan disabled by config")
+
+    # ========== 3) 多点搜索 ==========
+    if waypoints:
+        logger.info(f"[find] 🗺️ Start waypoint search: {waypoints}")
+        for idx, target in enumerate(waypoints, 1):
+            try:
+                tts_manager.say(f"Moving to {target}")
+                navigate_to_target(node, robot_name, target)
+            except Exception as e:
+                logger.warning(f"[find] navigate_to_target({target}) error: {e}")
+                continue
+
+            time.sleep(1.0)  # 稳定一下
+            # 3.1 该点单帧检测
+            hit = _single_frame_detect(item, conf_thres)
+            if hit:
+                _on_found_internal(robot_name, item, hit)
+                return True
+
+            # 3.2 该点半圈扫描（提高召回）
+            if use_rotate_scan and Twist is not None:
+                logger.info(f"[find] 🔄 Half-scan at waypoint {target}")
+                found = _rotate_scan_stepwise(
+                    node=node,
+                    robot_name=robot_name,
+                    detect_fn=lambda i, th: _single_frame_detect(i, th),
+                    item=item,
+                    max_rot_deg=180,
+                    step_deg=max(rotate_step_deg, 30),
+                    pause=rotate_pause_s,
+                    conf_thres=conf_thres
+                )
+                if found:
+                    return True
+
+    # ========== 未找到 ==========
+    tts_manager.say_sync("I couldn't find it.")
+    logger.info(f"[find] not found: {item}")
+    return False
 
 # ========= LLM 重规划（已改支持 original_user_command ）=========
 def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], Dict]:
@@ -783,22 +791,33 @@ def execute_find_with_llm_replanning(
     item: str,
     llm_replanning_fn: Optional[Callable[[Dict[str, Any], List[Dict[str, str]], str, str], Dict[str, Any]]] = None,
     history_store: Any = None
-) -> Dict[str, Any]:
-    basic = execute_find(node, robot_name, item)
-    if not basic.get("found"):
+) -> bool:
+    """
+    执行查找操作并可选地进行LLM重规划，统一返回 bool
+    True: 找到物体并完成了所有后续任务
+    False: 未找到物体或执行后续任务失败
+    """
+    # 首先执行基础查找
+    found = execute_find(node, robot_name, item)
+    if not found:
         logger.info(f"[find] {robot_name} didn't find {item}, no follow-up actions.")
-        return basic
+        return False
 
+    # 如果没有LLM规划函数，直接返回找到的结果
     if llm_replanning_fn is None:
         llm_replanning_fn = create_llm_replanning_function()
 
-    record = basic.get("record", {}) or {}
+    # 构建发现上下文
+    # 从黑板读取刚才保存的物体信息
+    db = _bb_read(robot_name)
+    record = db.get("objects", {}).get(item, {})
+    
     discovery_context = {
         "found_object": {
             "class": item,
             "confidence": record.get("conf", 0.0),
             "position": record.get("center_xy", [0, 0]),
-            "blackboard_key": basic.get("blackboard_key", item),
+            "blackboard_key": item,
             "detection_quality": {
                 "filter_used": record.get("filter_used", False),
                 "filter_score": record.get("filter_score"),
@@ -830,25 +849,98 @@ def execute_find_with_llm_replanning(
             original_user_command=original_command
         )
         if plan.get("success") and plan.get("action_needed") and plan.get("tasks"):
-            basic["follow_up_tasks"] = plan["tasks"]
-            basic["replanning_success"] = True
-            basic["replanning_source"] = "llm"
-            basic["replanning_reasoning"] = plan.get("reasoning", "")
-            logger.info(f"[find] LLM generated {len(plan['tasks'])} follow-up tasks")
-            return basic
+            follow_up_tasks = plan["tasks"]
+            logger.info(f"[find] LLM generated {len(follow_up_tasks)} follow-up tasks")
+            
+            # 执行后续任务
+            logger.info(f"[find] Executing {len(follow_up_tasks)} follow-up tasks for {robot_name}")
+            tts_manager.say_sync("Now executing follow-up tasks")
+
+            all_tasks_success = True
+            for i, task in enumerate(follow_up_tasks, 1):
+                action = task.get("action")
+                params = task.get("parameters", {}) or {}
+                logger.info(f"[find] 📋 Follow-up {i}/{len(follow_up_tasks)} → action={action} params={params}")
+
+                try:
+                    if action == "navigate_to_object":
+                        target = params.get("item")
+                        if target:
+                            # 这里需要导入navigate_to_object函数，如果没有就用navigate_to_target
+                            try:
+                                navigate_to_object(node, robot_name, target, None)
+                            except NameError:
+                                # 如果navigate_to_object不存在，使用navigate_to_target
+                                navigate_to_target(node, None, robot_name, target)
+                        else:
+                            logger.warning("[find] navigate missing target")
+                            all_tasks_success = False
+                            
+                    elif action == "navigate_to_target_position":
+                        if "position" in params:
+                            navigate_to_target(node, None, robot_name, params["position"])
+                        elif "target" in params:
+                            navigate_to_target(node, None, robot_name, params["target"])
+                        else:
+                            logger.warning("Missing 'position' or 'target' in navigate params")
+                            all_tasks_success = False
+                            
+                    elif action == "pickup":
+                        obj = params.get("item")
+                        if obj:
+                            ok = pickup_item(obj)
+                            if not ok:
+                                logger.warning("[find] pickup failed")
+                                all_tasks_success = False
+                        else:
+                            logger.warning("[find] pickup missing item")
+                            all_tasks_success = False
+                            
+                    elif action == "dropoff":
+                        obj = params.get("item")
+                        if obj:
+                            ok = dropoff_item(obj)
+                            if not ok:
+                                logger.warning("[find] dropoff failed")
+                                all_tasks_success = False
+                        else:
+                            logger.warning("[find] dropoff missing item")
+                            all_tasks_success = False
+                            
+                    else:
+                        logger.warning(f"[find] Unsupported follow-up action: {action}")
+                        all_tasks_success = False
+                        
+                except Exception as e:
+                    logger.exception(f"[find] Error during follow-up task: {e}")
+                    all_tasks_success = False
+
+            if all_tasks_success:
+                tts_manager.say_sync("All follow-up tasks completed successfully")
+                logger.info("[find] All follow-up tasks completed successfully")
+            else:
+                tts_manager.say_sync("Some follow-up tasks failed")
+                logger.warning("[find] Some follow-up tasks failed")
+                
+            return all_tasks_success
+            
         else:
             logger.warning(f"[find] LLM replanning not used or failed: {plan.get('error','no tasks')}")
+            # 没有后续任务但找到了物体，仍然算成功
+            return True
+            
     except Exception as e:
         logger.error(f"[find] LLM replanning error: {e}")
+        # LLM规划失败但找到了物体，仍然算成功
+        return True
 
-    basic["follow_up_tasks"] = []
-    basic["replanning_success"] = False
-    basic["replanning_source"] = "fallback"
-    basic["replanning_reasoning"] = "No LLM plan available"
-    return basic
-
-# ========= 对外入口 =========
-def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
+# ========= 对外入口（统一返回bool） =========
+def run_find(node: Any, robot_name: str, item: str, executor) -> bool:
+    """
+    对外统一入口，返回 bool
+    True: 找到物体（可能还执行了后续任务）
+    False: 未找到物体或执行失败
+    """
     # 自动注入历史：只读 memory.chattinglog.json；不存在就不用历史（不兜底）
     history_store = _FileHistoryStore(_HISTORY_PATH) if os.path.exists(_HISTORY_PATH) else None
 
@@ -857,55 +949,4 @@ def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
         history_store=history_store
     )
 
-    if not result.get("found"):
-        return result
-
-    follow_ups = result.get("follow_up_tasks", []) or []
-    if not follow_ups:
-        return result
-
-    logger.info(f"[find] Executing {len(follow_ups)} follow-up tasks for {robot_name}")
-    tts_manager.say_sync("Now executing follow-up tasks")
-
-    for i, task in enumerate(follow_ups, 1):
-        action = task.get("action")
-        params = task.get("parameters", {}) or {}
-        logger.info(f"[find] 📋 Follow-up {i}/{len(follow_ups)} → action={action} params={params}")
-
-        try:
-            if action == "navigate_to_object":
-                target = params.get("item")
-                if target:
-                    navigate_to_object(node, robot_name, target, executor)
-                else:
-                    logger.warning("[find] navigate missing target")
-            elif action == "navigate_to_target_position":
-                if "position" in params:
-                    return navigate_to_target(node, executor, robot_name, params["position"])
-                elif "target" in params:
-                    return navigate_to_target(node, executor, robot_name, params["target"])
-                else:
-                    logger.warning("Missing 'position' or 'target' in navigate params")
-            elif action == "pickup":
-                obj = params.get("item")
-                if obj:
-                    ok = pickup_item(obj)
-                    if not ok:
-                        logger.warning("[find] pickup failed")
-                else:
-                    logger.warning("[find] pickup missing item")
-            elif action == "dropoff":
-                obj = params.get("item")
-                if obj:
-                    ok = dropoff_item(obj)
-                    if not ok:
-                        logger.warning("[find] dropoff failed")
-                else:
-                    logger.warning("[find] dropoff missing item")
-            else:
-                logger.warning(f"[find] Unsupported follow-up action: {action}")
-        except Exception as e:
-            logger.exception(f"[find] Error during follow-up task: {e}")
-
-    tts_manager.say_sync("All follow-up tasks completed")
     return result

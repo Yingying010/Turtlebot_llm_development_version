@@ -36,41 +36,51 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
 
     try:
         if action == "move":
-            return move(node, robot, params["direction"], params["value"], params["unit"])
-
+            result = move(node, robot, params["direction"], params["value"], params["unit"])
+            return result
+        
         elif action == "turn":
-            return rotate(node, robot, params["direction"], params["value"], params["unit"], params.get("target", "self"))
-
+            result = rotate(node, robot, params["direction"], params["value"], params["unit"], params.get("target", "self"))
+            return result
+        
         elif action == "navigate":
             if "position" in params:
-                return navigate_to_target(node, executor, robot, params["position"])
+                result = navigate_to_target(node, executor, robot, params["position"])
+                return result
             elif "target" in params:
-                return navigate_to_target(node, executor, robot, params["target"])
+                result = navigate_to_target(node, executor, robot, params["target"])
+                return result
             else:
                 logger.warning("Missing 'position' or 'target' in navigate params")
                 return False
 
         elif action == "follow":
-            return follow_run(node, robot, params["target"], executor)
+            result = follow_run(node, robot, params["target"], executor)
+            return result
 
         elif action == "imitate":
-            return imitate_robot(node, robot, params["target"])
+            result = imitate_robot(node, robot, params["target"])
+            return result
 
         elif action == "face":
-            return face_run(node, robot, params["target"], executor)
+            result = face_run(node, robot, params["target"], executor)
+            return result
 
         elif action == "pickup":
-            return pickup_item(params["item"])
+            result = pickup_item(params["item"])
+            return result
 
         elif action == "dropoff":
-            return dropoff_item(params["item"])
+            result = dropoff_item(params["item"])
+            return result
         
         elif action == "contactless_transport":
-            return execute_contactless_transport(node, executor, robot, params)
+            result = execute_contactless_transport(node, executor, robot, params)
+            return result
 
         elif action == "find":
             result = run_find(node, robot, params["item"], executor)
-            return result.get("ok", False)
+            return result
 
         elif action == "wait":
             duration = params.get("duration_sec", 1.0)
