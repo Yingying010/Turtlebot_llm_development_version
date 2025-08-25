@@ -880,11 +880,12 @@ def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
                 else:
                     logger.warning("[find] navigate missing target")
             elif action == "navigate_to_target_position":
-                target = params.get("target")
-                if target:
-                    navigate_to_target(node, robot_name, target, executor)
+                if "position" in params:
+                    return navigate_to_target(node, executor, robot_name, params["position"])
+                elif "target" in params:
+                    return navigate_to_target(node, executor, robot_name, params["target"])
                 else:
-                    logger.warning("[find] navigate missing target")
+                    logger.warning("Missing 'position' or 'target' in navigate params")
             elif action == "pickup":
                 obj = params.get("item")
                 if obj:
