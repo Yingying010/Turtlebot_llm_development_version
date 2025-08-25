@@ -52,7 +52,7 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
 # === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
 _HISTORY_PATH = "memory/chattinglog.jsonl"
 
-def get_last_user_message_from_jsonlog(json_path="memory/chattinglog.json") -> str:
+def get_last_user_message_from_jsonlog(json_path="memory/chattinglog.jsonl") -> str:
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
