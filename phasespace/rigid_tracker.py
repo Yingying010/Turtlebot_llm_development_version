@@ -41,9 +41,9 @@ class RigidTracker(Node):
                 }
                 if self.position_lock:
                     with self.position_lock:
-                        self.position_cache[self.robot_name] = data
+                        self.position_cache[self.name] = data
                 else:
-                    self.position_cache[self.robot_name] = data
+                    self.position_cache[self.name] = data
 
                 # self.get_logger().info(
                 #     f"📍 {self.robot_name} position: x={msg.x:.2f}, y={msg.y:.2f}, z={msg.z:.2f}, "
