@@ -58,13 +58,13 @@ def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> O
     )
     executor.add_node(rigid_node)
     print(f"[POSITION] Initializing tracker for {robot_name}")
-    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
+    tts_manager.say_sync(f"Initializing tracker for {robot_name}, waiting for position data.")
     
     for _ in range(50):  # 10 second timeout
         with cache_lock:
             if robot_name in robot_position_cache:
                 print(f"[POSITION] Position data acquired for {robot_name}")
-                tts_manager.say(f"Position data acquired for {robot_name}.")
+                tts_manager.say_sync(f"Position data acquired for {robot_name}.")
                 return rigid_node
         time.sleep(0.2)
     
@@ -79,7 +79,7 @@ def get_current_position(robot_name: str) -> Tuple[float, float, float]:
             return rigid["x"], rigid["z"], rigid["heading_y"]
     
     print(f"[WARNING] No position data available for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
 
 def _ensure_publisher(node: Node, robot_name: str) -> Publisher:
@@ -556,7 +556,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     tracker_robot = getRobotPositionCache(robot_name, executor)
     if tracker_robot is None:
         print(f"[ERROR] Position tracking failed for {robot_name}")
-        tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+        tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
         return is_successful
 
     # Resolve target
@@ -572,7 +572,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
                 print(f"[TARGET_RESOLUTION] Semantic target '{target}' resolved")
             else:
                 print(f"[ERROR] Target '{target}' not found")
-                tts_manager.say(f"Can't resolve target {target}")
+                tts_manager.say_sync(f"Can't resolve target {target}")
                 return is_successful
     else:
         resolved_target = target
@@ -653,7 +653,7 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
         print(f"❌ Could not find location for item '{item}'!")
         print(f"💡 Tried semantic keys: {[item, f'{item}_location', f'{item}_pos']}")
         print(f"💡 Available semantic locations: {list(semantic_locations.keys())}")
-        tts_manager.say(f"Sorry, I cannot find the location of {item}")
+        tts_manager.say_sync(f"Sorry, I cannot find the location of {item}")
         return False
     
     print(f"🎯 Using location from: {used_key}")
@@ -696,7 +696,7 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     
     if not is_successful:
         print(f"❌ Navigation failed!")
-        tts_manager.say(f"Sorry, I could not reach the {item}")
+        tts_manager.say_sync(f"Sorry, I could not reach the {item}")
         return False
         
     print(f"✅ Navigation completed! Reached target location")

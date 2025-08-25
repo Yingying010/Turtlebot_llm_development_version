@@ -16,6 +16,66 @@ from robotControllerRepo.actions.dropoff import dropoff_item
 import config
 from geometry_msgs.msg import Twist
 
+# ======== Lifecycle 支持（桥接，免改 scheduler）========
+try:
+    from rclpy.lifecycle import LifecycleNode  # 若环境无此包，会走兜底
+    _LIFECYCLE_OK = True
+except Exception:
+    LifecycleNode = None  # type: ignore
+    _LIFECYCLE_OK = False
+
+# 提示：供内部桥接节点加入同一个 executor
+_EXECUTOR_HINT = None
+# 懒加载的生命周期“桥接节点”（专给 find 用）
+_LCN_BRIDGE = None
+
+def _is_lifecycle_node(node: Any) -> bool:
+    return bool(_LIFECYCLE_OK and isinstance(node, LifecycleNode)) or hasattr(node, "create_lifecycle_publisher")
+
+def _maybe_activate_publisher(pub: Any) -> None:
+    # LifecyclePublisher 需要 on_activate 后才能 publish
+    if hasattr(pub, "on_activate"):
+        try:
+            pub.on_activate()
+            logger.debug("[find] lifecycle publisher on_activate() called")
+        except Exception as e:
+            logger.debug(f"[find] lifecycle publisher on_activate() skipped: {e}")
+
+def _get_or_make_lifecycle_bridge() -> Optional[Any]:
+    """
+    若传入 node 不是 LifecycleNode，则在本模块内部创建一个生命周期“桥接节点”，
+    并尽力 configure/activate；需要时把它加入 _EXECUTOR_HINT。
+    """
+    global _LCN_BRIDGE
+    if not _LIFECYCLE_OK:
+        return None
+    if _LCN_BRIDGE is not None:
+        return _LCN_BRIDGE
+
+    try:
+        lcn = LifecycleNode("find_lifecycle_bridge")  # 仅 find.py 内部使用
+        # 把桥接节点加入调用方传进来的 executor（如果有）
+        if _EXECUTOR_HINT is not None:
+            try:
+                _EXECUTOR_HINT.add_node(lcn)
+                logger.debug("[find] lifecycle bridge added to executor")
+            except Exception as e:
+                logger.debug(f"[find] add bridge to executor skipped: {e}")
+        # 尽力切到 ACTIVE（若外部已有生命周期管理，不会破坏：失败忽略）
+        for m in ("configure", "activate"):
+            if hasattr(lcn, m):
+                try:
+                    getattr(lcn, m)()
+                    logger.debug(f"[find] lifecycle bridge {m}() called")
+                except Exception as e:
+                    logger.debug(f"[find] lifecycle bridge {m}() skipped: {e}")
+        _LCN_BRIDGE = lcn
+        logger.info("[find] Lifecycle bridge created & (best-effort) activated")
+        return _LCN_BRIDGE
+    except Exception as e:
+        logger.warning(f"[find] Failed to create lifecycle bridge: {e}")
+        return None
+
 # ========= 工具 =========
 def get_robot_id() -> str:
     return config.get("robot_id")
@@ -325,7 +385,6 @@ def _detect_with_simple_filter(detector: StandaloneYOLODetector,
     
     # 通过简单滤波器处理
     filtered_result = filter_obj.filter_detections(all_detections, target_class, conf_thres)
-    
     if filtered_result:
         logger.info(f"[find] ✅ Filtered detection: conf={filtered_result.get('conf', 0):.3f}, "
                    f"filter_score={filtered_result.get('filter_score', 0):.3f}")
@@ -349,15 +408,31 @@ def get_optimized_params(item: str) -> float:
 # ========= 轻量旋转（直接 cmd_vel） =========
 _pub_cache: Dict[str, Any] = {}
 def is_node_alive(node):
+    """更健壮的节点存活检查"""
     try:
-        logger.debug(f"[debug] node={node.get_name()}, alive={is_node_alive(node)}")
-        return node.context is not None and node.context.ok()
-    except Exception:
+        if node is None:
+            return False
+        # 检查节点的基本属性
+        if not hasattr(node, 'context') or node.context is None:
+            return False
+        # 检查上下文是否有效
+        if not hasattr(node.context, 'ok') or not node.context.ok():
+            return False
+        # 检查节点是否被销毁
+        if hasattr(node, '_handle') and node._handle is None:
+            return False
+        return True
+    except (AttributeError, InvalidHandle, Exception) as e:
+        logger.debug(f"[find] Node alive check failed: {e}")
         return False
 
 def _get_cmd_vel_pub(node: Any, robot_name: str):
     """
     懒加载并缓存 /<robot>/cmd_vel publisher
+    优先顺序：
+      1) 若传入 node 是 LifecycleNode → 用 create_lifecycle_publisher
+      2) 否则尝试使用模块内部的“桥接 LifecycleNode”
+      3) 再否则回退到普通 create_publisher（不使用生命周期）
     """
     if Twist is None:
         return None
@@ -366,14 +441,30 @@ def _get_cmd_vel_pub(node: Any, robot_name: str):
     pub = _pub_cache.get(key)
     if pub:
         return pub
+
+    topic = f"/{robot_name}/cmd_vel"
     try:
-        topic = f"/{robot_name}/cmd_vel"
-        pub = node.create_publisher(Twist, topic, 10)
+        # 1) 传入的 node 就是 lifecycle
+        if _is_lifecycle_node(node) and hasattr(node, "create_lifecycle_publisher"):
+            logger.info(f"[find] ✅ Using Lifecycle publisher on passed node: {topic}")
+            pub = node.create_lifecycle_publisher(Twist, topic, 10)
+            _maybe_activate_publisher(pub)
+        else:
+            # 2) 尝试用内部桥接生命周期节点
+            lcn = _get_or_make_lifecycle_bridge()
+            if lcn is not None and hasattr(lcn, "create_lifecycle_publisher"):
+                logger.info(f"[find] ✅ Using Lifecycle publisher on bridge: {topic}")
+                pub = lcn.create_lifecycle_publisher(Twist, topic, 10)
+                _maybe_activate_publisher(pub)
+            else:
+                # 3) 退回普通 publisher（保持兼容）
+                logger.info(f"[find] ✅ Using normal publisher: {topic}")
+                pub = node.create_publisher(Twist, topic, 10)
+
         _pub_cache[key] = pub
-        logger.info(f"[find] ✅ Created publisher: {topic}")
         return pub
     except Exception as e:
-        logger.error(f"[find] ❌ create_publisher failed: {e}")
+        logger.error(f"[find] ❌ create publisher failed: {e}")
         return None
 
 def rotate_by_deg(node: Any,
@@ -402,6 +493,9 @@ def rotate_by_deg(node: Any,
     pub = _get_cmd_vel_pub(node, robot_name)
     if pub is None:
         return False
+
+    # Lifecycle 发布器在 ACTIVE 才能发，确保激活（若可能）
+    _maybe_activate_publisher(pub)
 
     duration = abs(delta_deg) / max(angular_speed_deg_s, 1e-6)
     wz = (angular_speed_deg_s * math.pi / 180.0) * (1.0 if delta_deg >= 0 else -1.0)
@@ -539,6 +633,10 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
     True: 找到物体
     False: 未找到物体
     """
+    # 为桥接节点提供 executor（若后续需要懒加载）
+    global _EXECUTOR_HINT
+    _EXECUTOR_HINT = executor
+
     if not item:
         logger.warning("[find] No item specified")
         return False
