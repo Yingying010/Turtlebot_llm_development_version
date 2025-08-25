@@ -51,7 +51,7 @@ semantic_locations = config.get("semantic_locations")
 
 PARTICLE = (0.0, -500.0)     # 微粒点坐标
 TARGET   = (500.0, -1000.0)    # 目标点坐标
-GAP = 70 
+GAP = 75 
 LENGTH = 138
 WIDTH = 178
 SPEED    = 0.05
