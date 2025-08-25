@@ -9,7 +9,7 @@ import cv2
 import subprocess
 from loguru import logger
 from ttsRepo.stream_tts import tts_manager
-from robotControllerRepo.actions.navigate import navigate_after_follow
+from robotControllerRepo.actions.navigate import navigate_to_object, navigate_to_target
 from robotControllerRepo.actions.pickup import pickup_item
 from robotControllerRepo.actions.dropoff import dropoff_item
 # from llmParserRepo.yolo_perception import detect_once as yolo_detect_once  # ← 已改为本文件内YOLO链路
@@ -600,7 +600,7 @@ def execute_find(node: Any, robot_name: str, item: str) -> Dict[str, Any]:
         for idx, target in enumerate(waypoints, 1):
             try:
                 tts_manager.say(f"Moving to {target}")
-                navigate_after_follow(node, robot_name, target)
+                navigate_to_target(node, robot_name, target)
             except Exception as e:
                 logger.warning(f"[find] navigate_after_follow({target}) error: {e}")
                 continue
@@ -686,42 +686,40 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
             Detection Quality: {found_object["detection_quality"]}
             Blackboard Key: {found_object["blackboard_key"]}
 
-            Based on the conversation history, decide if the robot should:
-            1. Just report finding the object (no further action)
-            2. pickup the object 
-            3. pickup and deliver the object to someone (requires navigate in between)
-            4. Other specific actions
+            Based on the conversation history, decide whether the robot should:
+            1. Only report that it has found the object (no further action required)
+            2. Navigate to the object
+            3. Navigate to the object and pick it up
+            4. Navigate to the object, pick it up, and then navigate to the target position
+            5. Navigate to the object, pick it up, navigate to the target position, and then put the object down
+            6. Other specific actions
 
             ========================
             Action Definitions
             ========================
-            1. navigate  
-            - To a named target: {{"target": "<target_name>"}}  
-            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
+            1.navigate_to_object
+            - navigate to the item {{"item": "<item>"}}
 
             2. pickup  
             - Pick up an item: {{"item": "<item>"}}
 
-            3. dropoff  
+            3. navigate_to_target_position  
+            - To a named target: {{"target": "<target_name>"}}  
+            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
+
+            4. dropoff  
             - Drop off an item: {{"item": "<item>"}}
 
-            ========================
-            Important Rules
-            ========================
-            - When the user says "bring to me" or "deliver to <person>", the action sequence MUST be:
-            1) navigate to the item
-            2) pickup the item  
-            3) navigate to the target (e.g., the master {get_master_name()} or specified person/location)  
-            4) dropoff the item  
 
-            - Do NOT skip the navigate step before dropoff.
+            Note:
+            - When the user says "bring to me", "me" is {get_master_name()}
             - The output must always follow strict JSON format:
 
             {{
                 "action_needed": true/false,
                 "tasks": [
                     {{
-                        "action": "pickup|navigate|dropoff|wait",
+                        "action": "navigate_to_object|pickup|navigate_to_target_position|dropoff|wait",
                         "parameters": {{ ... }}
                     }}
                 ],
@@ -875,10 +873,16 @@ def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
         logger.info(f"[find] 📋 Follow-up {i}/{len(follow_ups)} → action={action} params={params}")
 
         try:
-            if action == "navigate":
+            if action == "navigate_to_object":
                 target = params.get("target")
                 if target:
-                    navigate_after_follow(node, robot_name, target, executor)
+                    navigate_to_object(node, robot_name, target, executor)
+                else:
+                    logger.warning("[find] navigate missing target")
+            elif action == "navigate_to_target_position":
+                target = params.get("target")
+                if target:
+                    navigate_to_target(node, robot_name, target, executor)
                 else:
                     logger.warning("[find] navigate missing target")
             elif action == "pickup":

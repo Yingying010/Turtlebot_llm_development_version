@@ -609,7 +609,7 @@ def navigate_to(node: Node, executor: MultiThreadedExecutor, robot_name: str, ta
 # ============================================================================
 # Special navigation function for after follow
 # ============================================================================
-def navigate_after_follow(node: Node, robot_name: str, item: str, executor):
+def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     """
     after find the item
     """
