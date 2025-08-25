@@ -140,7 +140,7 @@ class ThreeWayHandshakeManager:
         with self.lock:
             return sequence in self.completed_sequences
         
-    def wait_for_sequence_completion(self, sequence: int, timeout: float = 30.0) -> bool:
+    def wait_for_sequence_completion(self, sequence: int, timeout: float = 120.0) -> bool:
         """Wait for specified sequence handshake completion with timeout"""
         start_time = time.time()
         logger.debug(f"[HANDSHAKE] {self.robot_name}: Waiting for handshake completion of sequence={sequence} (timeout={timeout}s)")
@@ -278,7 +278,7 @@ class ImprovedSequentialManager:
                 
                 # Wait for handshake completion
                 handshake_start = time.time()
-                handshake_success = self.handshake_mgr.wait_for_sequence_completion(sequence, timeout=10.0)
+                handshake_success = self.handshake_mgr.wait_for_sequence_completion(sequence, timeout=120.0)
                 handshake_time = time.time() - handshake_start
                 
                 if handshake_success:
