@@ -19,11 +19,11 @@ DEFAULT_CONFIG = {
     "find_waypoints": ["table", "shelf", "corner"],  # 多点搜索顺序（名称对应 semantic_locations）
 
     "semantic_locations": {
-        "lucy":  {"x": -500, "y": -900, "heading": None},
-        "table": {"x":    0, "y":    0, "heading": None},
+        "lucy":  {"x": 500, "y": -1000, "heading": None},
+        "table": {"x": 0, "y": -500, "heading": None},
         "robot2":{"x": -500, "y": -500, "heading": None},
-        "corner":{"x": 1000, "y": 1000, "heading": None},
-        "shelf": {"x": 1000, "y": -1000,"heading": None},
+        "shelf":{"x": 1000, "y": -1000, "heading": None},
+        "corner": {"x": -1000, "y": -1000,"heading": None},
     },
 }
 
