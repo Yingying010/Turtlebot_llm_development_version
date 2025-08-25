@@ -350,8 +350,8 @@ def get_optimized_params(item: str) -> float:
 _pub_cache: Dict[str, Any] = {}
 def is_node_alive(node):
     try:
-        _ = node.get_name()
-        return True
+        logger.debug(f"[debug] node={node.get_name()}, alive={is_node_alive(node)}")
+        return node.context is not None and node.context.ok()
     except Exception:
         return False
 
@@ -533,7 +533,7 @@ def _on_found_internal(robot_name: str, item: str, hit: Dict[str, Any]) -> None:
     logger.info(f"[find] ✅ found {item} (key={item}, conf={record['conf']:.3f})")
 
 # ========= find（返回bool） =========
-def execute_find(node: Any, robot_name: str, item: str) -> bool:
+def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
     """
     执行查找操作，统一返回 bool
     True: 找到物体
@@ -587,7 +587,7 @@ def execute_find(node: Any, robot_name: str, item: str) -> bool:
         for idx, target in enumerate(waypoints, 1):
             try:
                 tts_manager.say(f"Moving to {target}")
-                navigate_to_target(node, robot_name, target)
+                navigate_to_target(node, executor, robot_name, target)
             except Exception as e:
                 logger.warning(f"[find] navigate_to_target({target}) error: {e}")
                 continue
@@ -755,7 +755,7 @@ def execute_find_with_llm_replanning(
     False: 未找到物体或执行后续任务失败
     """
     # 首先执行基础查找
-    found = execute_find(node, robot_name, item)
+    found = execute_find(node, executor, robot_name, item)
     if not found:
         logger.info(f"[find] {robot_name} didn't find {item}, no follow-up actions.")
         return False
