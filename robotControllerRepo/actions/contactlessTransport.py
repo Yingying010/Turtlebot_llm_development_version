@@ -57,9 +57,9 @@ WIDTH = 178
 SPEED    = 0.05
 
 # 超时配置（秒）
-NAV_TIMEOUT_SEC          = 60.0   # Phase 2 导航总超时
-WAIT_READY_TIMEOUT_SEC   = 30.0   # 等对方 READY 的超时
-WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
+NAV_TIMEOUT_SEC          = 120.0   # Phase 2 导航总超时
+WAIT_READY_TIMEOUT_SEC   = 120.0   # 等对方 READY 的超时
+WAIT_GO_TIMEOUT_SEC      = 120.0   # follower 等 GO 的超时
 
 # ===== 工具函数 =====
 def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
