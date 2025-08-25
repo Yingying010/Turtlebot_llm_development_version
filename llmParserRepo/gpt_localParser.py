@@ -787,6 +787,7 @@ def run_conversation_loop() -> Optional[Dict[str, Any]]:
 
         if any(kw in user_input.lower() for kw in exit_keywords):
             tts_manager.say_sync("Exiting voice control.")
+            sys.exit(0)
             break
 
         logger.info(f"🗣️ You said: {user_input}")
