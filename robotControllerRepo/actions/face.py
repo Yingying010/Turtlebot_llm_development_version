@@ -25,24 +25,24 @@ publisher_dict: Dict[Tuple[int, str], Publisher] = {}
  
 # === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
 
-def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     rigid_node = RigidTracker(
         position_cache=robot_position_cache,
-        robot_name=robot_name,
+        name=name,
         position_lock=cache_lock,  # 传入同一把锁，避免读写冲突
     )
     executor.add_node(rigid_node)
-    print(f"⏳ Waiting for position data of {robot_name}...")
-    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
+    print(f"⏳ Waiting for position data of {name}...")
+    tts_manager.say(f"Initializing tracker for {name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
-            ok = robot_name in robot_position_cache
+            ok = name in robot_position_cache
         if ok:
-            print(f"✅ Got position data for {robot_name}.")
-            tts_manager.say(f"Position data acquired for {robot_name}.")
+            print(f"✅ Got position data for {name}.")
+            tts_manager.say(f"Position data acquired for {name}.")
             return rigid_node
         time.sleep(0.2)
-    print(f"❌ Timeout: No position data for {robot_name}")
+    print(f"❌ Timeout: No position data for {name}")
     # tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 

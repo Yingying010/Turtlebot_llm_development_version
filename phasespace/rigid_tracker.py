@@ -9,18 +9,18 @@ import time
  
  
 class RigidTracker(Node):
-    def __init__(self, position_cache, robot_name, position_lock=None):
-        print(f"✅ RigidTracker initialized for {robot_name}")
-        super().__init__(f'rigid_tracker_{robot_name}')
+    def __init__(self, position_cache, name, position_lock=None):
+        print(f"✅ RigidTracker initialized for {name}")
+        super().__init__(f'rigid_tracker_{name}')
         self.subscription = self.create_subscription(
             Rigid,
-            f'/phasespace_body_{robot_name}',
+            f'/phasespace_body_{name}',
             self.listener_callback,
             10
         )
         self.position_cache = position_cache
         self.position_lock = position_lock
-        self.robot_name = robot_name
+        self.name = name
 
     def listener_callback(self, msg):
         # self.get_logger().info("📩 Received Rigid message")

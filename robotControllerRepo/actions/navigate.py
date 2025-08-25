@@ -49,26 +49,26 @@ def set_current_robot_name(robot_name: str):
     global current_robot_name
     current_robot_name = robot_name
 
-def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     """Initialize position tracking for specified robot"""
     rigid_node = RigidTracker(
         position_cache=robot_position_cache,
-        robot_name=robot_name,
+        name=name,
         position_lock=cache_lock,
     )
     executor.add_node(rigid_node)
-    print(f"[POSITION] Initializing tracker for {robot_name}")
-    tts_manager.say_sync(f"Initializing tracker for {robot_name}, waiting for position data.")
+    print(f"[POSITION] Initializing tracker for {name}")
+    tts_manager.say_sync(f"Initializing tracker for {name}, waiting for position data.")
     
     for _ in range(50):  # 10 second timeout
         with cache_lock:
-            if robot_name in robot_position_cache:
-                print(f"[POSITION] Position data acquired for {robot_name}")
-                tts_manager.say_sync(f"Position data acquired for {robot_name}.")
+            if name in robot_position_cache:
+                print(f"[POSITION] Position data acquired for {name}")
+                tts_manager.say_sync(f"Position data acquired for {name}.")
                 return rigid_node
         time.sleep(0.2)
     
-    print(f"[ERROR] Position tracking timeout for {robot_name}")
+    print(f"[ERROR] Position tracking timeout for {name}")
     return None
 
 def get_current_position(robot_name: str) -> Tuple[float, float, float]:
