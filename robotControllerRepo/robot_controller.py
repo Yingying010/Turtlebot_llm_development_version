@@ -111,7 +111,7 @@ def execute_contactless_transport(node, executor, robot_name: str, params: Dict)
 
         key = f"{robot_name}_transport"
         if key not in _transport_managers:
-            mgr = TransportManager(node, executor, robot_name)
+            mgr = TransportManager(node, executor, robot_name, item, start, goal)
             _transport_managers[key] = mgr
             mgr.worker.join(timeout=300)
             del _transport_managers[key]
