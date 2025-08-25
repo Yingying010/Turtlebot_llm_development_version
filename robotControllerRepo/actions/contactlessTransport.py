@@ -84,6 +84,16 @@ def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optiona
     print(f"[ERROR] Position tracking timeout for {name}")
     return None
 
+def get_position_with_polling(robot_name: str, timeout_sec=120, poll_interval=0.1):
+    """尝试在 timeout_sec 秒内反复获取非 None 的位置"""
+    start_time = time.time()
+    while time.time() - start_time < timeout_sec:
+        x, y, heading = get_current_position(robot_name)
+        if None not in (x, y, heading):
+            return x, y, heading
+        time.sleep(poll_interval)
+    logger.error(f"[POSITION] Timeout getting position for {robot_name}")
+    return None, None, None
 
 # robot 1 在右边
 def plan_formation(particle_xy, target_xy):
@@ -187,7 +197,7 @@ class TransportManager:
         if isinstance(start, str):
             resolved_start = getRobotPositionCache(start, executor)
             if resolved_start:
-                x, y, heading = get_current_position(start)
+                x, y, heading = get_position_with_polling(start)
                 resolved_start = {"x": x, "y": y, "heading": heading}
                 print(f"[TARGET_RESOLUTION] Dynamic target '{start}' resolved to ({x:.1f}, {y:.1f})")
             else:
@@ -209,7 +219,7 @@ class TransportManager:
         if isinstance(goal, str):
             resolved_goal = getRobotPositionCache(goal, executor)
             if resolved_goal:
-                x, y, heading = get_current_position(goal)
+                x, y, heading = get_position_with_polling(goal)
                 resolved_goal = {"x": x, "y": y, "heading": heading}
                 print(f"[TARGET_RESOLUTION] Dynamic target '{goal}' resolved to ({x:.1f}, {y:.1f})")
             else:
@@ -319,7 +329,7 @@ class TransportManager:
             self._publish(MSG_SYN, {"who": self.robot_id})
             self.ack_event.wait(timeout=3.0)  # 最多等 3s；没拿到也继续后面的流程
 
-            # Phase2: 导航到编队位姿（调用 navigate.py 的 navigate_to_target，并增加超时保护）
+            # Phase2: 导航到编队位姿
             if self.is_r1:
                 x_goal, y_goal, yaw_goal = self.r1
             else:
@@ -355,15 +365,8 @@ class TransportManager:
             # === 对称性检测 ===（只由 robot1 发起，避免重复打印）
             if self.is_r1:
                 # 获取两台车的当前位姿
-                # 尝试3次获取
-                for _ in range(3):
-                    x1, y1, h1 = get_current_position("robot1")
-                    if x1 != None and y1 != None and h1 != None:
-                        break
-                for _ in range(3):  
-                    x2, y2, h2 = get_current_position("robot2")
-                    if x2 != None and y2 != None and h2 != None:
-                        break
+                x1, y1, h1 = get_position_with_polling("robot1")
+                x2, y2, h2 = get_position_with_polling("robot2")
 
                 robot1_pose = (x1, y1, h1)
                 robot2_pose = (x2, y2, h2)

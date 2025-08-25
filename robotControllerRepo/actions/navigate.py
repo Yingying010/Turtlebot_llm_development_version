@@ -14,6 +14,7 @@ import json
 import argparse
 from phasespace.rigid_tracker import RigidTracker
 import config
+from loguru import logger
 from ttsRepo.stream_tts import tts_manager
 from robotControllerRepo.utils.coord_convert import resolve_object_position
 from robotControllerRepo.actions.rotate import rotate_deg
@@ -82,6 +83,17 @@ def get_current_position(robot_name: str) -> Tuple[float, float, float]:
     tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
 
+def get_position_with_polling(robot_name: str, timeout_sec=120.0, poll_interval=0.1):
+    """尝试在 timeout_sec 秒内反复获取非 None 的位置"""
+    start_time = time.time()
+    while time.time() - start_time < timeout_sec:
+        x, y, heading = get_current_position(robot_name)
+        if None not in (x, y, heading):
+            return x, y, heading
+        time.sleep(poll_interval)
+    logger.error(f"[POSITION] Timeout getting position for {robot_name}")
+    return None, None, None
+
 def _ensure_publisher(node: Node, robot_name: str) -> Publisher:
     """Ensure publisher exists for robot command velocity"""
     key = (id(node), robot_name)
@@ -110,7 +122,7 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
     """Rotate robot to face target position using feedback control"""
     x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_id)
+    x_now, y_now, _ = get_position_with_polling(robot_id)
     dx = x_target - x_now
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
@@ -118,7 +130,7 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
     print(f"[ROTATE] Target: ({x_target:.1f}, {y_target:.1f}) -> {target_angle:.1f} degrees")
 
     while True:
-        _, _, heading_y_now = get_current_position(robot_id)
+        _, _, heading_y_now = get_position_with_polling(robot_id)
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
@@ -153,7 +165,7 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
     print(f"[MOVE] Approaching target ({x_target:.1f}, {y_target:.1f})")
 
     while True:
-        x_now, y_now, heading_y_now = get_current_position(robot_name)
+        x_now, y_now, heading_y_now = get_position_with_polling(robot_name)
         dx = x_target - x_now
         dz = y_target - y_now
         distance = math.hypot(dx, dz)
@@ -197,7 +209,7 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
                     angular_speed_deg_per_s: float = 10.0, tolerance_deg: float = 1.0):
     
     """Execute precision rotation using time-based control"""
-    _, _, current_heading = get_current_position(robot_name)
+    _, _, current_heading = get_position_with_polling(robot_name)
     angle_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
     if abs(angle_diff) <= tolerance_deg:
@@ -222,7 +234,7 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
     safe_publish_twist(node, robot_name, Twist())
 
     # Verify result
-    _, _, final_heading = get_current_position(robot_name)
+    _, _, final_heading = get_position_with_polling(robot_name)
     final_diff = (target_angle_deg - final_heading + 180) % 360 - 180
     print(f"[PRECISION_ROTATE] Final heading: {final_heading:.1f}deg, "
           f"residual error: {final_diff:.1f}deg")
@@ -230,7 +242,7 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
 def precision_approach(node: Node, robot_name: str, target: Dict[str, float], 
                       speed_m_per_s: float = 0.03):
     """Execute precision approach using calculated distance and time"""
-    x_now, y_now, _ = get_current_position(robot_name)
+    x_now, y_now, _ = get_position_with_polling(robot_name)
     x_target, y_target = target["x"], target["y"]
 
     dx = x_target - x_now
@@ -272,7 +284,7 @@ def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_de
     time.sleep(0.3)  # Allow stabilization
     
     # Check if fine adjustment needed
-    _, _, current_heading = get_current_position(robot_name)
+    _, _, current_heading = get_position_with_polling(robot_name)
     angle_error = abs((target_heading_deg - current_heading + 180) % 360 - 180)
     
     if angle_error > 1.0:
@@ -282,7 +294,7 @@ def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_de
         
         # Final verification
         time.sleep(0.2)
-        _, _, final_heading = get_current_position(robot_name)
+        _, _, final_heading = get_position_with_polling(robot_name)
         final_error = abs((target_heading_deg - final_heading + 180) % 360 - 180)
         print(f"[HEADING_ALIGN] Final heading: {final_heading:.1f}deg, error: {final_error:.1f}deg")
     else:
@@ -295,7 +307,7 @@ def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_de
 def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     """Execute complete navigation to target position with multi-stage precision"""
     x_target, y_target = target["x"], target["y"]
-    x_now, y_now, _ = get_current_position(robot_name)
+    x_now, y_now, _ = get_position_with_polling(robot_name)
     initial_distance = math.hypot(x_target - x_now, y_target - y_now)
 
     print(f"[NAVIGATE] Robot: {robot_name}, Target: ({x_target:.1f}, {y_target:.1f}), "
@@ -308,7 +320,7 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
 
     # Stage 2: Precision adjustment
     print("[NAVIGATE] Stage 2: Precision adjustment")
-    current_pos = get_current_position(robot_name)
+    current_pos = get_position_with_polling(robot_name)
     target_angle = calculate_target_angle(current_pos, target)
     precision_rotate(node, robot_name, target_angle, angular_speed_deg_per_s=8.0)
     precision_approach(node, robot_name, target, speed_m_per_s=0.03)
@@ -563,7 +575,7 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
     if isinstance(target, str):
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
-            x, y, heading = get_current_position(target)
+            x, y, heading = get_position_with_polling(target)
             resolved_target = {"x": x, "y": y, "heading": heading}
             print(f"[TARGET_RESOLUTION] Dynamic target '{target}' resolved to ({x:.1f}, {y:.1f})")
         else:
@@ -613,7 +625,7 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     used_key = None
     
     # 获取机器人当前位置
-    robot_x, robot_y, robot_heading = get_current_position(robot_name)
+    robot_x, robot_y, robot_heading = get_position_with_polling(robot_name)
     robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
     print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
     
