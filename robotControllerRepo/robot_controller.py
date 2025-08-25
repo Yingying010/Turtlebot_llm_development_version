@@ -14,7 +14,7 @@ from ttsRepo.stream_tts import tts_manager
 from robotControllerRepo.actions.move import move
 from robotControllerRepo.actions.rotate import rotate, rotate_deg
 from robotControllerRepo.actions.imitate import imitate_robot
-from robotControllerRepo.actions.navigate import navigate_to_target, navigate_to
+from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
 from robotControllerRepo.actions.pickup import pickup_item
