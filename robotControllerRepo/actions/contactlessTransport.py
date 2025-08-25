@@ -355,8 +355,15 @@ class TransportManager:
             # === 对称性检测 ===（只由 robot1 发起，避免重复打印）
             if self.is_r1:
                 # 获取两台车的当前位姿
-                x1, y1, h1 = get_current_position("robot1")
-                x2, y2, h2 = get_current_position("robot2")
+                # 尝试3次获取
+                for _ in range(3):
+                    x1, y1, h1 = get_current_position("robot1")
+                    if x1 != None and y1 != None and h1 != None:
+                        break
+                for _ in range(3):  
+                    x2, y2, h2 = get_current_position("robot2")
+                    if x2 != None and y2 != None and h2 != None:
+                        break
 
                 robot1_pose = (x1, y1, h1)
                 robot2_pose = (x2, y2, h2)
