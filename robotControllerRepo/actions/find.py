@@ -1,6 +1,10 @@
 # find.py
 # -*- coding: utf-8 -*-
 import os, sys, time, math, json
+from typing import Dict, Optional, Tuple, List
+from rclpy.node import Node
+from rclpy.publisher import Publisher
+from std_msgs.msg import String
 from typing import Any, Dict, List, Optional, Callable
 from rclpy._rclpy_pybind11 import InvalidHandle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -16,80 +20,36 @@ from robotControllerRepo.actions.dropoff import dropoff_item
 import config
 from geometry_msgs.msg import Twist
 
-# ======== Lifecycle 支持（桥接，免改 scheduler）========
-try:
-    from rclpy.lifecycle import LifecycleNode  # 若环境无此包，会走兜底
-    _LIFECYCLE_OK = True
-except Exception:
-    LifecycleNode = None  # type: ignore
-    _LIFECYCLE_OK = False
-
-# 提示：供内部桥接节点加入同一个 executor
-_EXECUTOR_HINT = None
-# 懒加载的生命周期“桥接节点”（专给 find 用）
-_LCN_BRIDGE = None
-
-def _is_lifecycle_node(node: Any) -> bool:
-    return bool(_LIFECYCLE_OK and isinstance(node, LifecycleNode)) or hasattr(node, "create_lifecycle_publisher")
-
-def _activate_publisher_with_owner_state(pub: Any, owner_node: Any) -> None:
-    """
-    正确激活 LifecyclePublisher：必须传入 owner_node 的当前生命周期 State。
-    - 若接口/状态不可用则静默跳过（保持最小侵入）。
-    """
-    try:
-        if hasattr(pub, "on_activate") and hasattr(owner_node, "get_current_state"):
-            state = owner_node.get_current_state()
-            if state is not None:
-                try:
-                    pub.on_activate(state)
-                    logger.debug("[find] lifecycle publisher activated with owner state")
-                except Exception as e:
-                    logger.debug(f"[find] publisher on_activate(state) skipped: {e}")
-    except Exception as e:
-        logger.debug(f"[find] publisher activation helper skipped: {e}")
-
-def _get_or_make_lifecycle_bridge() -> Optional[Any]:
-    """
-    若传入 node 不是 LifecycleNode，则在本模块内部创建一个生命周期“桥接节点”，
-    并尽力 configure/activate；需要时把它加入 _EXECUTOR_HINT。
-    """
-    global _LCN_BRIDGE
-    if not _LIFECYCLE_OK:
-        return None
-    if _LCN_BRIDGE is not None:
-        return _LCN_BRIDGE
-
-    try:
-        lcn = LifecycleNode("find_lifecycle_bridge")  # 仅 find.py 内部使用
-        # 把桥接节点加入调用方传进来的 executor（如果有）
-        if _EXECUTOR_HINT is not None:
-            try:
-                _EXECUTOR_HINT.add_node(lcn)
-                logger.debug("[find] lifecycle bridge added to executor")
-            except Exception as e:
-                logger.debug(f"[find] add bridge to executor skipped: {e}")
-        # 尽力切到 ACTIVE（若外部已有生命周期管理，不会破坏：失败忽略）
-        for m in ("configure", "activate"):
-            if hasattr(lcn, m):
-                try:
-                    getattr(lcn, m)()
-                    logger.debug(f"[find] lifecycle bridge {m}() called")
-                except Exception as e:
-                    logger.debug(f"[find] lifecycle bridge {m}() skipped: {e}")
-        _LCN_BRIDGE = lcn
-        logger.info("[find] Lifecycle bridge created & (best-effort) activated")
-        return _LCN_BRIDGE
-    except Exception as e:
-        logger.warning(f"[find] Failed to create lifecycle bridge: {e}")
-        return None
-
 # ========= 工具 =========
+publisher_dict: Dict[Tuple[int, str], Publisher] = {}
+
+
 def get_robot_id() -> str:
     return config.get("robot_id")
 
 def get_master_name() -> str:
     return config.get("master_id")
+
+
+def _ensure_publisher(node: Node, robot_name: str) -> Publisher:
+    """Ensure publisher exists for robot command velocity"""
+    key = (id(node), robot_name)
+    pub = publisher_dict.get(key)
+    if pub is None:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+    return pub
+
+def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
+    """Safely publish twist command with error handling"""
+    key = (id(node), robot_name)
+    pub = _ensure_publisher(node, robot_name)
+    try:
+        pub.publish(twist)
+    except InvalidHandle:
+        pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
+        publisher_dict[key] = pub
+        pub.publish(twist)
 
 def _bb_path(robot_name: str) -> str:
     return f"robot_blackboard_{robot_name}.json"
@@ -413,69 +373,8 @@ def get_optimized_params(item: str) -> float:
         return 0.5
     return 0.5
 
-# ========= 轻量旋转（直接 cmd_vel） =========
-_pub_cache: Dict[str, Any] = {}
-def is_node_alive(node):
-    """更健壮的节点存活检查"""
-    try:
-        if node is None:
-            return False
-        # 检查节点的基本属性
-        if not hasattr(node, 'context') or node.context is None:
-            return False
-        # 检查上下文是否有效
-        if not hasattr(node.context, 'ok') or not node.context.ok():
-            return False
-        # 检查节点是否被销毁
-        if hasattr(node, '_handle') and node._handle is None:
-            return False
-        return True
-    except (AttributeError, InvalidHandle, Exception) as e:
-        logger.debug(f"[find] Node alive check failed: {e}")
-        return False
-
-def _get_cmd_vel_pub(node: Any, robot_name: str):
-    """
-    懒加载并缓存 /<robot>/cmd_vel publisher
-    优先顺序：
-      1) 若传入 node 是 LifecycleNode → 用 create_lifecycle_publisher 并用 node 的 state 激活
-      2) 否则尝试使用模块内部的“桥接 LifecycleNode”并用其 state 激活
-      3) 再否则回退到普通 create_publisher（不使用生命周期）
-    """
-    if Twist is None:
-        return None
-
-    key = f"{robot_name}:/cmd_vel"
-    pub = _pub_cache.get(key)
-    if pub:
-        return pub
-
-    topic = f"/{robot_name}/cmd_vel"
-    try:
-        # 1) 传入的 node 就是 lifecycle
-        if _is_lifecycle_node(node) and hasattr(node, "create_lifecycle_publisher"):
-            logger.info(f"[find] ✅ Using Lifecycle publisher on passed node: {topic}")
-            pub = node.create_lifecycle_publisher(Twist, topic, 10)
-            _activate_publisher_with_owner_state(pub, node)
-        else:
-            # 2) 尝试用内部桥接生命周期节点
-            lcn = _get_or_make_lifecycle_bridge()
-            if lcn is not None and hasattr(lcn, "create_lifecycle_publisher"):
-                logger.info(f"[find] ✅ Using Lifecycle publisher on bridge: {topic}")
-                pub = lcn.create_lifecycle_publisher(Twist, topic, 10)
-                _activate_publisher_with_owner_state(pub, lcn)
-            else:
-                # 3) 退回普通 publisher（保持兼容）
-                logger.info(f"[find] ✅ Using normal publisher: {topic}")
-                pub = node.create_publisher(Twist, topic, 10)
-
-        _pub_cache[key] = pub
-        return pub
-    except Exception as e:
-        logger.error(f"[find] ❌ create publisher failed: {e}")
-        return None
-
-def rotate_by_deg(node: Any,
+# ========= 轻量旋转 =========
+def rotate_by_deg(node: Node,
                   robot_name: str,
                   delta_deg: float,
                   angular_speed_deg_s: float = None) -> bool:
@@ -484,45 +383,45 @@ def rotate_by_deg(node: Any,
     - 正角度：左转（+z）
     - 负角度：右转（-z）
     """
-    if not is_node_alive(node):
-        logger.error("[find] 🚨 node passed into rotate_by_deg is already destroyed!")
-
     if Twist is None:
         logger.error("[find] Twist unavailable, cannot rotate")
         return False
 
     if abs(delta_deg) < 1e-3:
+        logger.info("[find] Rotation angle too small, skip")
         return True
 
-    # 允许通过 config 覆盖默认角速度
+    # 从 config 中读取默认角速度
     if angular_speed_deg_s is None:
         angular_speed_deg_s = float(config.get("find_rotate_speed_deg_s", 25.0))
 
-    pub = _get_cmd_vel_pub(node, robot_name)
-    if pub is None:
-        return False
-
+    # 计算旋转时间（秒）和角速度（rad/s）
     duration = abs(delta_deg) / max(angular_speed_deg_s, 1e-6)
-    wz = (angular_speed_deg_s * math.pi / 180.0) * (1.0 if delta_deg >= 0 else -1.0)
+    wz = math.radians(angular_speed_deg_s) * (1.0 if delta_deg >= 0 else -1.0)
 
-    tw = Twist()
-    tw.angular.z = wz
+    twist = Twist()
+    twist.angular.z = wz
 
-    start = time.time()
-    rate = 0.02  # 50Hz
     logger.info(f"[find] 🔄 rotate_by_deg: {delta_deg:.1f}°, ω={angular_speed_deg_s:.1f}°/s, t={duration:.2f}s")
+
+    # 发布转动指令
+    safe_publish_twist(node, robot_name, twist)
+
     try:
+        start = time.time()
         while time.time() - start < duration:
-            pub.publish(tw)
-            time.sleep(rate)
+            safe_publish_twist(node, robot_name, twist)
+            time.sleep(0.02)  # 50Hz
     finally:
-        tw_stop = Twist()
         try:
-            pub.publish(tw_stop)
+            safe_publish_twist(node, robot_name, Twist())  # 停止转动
         except InvalidHandle:
             logger.warning("[find] Node destroyed before sending stop command, abort")
             return False
+
     return True
+
+
 
 def _rotate_scan_stepwise(node: Any,
                           robot_name: str,
