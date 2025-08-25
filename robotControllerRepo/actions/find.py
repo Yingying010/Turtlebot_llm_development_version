@@ -765,36 +765,35 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
             Action Definitions
             ========================
             1.navigate_to_object
-            - navigate to the item {"{"}"item": "<item> {"}"} 
+            - navigate to the item {{"item": "<item>"}}
 
             2. pickup  
-            - Pick up an item: {"{"}"item": "<item> {"}"}
+            - Pick up an item: {{"item": "<item>"}}
 
             3. navigate_to_target_position  
-            - To a named target: {"{"}"target": "<target_name> {"}"}  
-            - To coordinates: {"{"}"position": {"{"}"x": <num>, "y": <num>, "heading_deg": <num_or_null>{"}"} {"}"}
+            - To a named target: {{"target": "<target_name>"}}  
+            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
 
             4. dropoff  
-            - Drop off an item: {"{"}"item": "<item> {"}"}
+            - Drop off an item: {{"item": "<item>"}}
 
 
             Note:
-            - When the user says "bring to me", "me" is %s
+            - When the user says "bring to me", "me" is {get_master_name()}
             - The output must always follow strict JSON format:
 
-            {
+            {{
                 "action_needed": true/false,
                 "tasks": [
-                    {
+                    {{
                         "action": "navigate_to_object|pickup|navigate_to_target_position|dropoff|wait",
-                        "parameters": { ... }
-                    }
+                        "parameters": {{ ... }}
+                    }}
                 ],
                 "reasoning": "Brief explanation"
-            }
+            }}
 
-            """ % get_master_name()).strip()
-
+            """).strip()
 
             history_text = "No recent conversation history available."
             if chat_history:
