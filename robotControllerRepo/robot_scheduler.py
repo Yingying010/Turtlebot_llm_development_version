@@ -26,6 +26,12 @@ import config
 
 import datetime
 
+# 增加全局缓存
+_cached_node = None
+_executor_thread = None
+_executor = None
+_node_lock = threading.Lock()
+
 def now():
     """Get current timestamp in millisecond precision"""
     return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -678,9 +684,8 @@ def run_improved_scheduler_for_robot(node: Node, robot_name: str, task_data: Dic
 # =========================
 def run(task_data: Dict[str, Any]):
     """Enhanced multi-robot task scheduler entry point"""
-    
     logger.info("[SYSTEM] Starting enhanced multi-robot coordination system")
-    
+
     # Validate task plan
     try:
         validate_local_plan(task_data)
@@ -693,19 +698,20 @@ def run(task_data: Dict[str, Any]):
 
     logger.info(f"[SYSTEM] Initializing scheduler for robot: {robot_id}")
 
-    # Initialize ROS environment
-    try:
-        rclpy.init()
-        logger.info("[SYSTEM] ROS environment initialized successfully")
-    except RuntimeError as e:
-        logger.warning(f"[SYSTEM] ROS already initialized: {e}")
+    # Ensure ROS environment is initialized
+    if not rclpy.ok():
+        try:
+            rclpy.init()
+            logger.info("[SYSTEM] ROS environment initialized successfully")
+        except RuntimeError as e:
+            logger.warning(f"[SYSTEM] ROS already initialized: {e}")
 
     # Create ROS node and executor
     try:
         ros_node = rclpy.create_node(f"enhanced_scheduler_{robot_id}")
         executor = MultiThreadedExecutor()
         executor.add_node(ros_node)
-        
+
         logger.info(f"[SYSTEM] ROS node created: enhanced_scheduler_{robot_id}")
         logger.info("[SYSTEM] Multi-threaded executor configured")
 
@@ -719,24 +725,24 @@ def run(task_data: Dict[str, Any]):
             ensure_task_ids(task_data)
             dependency_map = build_prev_stage_map(task_data)
             ownership_map = build_seq_owner_map(task_data)
-            
+
             logger.info("[SYSTEM] Task preprocessing completed")
             logger.info("[SYSTEM] Beginning coordinated task execution")
-            
+
             # Execute scheduler
             execution_result = run_improved_scheduler_for_robot(
                 ros_node, robot_id, task_data, executor, dependency_map, ownership_map
             )
-            
+
             if execution_result:
                 logger.info(f"[SYSTEM] Multi-robot coordination completed successfully for {robot_id}")
             else:
                 logger.error(f"[SYSTEM] Multi-robot coordination failed for {robot_id}")
-            
+
         except Exception as e:
             logger.exception(f"[SYSTEM] Scheduler execution error: {e}")
             execution_result = False
-            
+
         finally:
             # Cleanup ROS resources
             logger.info(f"[SYSTEM] Initiating cleanup for robot: {robot_id}")
@@ -745,17 +751,21 @@ def run(task_data: Dict[str, Any]):
                 logger.debug("[SYSTEM] Node removed from executor")
             except Exception as cleanup_error:
                 logger.warning(f"[SYSTEM] Node cleanup warning: {cleanup_error}")
-                
+
             executor.shutdown()
-            ros_node.destroy_node()
-            logger.debug("[SYSTEM] ROS node destroyed")
-            
             try:
-                rclpy.shutdown()
-                logger.debug("[SYSTEM] ROS environment shutdown")
-            except Exception as shutdown_error:
-                logger.warning(f"[SYSTEM] ROS shutdown warning: {shutdown_error}")
-                
+                ros_node.destroy_node()
+                logger.debug("[SYSTEM] ROS node destroyed")
+            except Exception as e:
+                logger.warning(f"[SYSTEM] Node destroy warning: {e}")
+
+            if rclpy.ok():
+                try:
+                    rclpy.shutdown()
+                    logger.debug("[SYSTEM] ROS environment shutdown")
+                except Exception as shutdown_error:
+                    logger.warning(f"[SYSTEM] ROS shutdown warning: {shutdown_error}")
+
             # Wait for executor thread completion
             executor_thread.join(timeout=1)
             if executor_thread.is_alive():
@@ -769,8 +779,11 @@ def run(task_data: Dict[str, Any]):
 
     logger.info(f"[SYSTEM] Enhanced multi-robot coordination system shutdown complete")
     logger.info(f"[SYSTEM] Final execution status: {'SUCCESS' if execution_result else 'FAILURE'}")
-    
+
     return execution_result
+
+
+
 
 # =========================
 # Test Entry Point
