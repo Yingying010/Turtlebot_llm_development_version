@@ -21,6 +21,11 @@ import json
 import argparse
 import threading
 from loguru import logger
+from typing import Dict, Optional
+
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 
 import rclpy
 from rclpy.node import Node
@@ -30,12 +35,20 @@ from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
+import config
+from ttsRepo.stream_tts import tts_manager
+from phasespace.rigid_tracker import RigidTracker
+
 # ===== 使用你现有的导航函数 =====
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from robotControllerRepo.actions.navigate import navigate_to_target, get_current_position
 
 # ===== 全局参数（直接改这里就行） =====
+position_cache: Dict[str, Dict[str, float]] = {}
+cache_lock = threading.Lock()
+semantic_locations = config.get("semantic_locations")
+
 PARTICLE = (0.0, -500.0)     # 微粒点坐标
 TARGET   = (500.0, -1000.0)    # 目标点坐标
 GAP = 70 
@@ -49,6 +62,29 @@ WAIT_READY_TIMEOUT_SEC   = 30.0   # 等对方 READY 的超时
 WAIT_GO_TIMEOUT_SEC      = 30.0   # follower 等 GO 的超时
 
 # ===== 工具函数 =====
+def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
+    """Initialize position tracking for specified robot"""
+    rigid_node = RigidTracker(
+        position_cache=position_cache,
+        name=name,
+        position_lock=cache_lock,
+    )
+    executor.add_node(rigid_node)
+    print(f"[POSITION] Initializing tracker for {name}")
+    tts_manager.say_sync(f"Initializing tracker for {name}, waiting for position data.")
+    
+    for _ in range(50):  # 10 second timeout
+        with cache_lock:
+            if name in position_cache:
+                print(f"[POSITION] Position data acquired for {name}")
+                tts_manager.say_sync(f"Position data acquired for {name}.")
+                return rigid_node
+        time.sleep(0.2)
+    
+    print(f"[ERROR] Position tracking timeout for {name}")
+    return None
+
+
 # robot 1 在右边
 def plan_formation(particle_xy, target_xy):
     px, py = particle_xy
@@ -141,17 +177,59 @@ class TransportManager:
         self.node = node
         self.executor = executor
         self.robot_id = robot_id
-        self.item = item
-        self.start = start
-        self.goal = goal
         self.peer_id = "robot1" if robot_id == "robot2" else "robot2"
 
         self.completed = False
         self.success = False
 
+
+        # Resolve start
+        if isinstance(start, str):
+            resolved_start = getRobotPositionCache(start, executor)
+            if resolved_start:
+                x, y, heading = get_current_position(start)
+                resolved_start = {"x": x, "y": y, "heading": heading}
+                print(f"[TARGET_RESOLUTION] Dynamic target '{start}' resolved to ({x:.1f}, {y:.1f})")
+            else:
+                if start in semantic_locations:
+                    resolved_start = semantic_locations[start]
+                    print(f"[TARGET_RESOLUTION] Semantic target '{start}' resolved")
+                else:
+                    logger.error(f"[ERROR] Target '{start}' not found")
+                    tts_manager.say_sync(f"Can't resolve target {start}")
+                    return False
+        else:
+            resolved_start = start
+
+        if not (isinstance(resolved_start, dict) and "x" in resolved_start and "y" in resolved_start):
+            print(f"[ERROR] Invalid target format: {resolved_start}")
+            return False
+        
+        # Resolve goal
+        if isinstance(goal, str):
+            resolved_goal = getRobotPositionCache(goal, executor)
+            if resolved_goal:
+                x, y, heading = get_current_position(goal)
+                resolved_goal = {"x": x, "y": y, "heading": heading}
+                print(f"[TARGET_RESOLUTION] Dynamic target '{goal}' resolved to ({x:.1f}, {y:.1f})")
+            else:
+                if goal in semantic_locations:
+                    resolved_goal = semantic_locations[goal]
+                    print(f"[TARGET_RESOLUTION] Semantic target '{goal}' resolved")
+                else:
+                    logger.error(f"[ERROR] Target '{goal}' not found")
+                    tts_manager.say_sync(f"Can't resolve target {goal}")
+                    return False
+        else:
+            resolved_goal = goal
+
+        if not (isinstance(resolved_goal, dict) and "x" in resolved_goal and "y" in resolved_goal):
+            print(f"[ERROR] Invalid target format: {resolved_goal}")
+            return False
+
         # Phase1: 队形规划
-        print(f"start:{start}===========goal:{goal}")
-        self.phi, self.r1, self.r2, self.path_len = plan_formation(start, goal)
+        logger.info(f"[COORDINATION] Starting navigation coordination for {resolved_start} --> {resolved_goal}")
+        self.phi, self.r1, self.r2, self.path_len = plan_formation(resolved_start, resolved_goal)
         self.is_r1 = (robot_id == "robot1")
         logger.info(f"[robot1]: {self.r1} |  [robot2]: {self.r2}")
 
