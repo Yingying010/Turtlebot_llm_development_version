@@ -52,7 +52,7 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
 # === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
 _HISTORY_PATH = "memory/chattinglog.jsonl"
 
-def get_last_user_message_from_jsonlog(json_path="memory.chattinglog.json") -> str:
+def get_last_user_message_from_jsonlog(json_path="memory/chattinglog.json") -> str:
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -61,7 +61,7 @@ def get_last_user_message_from_jsonlog(json_path="memory.chattinglog.json") -> s
             if data.get("type") == "user":
                 return data.get("content", "")
     except Exception as e:
-        print(f"[find.py] Failed to load user message from log: {e}")
+        logger.error(f"[find] Failed to load user message from log: {e}")
     return ""
 
 def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
