@@ -189,7 +189,7 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
 
 # -------- 黑板读取 --------
 def _bb_path(robot_name: str) -> str:
-    return f"/tmp/robot_blackboard_{robot_name}.json"
+    return f"robot_blackboard_{robot_name}.json"
 
 def bb_get(robot_name: str, key: str) -> Optional[Dict]:
     """从黑板读取物体信息"""
