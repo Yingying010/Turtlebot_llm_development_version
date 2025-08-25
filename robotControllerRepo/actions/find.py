@@ -24,7 +24,7 @@ def get_master_name() -> str:
     return config.get("master_id")
 
 def _bb_path(robot_name: str) -> str:
-    return f"/tmp/robot_blackboard_{robot_name}.json"
+    return f"robot_blackboard_{robot_name}.json"
 
 def _bb_read(robot_name: str) -> Dict[str, Any]:
     p = _bb_path(robot_name)
@@ -789,6 +789,7 @@ def execute_find_with_llm_replanning(
     node: Any,
     robot_name: str,
     item: str,
+    executor,
     llm_replanning_fn: Optional[Callable[[Dict[str, Any], List[Dict[str, str]], str, str], Dict[str, Any]]] = None,
     history_store: Any = None
 ) -> bool:
@@ -878,9 +879,9 @@ def execute_find_with_llm_replanning(
                             
                     elif action == "navigate_to_target_position":
                         if "position" in params:
-                            navigate_to_target(node, None, robot_name, params["position"])
+                            navigate_to_target(node, executor, robot_name, params["position"])
                         elif "target" in params:
-                            navigate_to_target(node, None, robot_name, params["target"])
+                            navigate_to_target(node, executor, robot_name, params["target"])
                         else:
                             logger.warning("Missing 'position' or 'target' in navigate params")
                             all_tasks_success = False
@@ -945,7 +946,7 @@ def run_find(node: Any, robot_name: str, item: str, executor) -> bool:
     history_store = _FileHistoryStore(_HISTORY_PATH) if os.path.exists(_HISTORY_PATH) else None
 
     result = execute_find_with_llm_replanning(
-        node, robot_name, item,
+        node, robot_name, item, executor,
         history_store=history_store
     )
 

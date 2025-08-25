@@ -613,14 +613,6 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     """
     after find the item
     """
-    # 候选的黑板key（按优先级排序）
-    candidate_keys = [
-        f"{item}_target",     # 标准格式：cup_target
-        f"{item}",           # 直接使用物品名：cup
-        f"found_{item}",     # found_cup
-        f"target_{item}",    # target_cup
-    ]
-    
     target_position = None
     used_key = None
     
@@ -630,17 +622,15 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
     
     # 尝试各个候选key
-    for key in candidate_keys:
-        print(f"🔑 Trying blackboard key: '{key}'")
-        map_position = resolve_object_position(robot_name, key, robot_pos)
-        if map_position:
-            print(f"✅ Found in blackboard with key '{key}':")
-            print(f"   📍 Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
-            print(f"   📏 Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
-            print(f"   🎯 Confidence: {map_position.get('confidence', 0):.2f}")
-            target_position = map_position
-            used_key = key
-            break
+    print(f"🔑 Trying blackboard key: '{item}'")
+    map_position = resolve_object_position(robot_name, item, robot_pos)
+    if map_position:
+        print(f"✅ Found in blackboard with key '{item}':")
+        print(f"   📍 Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
+        print(f"   📏 Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
+        print(f"   🎯 Confidence: {map_position.get('confidence', 0):.2f}")
+        target_position = map_position
+        used_key = item
     
     # 如果黑板中没找到，尝试语义位置
     if not target_position:
@@ -661,7 +651,6 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     # 如果都没找到，报错
     if not target_position:
         print(f"❌ Could not find location for item '{item}'!")
-        print(f"💡 Tried blackboard keys: {candidate_keys}")
         print(f"💡 Tried semantic keys: {[item, f'{item}_location', f'{item}_pos']}")
         print(f"💡 Available semantic locations: {list(semantic_locations.keys())}")
         tts_manager.say(f"Sorry, I cannot find the location of {item}")
