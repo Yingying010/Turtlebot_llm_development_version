@@ -874,7 +874,7 @@ def run_find(node: Any, robot_name: str, item: str, executor) -> Dict[str, Any]:
 
         try:
             if action == "navigate_to_object":
-                target = params.get("target")
+                target = params.get("item")
                 if target:
                     navigate_to_object(node, robot_name, target, executor)
                 else:
