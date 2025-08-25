@@ -32,14 +32,22 @@ _LCN_BRIDGE = None
 def _is_lifecycle_node(node: Any) -> bool:
     return bool(_LIFECYCLE_OK and isinstance(node, LifecycleNode)) or hasattr(node, "create_lifecycle_publisher")
 
-def _maybe_activate_publisher(pub: Any) -> None:
-    # LifecyclePublisher 需要 on_activate 后才能 publish
-    if hasattr(pub, "on_activate"):
-        try:
-            pub.on_activate()
-            logger.debug("[find] lifecycle publisher on_activate() called")
-        except Exception as e:
-            logger.debug(f"[find] lifecycle publisher on_activate() skipped: {e}")
+def _activate_publisher_with_owner_state(pub: Any, owner_node: Any) -> None:
+    """
+    正确激活 LifecyclePublisher：必须传入 owner_node 的当前生命周期 State。
+    - 若接口/状态不可用则静默跳过（保持最小侵入）。
+    """
+    try:
+        if hasattr(pub, "on_activate") and hasattr(owner_node, "get_current_state"):
+            state = owner_node.get_current_state()
+            if state is not None:
+                try:
+                    pub.on_activate(state)
+                    logger.debug("[find] lifecycle publisher activated with owner state")
+                except Exception as e:
+                    logger.debug(f"[find] publisher on_activate(state) skipped: {e}")
+    except Exception as e:
+        logger.debug(f"[find] publisher activation helper skipped: {e}")
 
 def _get_or_make_lifecycle_bridge() -> Optional[Any]:
     """
@@ -430,8 +438,8 @@ def _get_cmd_vel_pub(node: Any, robot_name: str):
     """
     懒加载并缓存 /<robot>/cmd_vel publisher
     优先顺序：
-      1) 若传入 node 是 LifecycleNode → 用 create_lifecycle_publisher
-      2) 否则尝试使用模块内部的“桥接 LifecycleNode”
+      1) 若传入 node 是 LifecycleNode → 用 create_lifecycle_publisher 并用 node 的 state 激活
+      2) 否则尝试使用模块内部的“桥接 LifecycleNode”并用其 state 激活
       3) 再否则回退到普通 create_publisher（不使用生命周期）
     """
     if Twist is None:
@@ -448,14 +456,14 @@ def _get_cmd_vel_pub(node: Any, robot_name: str):
         if _is_lifecycle_node(node) and hasattr(node, "create_lifecycle_publisher"):
             logger.info(f"[find] ✅ Using Lifecycle publisher on passed node: {topic}")
             pub = node.create_lifecycle_publisher(Twist, topic, 10)
-            _maybe_activate_publisher(pub)
+            _activate_publisher_with_owner_state(pub, node)
         else:
             # 2) 尝试用内部桥接生命周期节点
             lcn = _get_or_make_lifecycle_bridge()
             if lcn is not None and hasattr(lcn, "create_lifecycle_publisher"):
                 logger.info(f"[find] ✅ Using Lifecycle publisher on bridge: {topic}")
                 pub = lcn.create_lifecycle_publisher(Twist, topic, 10)
-                _maybe_activate_publisher(pub)
+                _activate_publisher_with_owner_state(pub, lcn)
             else:
                 # 3) 退回普通 publisher（保持兼容）
                 logger.info(f"[find] ✅ Using normal publisher: {topic}")
@@ -493,9 +501,6 @@ def rotate_by_deg(node: Any,
     pub = _get_cmd_vel_pub(node, robot_name)
     if pub is None:
         return False
-
-    # Lifecycle 发布器在 ACTIVE 才能发，确保激活（若可能）
-    _maybe_activate_publisher(pub)
 
     duration = abs(delta_deg) / max(angular_speed_deg_s, 1e-6)
     wz = (angular_speed_deg_s * math.pi / 180.0) * (1.0 if delta_deg >= 0 else -1.0)
@@ -760,35 +765,35 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
             Action Definitions
             ========================
             1.navigate_to_object
-            - navigate to the item {{"item": "<item>"}}
+            - navigate to the item {"{"}"item": "<item> {"}"} 
 
             2. pickup  
-            - Pick up an item: {{"item": "<item>"}}
+            - Pick up an item: {"{"}"item": "<item> {"}"}
 
             3. navigate_to_target_position  
-            - To a named target: {{"target": "<target_name>"}}  
-            - To coordinates: {{"position": {{"x": <num>, "y": <num>, "heading_deg": <num_or_null>}}}}
+            - To a named target: {"{"}"target": "<target_name> {"}"}  
+            - To coordinates: {"{"}"position": {"{"}"x": <num>, "y": <num>, "heading_deg": <num_or_null>{"}"} {"}"}
 
             4. dropoff  
-            - Drop off an item: {{"item": "<item>"}}
+            - Drop off an item: {"{"}"item": "<item> {"}"}
 
 
             Note:
-            - When the user says "bring to me", "me" is {get_master_name()}
+            - When the user says "bring to me", "me" is %s
             - The output must always follow strict JSON format:
 
-            {{
+            {
                 "action_needed": true/false,
                 "tasks": [
-                    {{
+                    {
                         "action": "navigate_to_object|pickup|navigate_to_target_position|dropoff|wait",
-                        "parameters": {{ ... }}
-                    }}
+                        "parameters": { ... }
+                    }
                 ],
                 "reasoning": "Brief explanation"
-            }}
+            }
 
-            """).strip()
+            """ % get_master_name()).strip()
 
 
             history_text = "No recent conversation history available."
