@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os, sys, time, math, json
 from typing import Any, Dict, List, Optional, Callable
-
+from rclpy._rclpy_pybind11 import InvalidHandle
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import cv2
@@ -336,62 +336,6 @@ def _detect_with_simple_filter(detector: StandaloneYOLODetector,
     logger.debug(f"[find] 🔍 Filter rejected all detections")
     return None
 
-def _detect_with_camera_multiframe(detector: StandaloneYOLODetector, 
-                                  target_class: str, 
-                                  conf_thres: float,
-                                  num_frames: int = 3,
-                                  frame_interval: float = 0.3) -> Optional[Dict]:
-    """传统多帧检测（备选方法）"""
-    if not detector.available:
-        return None
-    
-    logger.debug(f"[find] 📷 Multi-frame detection: {num_frames} frames for {target_class}")
-    
-    all_detections = []
-    successful_frames = 0
-    
-    for frame_idx in range(num_frames):
-        logger.debug(f"[find] 📸 Capturing frame {frame_idx + 1}/{num_frames}")
-        
-        frame_detections = _capture_and_detect(detector, conf_thres)
-        targets = [d for d in frame_detections if d.get("class") == target_class and d.get("conf", 0) >= conf_thres]
-        
-        if targets:
-            for t in targets:
-                t["frame_idx"] = frame_idx
-            all_detections.extend(targets)
-            successful_frames += 1
-            
-        if frame_idx < num_frames - 1:
-            time.sleep(frame_interval)
-    
-    logger.info(f"[find] 📊 Multi-frame: {successful_frames}/{num_frames} frames, {len(all_detections)} detections")
-    
-    if not all_detections:
-        return None
-    
-    best_detection = max(all_detections, key=lambda x: x.get("conf", 0))
-    best_detection["detection_method"] = "multiframe"
-    best_detection["detection_count"] = len(all_detections)
-    best_detection["successful_frames"] = successful_frames
-    return best_detection
-
-def _detect_with_camera(detector: StandaloneYOLODetector,
-                       simple_filter: SimpleDetectionFilter,
-                       target_class: str, 
-                       conf_thres: float,
-                       use_filter: bool = True,
-                       num_frames: int = 1) -> Optional[Dict]:
-    """检测方法选择器"""
-    if use_filter and num_frames == 1:
-        logger.debug(f"[find] Using simple filtered single-frame detection")
-        return _detect_with_simple_filter(detector, simple_filter, target_class, conf_thres)
-    else:
-        logger.debug(f"[find] Using traditional multi-frame detection ({num_frames} frames)")
-        return _detect_with_camera_multiframe(detector, target_class, conf_thres, num_frames)
-
-
-
 # ========= 参数优化 =========
 def get_optimized_params(item: str) -> float:
     if item in ["cup", "bottle", "phone", "remote", "keys"]:
@@ -404,6 +348,12 @@ def get_optimized_params(item: str) -> float:
 
 # ========= 轻量旋转（直接 cmd_vel） =========
 _pub_cache: Dict[str, Any] = {}
+def is_node_alive(node):
+    try:
+        _ = node.get_name()
+        return True
+    except Exception:
+        return False
 
 def _get_cmd_vel_pub(node: Any, robot_name: str):
     """
@@ -435,6 +385,9 @@ def rotate_by_deg(node: Any,
     - 正角度：左转（+z）
     - 负角度：右转（-z）
     """
+    if not is_node_alive(node):
+        logger.error("[find] 🚨 node passed into rotate_by_deg is already destroyed!")
+
     if Twist is None:
         logger.error("[find] Twist unavailable, cannot rotate")
         return False
@@ -464,9 +417,12 @@ def rotate_by_deg(node: Any,
             pub.publish(tw)
             time.sleep(rate)
     finally:
-        # 停止
         tw_stop = Twist()
-        pub.publish(tw_stop)
+        try:
+            pub.publish(tw_stop)
+        except InvalidHandle:
+            logger.warning("[find] Node destroyed before sending stop command, abort")
+            return False
     return True
 
 def _rotate_scan_stepwise(node: Any,
