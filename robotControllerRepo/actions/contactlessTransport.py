@@ -137,18 +137,21 @@ class TransportManager:
     协作运输管理器（不继承 Node；复用外部 node 和 executor）
     将来在 controller.py 里可直接：TransportManager(controller_node, controller_executor, "robot1")
     """
-    def __init__(self, node: Node, executor: MultiThreadedExecutor, robot_id: str):
+    def __init__(self, node: Node, executor: MultiThreadedExecutor, robot_id: str, item, start, goal):
         self.node = node
         self.executor = executor
         self.robot_id = robot_id
+        self.item = item
+        self.start = start
+        self.goal = goal
         self.peer_id = "robot1" if robot_id == "robot2" else "robot2"
 
-        # 🔥 新增：跟踪完成状态的公共属性
         self.completed = False
         self.success = False
 
         # Phase1: 队形规划
-        self.phi, self.r1, self.r2, self.path_len = plan_formation(PARTICLE, TARGET)
+        print(f"start:{start}===========goal:{goal}")
+        self.phi, self.r1, self.r2, self.path_len = plan_formation(start, goal)
         self.is_r1 = (robot_id == "robot1")
         logger.info(f"[robot1]: {self.r1} |  [robot2]: {self.r2}")
 
