@@ -12,7 +12,7 @@ from ttsRepo.stream_tts import tts_manager
 
 # === Action Modules ===
 from robotControllerRepo.actions.move import move
-from robotControllerRepo.actions.rotate import rotate, rotate_deg
+from robotControllerRepo.actions.rotate import rotate
 from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow import follow_run
