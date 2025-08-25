@@ -222,7 +222,7 @@ class ImprovedSequentialManager:
         except Exception as e:
             logger.error(f"[SEQUENTIAL] {self.robot_name}: Unexpected error in status callback: {e}")
 
-    def wait_for_previous_sequence(self, sequence: int, prev_sequence: int, prev_owner: str, timeout: float = 60.0) -> bool:
+    def wait_for_previous_sequence(self, sequence: int, prev_sequence: int, prev_owner: str, timeout: float = 120.0) -> bool:
         """Wait for prerequisite sequence completion from specified robot"""
         if prev_owner == self.robot_name:
             logger.debug(f"[SEQUENTIAL] {self.robot_name}: Previous sequence={prev_sequence} owned by self, proceeding immediately")
@@ -329,7 +329,7 @@ class RobotSyncManager:
     Manages synchronous task coordination across multiple robots using
     distributed consensus protocol with ready-acknowledge handshaking.
     """
-    def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 60.0):
+    def __init__(self, node: Node, robot_name: str, sync_group: int, target_count: int, timeout: float = 120.0):
         self.node = node
         self.robot_name = robot_name
         self.sync_group = sync_group
