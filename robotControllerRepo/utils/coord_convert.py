@@ -28,7 +28,7 @@ logger = SimpleLogger()
 OBJECT_SIZE_DATABASE = {
     # 日常小物品（厘米）
     "cup": {"width": 8, "height": 10},
-    "bottle": {"width": 6, "height": 20},
+    "bottle": {"width": 5, "height": 16},
     "phone": {"width": 7, "height": 15},
     "remote": {"width": 5, "height": 18},
     "mouse": {"width": 6, "height": 10},
@@ -132,7 +132,7 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         camera_params = {
             "image_width": 640,
             "image_height": 480,
-            "fov_horizontal_deg": 62.2,
+            "fov_horizontal_deg": 52.2,
             "camera_offset_x": 0.0,    # 摄像头相对机器人中心的x偏移
             "camera_offset_y": 0.0     # 摄像头相对机器人中心的y偏移
         }
