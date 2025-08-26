@@ -40,7 +40,7 @@ except ImportError:
     tts_manager = DummyTTS()
 
 # ===== 运动参数 =====
-SPEED = 0.05        # 运动速度 (m/s)
+SPEED = 0.02        # 运动速度 (m/s)
 DISTANCE = 1000     # 运动距离 (mm)
 
 # 超时配置（秒）
@@ -122,7 +122,7 @@ class CollaborativeMove:
         self.speed = speed        # 使用传入的参数
 
         logger.info(f"[{robot_id}] 协作运动管理器初始化完成")
-        tts_manager.say_sync(f"{robot_id} ready for collaborative movement")
+        # tts_manager.say_sync(f"{robot_id} ready for collaborative movement")
 
         # 启动工作线程
         self.worker = threading.Thread(target=self._run_collaborative_move, daemon=True)
@@ -149,7 +149,7 @@ class CollaborativeMove:
             self.aborted = True
             self._publish_message(MSG_ABORT, {"reason": reason})
             logger.error(f"[{self.robot_id}] 中止运动: {reason}")
-            tts_manager.say_sync(f"Movement aborted: {reason}")
+            # tts_manager.say_sync(f"Movement aborted: {reason}")
         
         self.motion.stop()
         self.abort_event.set()
@@ -198,7 +198,7 @@ class CollaborativeMove:
         try:
             # 步骤1: 广播 READY 并等待对方 READY
             logger.info(f"[{self.robot_id}] 广播 READY 信号")
-            tts_manager.say_sync("Broadcasting ready signal")
+            # tts_manager.say_sync("Broadcasting ready signal")
             self._publish_message(MSG_READY)
 
             logger.info(f"[{self.robot_id}] 等待 {self.peer_id} 的 READY 信号...")
@@ -223,11 +223,11 @@ class CollaborativeMove:
                     "distance": self.distance,
                     "speed": self.speed
                 })
-                tts_manager.say_sync("Sending go signal, movement will start in 3 seconds")
+                # tts_manager.say_sync("Sending go signal, movement will start in 3 seconds")
             else:
                 # robot2 等待 GO 信号
                 logger.info(f"[{self.robot_id}] 等待 GO 信号...")
-                tts_manager.say_sync("Waiting for go signal")
+                # tts_manager.say_sync("Waiting for go signal")
                 if not self.go_event.wait(timeout=WAIT_GO_TIMEOUT_SEC):
                     self._abort(f"等待 GO 信号超时 (>{WAIT_GO_TIMEOUT_SEC}s)")
                     return
@@ -280,7 +280,7 @@ class CollaborativeMove:
             logger.info(f"[{self.robot_id}] 同步误差: {sync_error*1000:.2f} ms")
             logger.info(f"[{self.robot_id}] 运动参数: 方向={'前进' if forward else '后退'}, 距离={self.distance}mm, 速度={self.speed}m/s")
             
-            tts_manager.say_sync("Starting synchronized movement now")
+            # tts_manager.say_sync("Starting synchronized movement now")
             
             self.motion.drive_constant(forward, self.distance, self.speed)
             
@@ -291,7 +291,7 @@ class CollaborativeMove:
             logger.info(f"[{self.robot_id}] ✅ 协作运动完成！")
             logger.info(f"[{self.robot_id}] 运动用时: {duration:.2f} 秒")
             logger.info(f"[{self.robot_id}] 完成时间: {finish_time:.6f}")
-            tts_manager.say_sync("Collaborative movement completed successfully")
+            # tts_manager.say_sync("Collaborative movement completed successfully")
             
             self.success = True
 
