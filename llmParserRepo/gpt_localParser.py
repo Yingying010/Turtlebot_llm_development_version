@@ -10,7 +10,8 @@ sys.path.append(PROJECT_ROOT)
 import openai
 from loguru import logger
  
-from WhisperRepo.whisper_recognizer import recognize
+# from WhisperRepo.whisper_recognizer import recognize
+from WhisperRepo.whisper_openai import recognize
 from ttsRepo.stream_tts import tts_manager
 import config
 
