@@ -40,7 +40,7 @@ except ImportError:
     tts_manager = DummyTTS()
 
 # ===== 运动参数 =====
-SPEED = 0.05        # 运动速度 (m/s)
+SPEED = 0.02        # 运动速度 (m/s)
 DISTANCE = 1000     # 运动距离 (mm)
 
 # 超时配置（秒）
