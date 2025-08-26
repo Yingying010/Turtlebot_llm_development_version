@@ -79,7 +79,8 @@ class CollaborativeMove:
     """
     协作运动管理器 - 只包含Phase3的同步运动部分
     """
-    def __init__(self, node: Node, executor: MultiThreadedExecutor, robot_id: str):
+    def __init__(self, node: Node, executor: MultiThreadedExecutor, robot_id: str, 
+                 distance: float = DISTANCE, speed: float = SPEED):
         self.node = node
         self.executor = executor
         self.robot_id = robot_id
@@ -107,8 +108,8 @@ class CollaborativeMove:
         
         # 运动参数
         self.start_at = None
-        self.distance = DISTANCE
-        self.speed = SPEED
+        self.distance = distance  # 使用传入的参数
+        self.speed = speed        # 使用传入的参数
 
         logger.info(f"[{robot_id}] 协作运动管理器初始化完成")
         tts_manager.say_sync(f"{robot_id} ready for collaborative movement")
@@ -269,12 +270,11 @@ def main():
                        help="运动速度(m/s)")
     args = parser.parse_args()
 
-    # 更新全局参数
-    global DISTANCE, SPEED
-    DISTANCE = args.distance
-    SPEED = args.speed
+    # 使用局部变量而不是修改全局变量
+    distance = args.distance
+    speed = args.speed
 
-    logger.info(f"启动协作运动: robot_id={args.robot_id}, distance={DISTANCE}mm, speed={SPEED}m/s")
+    logger.info(f"启动协作运动: robot_id={args.robot_id}, distance={distance}mm, speed={speed}m/s")
 
     try:
         rclpy.init()
@@ -282,8 +282,8 @@ def main():
         executor = MultiThreadedExecutor()
         executor.add_node(node)
 
-        # 创建协作运动管理器
-        move_manager = CollaborativeMove(node, executor, args.robot_id)
+        # 创建协作运动管理器，传入自定义参数
+        move_manager = CollaborativeMove(node, executor, args.robot_id, distance=distance, speed=speed)
 
         # 启动executor
         executor_thread = threading.Thread(target=executor.spin, daemon=True)
