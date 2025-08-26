@@ -5,8 +5,8 @@ from ttsRepo.stream_tts import tts_manager
 
 def pickup_item(item:str):
     print(f"🗣️ Speaking: I am picking up {item}")
-    tts_manager.say(f"I am picking up {item}")
+    tts_manager.say_sync(f"I am picking up {item}")
     time.sleep(3)  # 模拟收集时间
-    tts_manager.say(f"{item} picked up successfully")
+    tts_manager.say_sync(f"{item} picked up successfully")
 
     return True

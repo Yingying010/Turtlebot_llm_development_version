@@ -588,7 +588,7 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
         logger.info(f"[find] 🗺️ Start waypoint search: {waypoints}")
         for idx, target in enumerate(waypoints, 1):
             try:
-                tts_manager.say(f"Moving to {target}")
+                tts_manager.say_sync(f"Moving to {target}")
                 navigate_to_target(node, executor, robot_name, target)
             except Exception as e:
                 logger.warning(f"[find] navigate_to_target({target}) error: {e}")

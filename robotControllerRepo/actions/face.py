@@ -33,13 +33,13 @@ def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optiona
     )
     executor.add_node(rigid_node)
     print(f"⏳ Waiting for position data of {name}...")
-    tts_manager.say(f"Initializing tracker for {name}, waiting for position data.")
+    tts_manager.say_sync(f"Initializing tracker for {name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
             ok = name in robot_position_cache
         if ok:
             print(f"✅ Got position data for {name}.")
-            tts_manager.say(f"Position data acquired for {name}.")
+            tts_manager.say_sync(f"Position data acquired for {name}.")
             return rigid_node
         time.sleep(0.2)
     print(f"❌ Timeout: No position data for {name}")
@@ -55,7 +55,7 @@ def get_current_position(robot_name: str) -> tuple:
             heading_y = rigid["heading_y"]
             return x, y, heading_y
     print(f"⚠️ No position data for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
  
  
@@ -128,7 +128,7 @@ def face_run(node: Node, robot_name: str, target: str, executor: MultiThreadedEx
     tracker_robot = getRobotPositionCache(robot_name, executor)
     if tracker_robot is None:
         print("❌ Abort navigation due to missing pose.")
-        tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+        tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
         return is_successful
  
     # 2) 解析语义位置或直接使用坐标
@@ -145,7 +145,7 @@ def face_run(node: Node, robot_name: str, target: str, executor: MultiThreadedEx
                 print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
             else:
                 print(f"❌ Error: target '{target}' not found in semantic_locations")
-                tts_manager.say(f"Can't get position data for {target}. Please check the tracking system or config file")
+                tts_manager.say_sync(f"Can't get position data for {target}. Please check the tracking system or config file")
 
     else:
         resolved_target = target

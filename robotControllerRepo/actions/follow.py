@@ -13,7 +13,6 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from WhisperRepo.whisper_background import run_continuous_listen
-from ttsRepo.stream_tts import tts_manager
  
 # 工程根路径
 
@@ -79,17 +78,17 @@ def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> O
     )
     executor.add_node(rigid_node)
     print(f"⏳ Waiting for position data of {robot_name}...")
-    tts_manager.say(f"Initializing tracker for {robot_name}, waiting for position data.")
+    tts_manager.say_sync(f"Initializing tracker for {robot_name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
             ok = robot_name in robot_position_cache
         if ok:
             print(f"✅ Got position data for {robot_name}.")
-            tts_manager.say(f"Position data acquired for {robot_name}.")
+            tts_manager.say_sync(f"Position data acquired for {robot_name}.")
             return rigid_node
         time.sleep(0.2)
     print(f"❌ Timeout: No position data for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
 def get_current_position(robot_name: str) -> tuple:
@@ -101,7 +100,7 @@ def get_current_position(robot_name: str) -> tuple:
             heading_y = rigid["heading_y"]
             return x, y, heading_y
     print(f"⚠️ No position data for {robot_name}")
-    tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
 
 
@@ -223,7 +222,7 @@ HYSTERESIS_MM = 50.0
 
 # === 跟随线程函数（外部） ===
 def follow_loop(ctrl_node: Node, follower: str, target: str, stop_event: threading.Event):
-    tts_manager.say(f"{follower} is now following {target}")
+    tts_manager.say_sync(f"{follower} is now following {target}")
     try:
         while rclpy.ok() and not stop_event.is_set():
             fx, fz, _ = get_current_position(follower)
@@ -244,7 +243,7 @@ def follow_loop(ctrl_node: Node, follower: str, target: str, stop_event: threadi
             time.sleep(0.15)
     finally:
         safe_publish_twist(ctrl_node, follower, Twist())
-        tts_manager.say(f"{follower} stopped following {target}")
+        tts_manager.say_sync(f"{follower} stopped following {target}")
  
  
 # ------------------------------------------------------------------

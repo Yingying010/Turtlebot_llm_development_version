@@ -31,7 +31,7 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
     params = task["parameters"]
 
     logger.info(f"🚗 {robot} is executing {action} → {params}")
-    tts_manager.say(f"{robot} is executing {action}")
+    tts_manager.say_sync(f"{robot} is executing {action}")
 
     try:
         if action == "move":
@@ -102,7 +102,7 @@ def execute_contactless_transport(node, executor, robot_name: str, params: Dict)
         goal = params.get("goal_position", "lucy")
 
         logger.info(f"🚛 {robot_name} transporting {item} from {start} to {goal}")
-        tts_manager.say(f"{robot_name} transporting {item}")
+        tts_manager.say_sync(f"{robot_name} transporting {item}")
 
         key = f"{robot_name}_transport"
         if key not in _transport_managers:

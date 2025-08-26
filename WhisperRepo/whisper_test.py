@@ -1,12 +1,10 @@
 import sys
 import os
 import queue
-import threading
 import time
 import wave
 import numpy as np
 import sounddevice as sd
-from scipy.io.wavfile import write
 from loguru import logger
 import subprocess
 

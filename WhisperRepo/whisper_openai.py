@@ -7,8 +7,6 @@ import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write
 from loguru import logger
-import config
-from ttsRepo.stream_tts import tts_manager
 from typing import Final
 import wave
 

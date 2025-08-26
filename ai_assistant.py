@@ -83,7 +83,7 @@ if __name__ == "__main__":
         if "open robot system" in wakeup_word:
             config.set(chat_or_instruct=False)
             logger.info("🎮 Switched to CONTROL mode.")
-            tts_manager.say_sync("Hi, I am your intelligent assistant. If you do not wish to continue, please say goodbye, my assistant")
+            tts_manager.say_sync("Hi, I am your intelligent assistant. If you do not wish to continue, please say goodbye my assistant")
         elif wakeup_word in {"goodbye, my assistant", "goodbye", "bye"}:
             tts_manager.say_sync("Goodbye!")
             time.sleep(1)
