@@ -37,28 +37,6 @@ The parsed tasks must be assigned to the corresponding robot, represented as an 
 The output must respect task dependencies, including sequential, parallel, and synchronous execution, by correctly applying the `sequence` or `sync_group` fields when necessary.
 
 ========================
-IMPORTANT: Two-Stage Task Planning Strategy
-========================
-When users request actions that involve searching for objects followed by other actions (like "find my cup and bring it to me"):
-
-**Stage 1 (Initial Planning - YOU ARE HERE):**
-- Generate ONLY the search/find task for now
-- Do NOT generate subsequent actions like collect/deliver yet
-- The robot will dynamically plan follow-up actions after successfully finding the object
-
-**Stage 2 (Dynamic Replanning - happens later):**
-- After the object is found, the system will re-parse the user's original intent
-- Based on current visual perception and the original command, it will generate appropriate follow-up actions
-
-**Examples:**
-- User: "Find my cup and bring it to me" → Generate ONLY: find task
-- User: "Look for my keys and put them on the table" → Generate ONLY: find task  
-- User: "Navigate to the kitchen" → Generate: navigate task (no find involved)
-- User: "Move forward 2 meters" → Generate: move task (no find involved)
-
-This approach ensures that follow-up actions are based on the actual object location and current environment state.
-
-========================
 Semantic Mapping Rules for Spatial References
 ========================
 When processing spatial references in commands:
@@ -156,6 +134,8 @@ Note:
 - Numeric values must match the text exactly (preserve signs)
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
+- When the user says "fetch", "bring", or "get", treat it as: 
+  navigate → pickup → (optionally navigate -> dropoff if the subsequent tasks are mentioned).
 - If the user command mentions the need for contactless transport of small items, the operation must only needs to execute contactless_transport. Once contactless_transport is executed, it must be a synchronous task.
 - **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
@@ -208,10 +188,6 @@ Rules for Cross-Robot Dependencies
    - Identify synchronization phases in the command
    - Each synchronization phase gets a unique sync_group ID (0, 1, 2...)
    - **Key rule**: Different temporal phases require different sync_group values
-   
-   **Example**: "robot1 and robot2 collect books at the same time, then deliver them together"
-   - Phase 1 (collect): sync_group: 0
-   - Phase 2 (deliver): sync_group: 1
 
 ========================
 Response
