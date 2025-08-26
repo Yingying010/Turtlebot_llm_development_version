@@ -32,6 +32,10 @@ OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
+def is_english(text: str) -> bool:
+    """判断字符串是否主要由英文单词组成"""
+    return bool(re.fullmatch(r"[a-zA-Z0-9\s]+", text)) and len(text.strip()) > 3
+
 # === 标准写入 wav 文件 ===
 def save_wav_standard(wav_path, audio_int16, samplerate=48000):
     with wave.open(wav_path, "wb") as wf:
@@ -132,9 +136,15 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
             )
         # SDK 通常提供 resp.text；为兼容性再兜底一下：
         raw_text = getattr(resp, "text", None) or str(resp)
-        clean_text = _clean(raw_text or "")
+        logger.info(f"📄 Raw transcript: {raw_text}")
 
-        logger.success(f"📝 Transcribed Text: {clean_text or '<EMPTY>'}")
+        clean_text = _clean(raw_text or "")
+        if not is_english(clean_text):
+            logger.warning("❌ 非英文内容被识别，丢弃结果")
+            return ""  # 返回空表示“跳过此段”
+
+        logger.success(f"📝 Transcribed Text: {clean_text}")
+
         if delay:
             time.sleep(delay)
         return clean_text
