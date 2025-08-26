@@ -32,7 +32,7 @@ from std_msgs.msg import String
 from ttsRepo.stream_tts import tts_manager
 
 # ===== 运动参数 =====
-SPEED = 0.05        # 运动速度 (m/s)
+SPEED = 0.02        # 运动速度 (m/s)
 DISTANCE = 1000     # 运动距离 (mm)
 
 # 超时配置（秒）
@@ -234,7 +234,7 @@ class CollaborativeMove:
 
             # 步骤4: 同步开始运动
             # 这里简化为两个机器人都前进，你可以根据需要修改
-            forward = True  # 两个机器人都前进
+            forward = self.is_robot1 # 两个机器人都前进
             
             logger.info(f"[{self.robot_id}] 开始协作运动！")
             tts_manager.say_sync("Starting collaborative movement")
