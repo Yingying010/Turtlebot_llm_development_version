@@ -267,7 +267,7 @@ class CollaborativeMove:
                     time.sleep(0.01)    # 10毫秒精度
 
             # 步骤4: 同步开始运动 - 添加更详细的日志
-            forward = True  # 两个机器人都前进
+            forward = self.is_robot1  # 两个机器人都前进
             
             # 记录实际开始时间
             actual_start_time = time.time()
