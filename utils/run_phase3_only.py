@@ -17,7 +17,9 @@ import threading
 from loguru import logger
 
 import os, sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+# 添加项目根目录到Python路径
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
 
 import rclpy
 from rclpy.node import Node
