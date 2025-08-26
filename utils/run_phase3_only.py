@@ -29,10 +29,18 @@ from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
-from ttsRepo.stream_tts import tts_manager
+# 修复导入路径
+try:
+    from ttsRepo.stream_tts import tts_manager
+except ImportError:
+    # 如果找不到tts模块，创建一个简单的替代品
+    class DummyTTS:
+        def say_sync(self, text):
+            print(f"[TTS] {text}")
+    tts_manager = DummyTTS()
 
 # ===== 运动参数 =====
-SPEED = 0.02        # 运动速度 (m/s)
+SPEED = 0.05        # 运动速度 (m/s)
 DISTANCE = 1000     # 运动距离 (mm)
 
 # 超时配置（秒）
@@ -201,17 +209,21 @@ class CollaborativeMove:
             if self.aborted:
                 return
 
-            # 步骤2: 协调开始时间
+            # 步骤2: 协调开始时间 - 改进版本，预留更多准备时间
             if self.is_robot1:
                 # robot1 作为协调者，发送 GO 信号
-                self.start_at = time.time() + 1.0  # 预留1秒准备时间
-                logger.info(f"[{self.robot_id}] 发送 GO 信号，开始时间: {self.start_at}")
+                self.start_at = time.time() + 3.0  # 预留3秒准备时间，确保同步
+                logger.info(f"[{self.robot_id}] 发送 GO 信号")
+                logger.info(f"[{self.robot_id}] 当前时间: {time.time():.3f}")
+                logger.info(f"[{self.robot_id}] 计划开始时间: {self.start_at:.3f}")
+                logger.info(f"[{self.robot_id}] 倒计时: {self.start_at - time.time():.3f} 秒")
+                
                 self._publish_message(MSG_GO, {
                     "start_at": self.start_at,
                     "distance": self.distance,
                     "speed": self.speed
                 })
-                tts_manager.say_sync("Sending go signal, movement will start in 1 second")
+                tts_manager.say_sync("Sending go signal, movement will start in 3 seconds")
             else:
                 # robot2 等待 GO 信号
                 logger.info(f"[{self.robot_id}] 等待 GO 信号...")
@@ -219,30 +231,67 @@ class CollaborativeMove:
                 if not self.go_event.wait(timeout=WAIT_GO_TIMEOUT_SEC):
                     self._abort(f"等待 GO 信号超时 (>{WAIT_GO_TIMEOUT_SEC}s)")
                     return
+                
+                logger.info(f"[{self.robot_id}] 收到 GO 信号")
+                logger.info(f"[{self.robot_id}] 当前时间: {time.time():.3f}")
+                logger.info(f"[{self.robot_id}] 计划开始时间: {self.start_at:.3f}")
+                logger.info(f"[{self.robot_id}] 倒计时: {self.start_at - time.time():.3f} 秒")
 
             if self.aborted:
                 return
 
-            # 步骤3: 精确时间同步等待
-            logger.info(f"[{self.robot_id}] 等待同步开始时间...")
-            while True:
-                remain = self.start_at - time.time()
-                if remain <= 0:
-                    break
-                # 最后2ms用忙等，其余时间轻睡
-                time.sleep(0.0005 if remain < 0.002 else 0.005)
-
-            # 步骤4: 同步开始运动
-            # 这里简化为两个机器人都前进，你可以根据需要修改
-            forward = self.is_robot1 # 两个机器人都前进
+            # 步骤3: 精确时间同步等待 - 改进版本
+            logger.info(f"[{self.robot_id}] 开始精确时间同步等待...")
+            countdown_shown = False
             
-            logger.info(f"[{self.robot_id}] 开始协作运动！")
-            tts_manager.say_sync("Starting collaborative movement")
+            while True:
+                current_time = time.time()
+                remain = self.start_at - current_time
+                
+                if remain <= 0:
+                    logger.info(f"[{self.robot_id}] ⏰ 时间到！开始运动！")
+                    break
+                
+                # 显示倒计时（每秒显示一次）
+                if remain <= 3.0 and not countdown_shown:
+                    logger.info(f"[{self.robot_id}] ⏱️ 倒计时: {remain:.1f} 秒")
+                    if remain <= 1.0:
+                        countdown_shown = True
+                
+                # 最后5ms用忙等，其余时间轻睡
+                if remain < 0.005:
+                    time.sleep(0.0001)  # 100微秒精度
+                elif remain < 0.1:
+                    time.sleep(0.001)   # 1毫秒精度
+                else:
+                    time.sleep(0.01)    # 10毫秒精度
+
+            # 步骤4: 同步开始运动 - 添加更详细的日志
+            forward = True  # 两个机器人都前进
+            
+            # 记录实际开始时间
+            actual_start_time = time.time()
+            planned_start_time = self.start_at
+            sync_error = actual_start_time - planned_start_time
+            
+            logger.info(f"[{self.robot_id}] 🚀 开始协作运动！")
+            logger.info(f"[{self.robot_id}] 计划开始时间: {planned_start_time:.6f}")
+            logger.info(f"[{self.robot_id}] 实际开始时间: {actual_start_time:.6f}")
+            logger.info(f"[{self.robot_id}] 同步误差: {sync_error*1000:.2f} ms")
+            logger.info(f"[{self.robot_id}] 运动参数: 方向={'前进' if forward else '后退'}, 距离={self.distance}mm, 速度={self.speed}m/s")
+            
+            tts_manager.say_sync("Starting synchronized movement now")
             
             self.motion.drive_constant(forward, self.distance, self.speed)
             
-            logger.info(f"[{self.robot_id}] 协作运动完成！")
-            tts_manager.say_sync("Collaborative movement completed")
+            # 记录完成时间
+            finish_time = time.time()
+            duration = finish_time - actual_start_time
+            
+            logger.info(f"[{self.robot_id}] ✅ 协作运动完成！")
+            logger.info(f"[{self.robot_id}] 运动用时: {duration:.2f} 秒")
+            logger.info(f"[{self.robot_id}] 完成时间: {finish_time:.6f}")
+            tts_manager.say_sync("Collaborative movement completed successfully")
             
             self.success = True
 
