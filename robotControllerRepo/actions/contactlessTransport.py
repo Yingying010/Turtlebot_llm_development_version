@@ -53,7 +53,7 @@ PARTICLE = (0.0, -500.0)     # 微粒点坐标
 TARGET   = (500.0, -1000.0)    # 目标点坐标
 GAP = 75 
 LENGTH = 138
-WIDTH = 190
+WIDTH = 178
 SPEED    = 0.05
 
 # 超时配置（秒）
@@ -97,6 +97,16 @@ def get_position_with_polling(robot_name: str, timeout_sec=120, poll_interval=0.
 
 # robot 1 在右边
 def plan_formation(particle_xy, target_xy):
+    # error
+    r1_x_error=0
+    r2_x_error=20
+
+    r1_y_error=0
+    r2_y_error=0
+
+    r1_heading_error=0
+    r2_heading_error=0
+
     px, py = particle_xy.get("x"), particle_xy.get("y")
     tx, ty = target_xy.get("x"), target_xy.get("y")
 
@@ -111,8 +121,8 @@ def plan_formation(particle_xy, target_xy):
     r2_heading = phi
 
     # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
-    r1 = (r1_x, r1_y, r1_heading)
-    r2 = (r2_x, r2_y, r2_heading)
+    r1 = (r1_x + r1_x_error, r1_y + r1_y_error, r1_heading + r1_heading_error)
+    r2 = (r2_x + r2_x_error, r2_y + r2_y_error, r2_heading + r2_heading_error)
 
     path_dis = math.hypot(tx - px, ty - py)
 

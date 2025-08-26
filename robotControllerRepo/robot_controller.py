@@ -13,7 +13,6 @@ from ttsRepo.stream_tts import tts_manager
 # === Action Modules ===
 from robotControllerRepo.actions.move import move
 from robotControllerRepo.actions.rotate import rotate
-from robotControllerRepo.actions.imitate import imitate_robot
 from robotControllerRepo.actions.navigate import navigate_to_target
 from robotControllerRepo.actions.follow import follow_run
 from robotControllerRepo.actions.face import face_run
@@ -57,11 +56,7 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
         elif action == "follow":
             result = follow_run(node, robot, params["target"], executor)
             return result
-
-        elif action == "imitate":
-            result = imitate_robot(node, robot, params["target"])
-            return result
-
+        
         elif action == "face":
             result = face_run(node, robot, params["target"], executor)
             return result
