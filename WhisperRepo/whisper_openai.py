@@ -24,7 +24,7 @@ MAX_DURATION      = 30
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
 # 选择 OpenAI 的 STT 模型（可改成 "gpt-4o-transcribe" 追求更高精度）
-OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
+OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "gpt-4o-transcribe")
 
 # === 清理文本 ===
 def _clean(text: str) -> str:
