@@ -22,7 +22,8 @@ SILENCE_THRESHOLD = 30.0  # 🔧 根据你的环境调整：你的背景噪音�
 SPEECH_THRESHOLD = 35.0   # 🔧 新增：语音检测阈值，需要明显高于背景噪音
 SILENCE_DURATION = 2.5    # 🔧 增加到2.5秒，避免正常停顿被误判
 CONFIRMATION_DURATION = 1.5  # 🔧 新增：确认阶段的等待时间
-CALIBRATION_BLOCKS = 20   # 🔧 校准阶段采集的块数
+CALIBRATION_BLOCKS = 30   # 🔧 增加校准块数，更准确
+SPEECH_DETECT_BLOCKS = 3  # 🔧 连续检测块数
 MAX_DURATION = 30
 FIXED_WAV_PATH = "/tmp/voice_input.wav"
 
@@ -64,6 +65,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     in_confirmation = False  # 🔧 新增：确认阶段标志
     is_calibrating = True    # 🔧 新增：校准阶段标志
     calibration_counter = 0
+    speech_detect_counter = 0  # 🔧 连续语音检测计数器
     
     # 🔧 背景噪音校准
     background_volumes = []
@@ -99,22 +101,23 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                     bg_avg = np.mean(background_volumes)
                     bg_std = np.std(background_volumes)
                     bg_max = np.max(background_volumes)
+                    bg_percentile_90 = np.percentile(background_volumes, 90)
                     
-                    # 🔧 更保守的动态阈值设置
-                    silence_threshold_dynamic = bg_avg + 3 * bg_std  # 背景噪音 + 3个标准差
-                    speech_threshold_dynamic = bg_avg + 6 * bg_std   # 背景噪音 + 6个标准差
+                    # 🔧 更合理的阈值设置策略
+                    # 基于90分位数而不是平均值+标准差，更稳定
+                    silence_threshold_dynamic = bg_percentile_90 + 1.5  # 90分位数 + 小幅增量
+                    speech_threshold_dynamic = bg_percentile_90 + 4.0   # 90分位数 + 明显增量
                     
-                    # 确保最小阈值差异和绝对最小值
-                    min_speech_gap = max(8, bg_std * 3)  # 至少8的差距，或3倍标准差
-                    if speech_threshold_dynamic - silence_threshold_dynamic < min_speech_gap:
-                        speech_threshold_dynamic = silence_threshold_dynamic + min_speech_gap
+                    # 🔧 确保阈值在合理范围内
+                    silence_threshold_dynamic = max(silence_threshold_dynamic, bg_avg + 2)
+                    speech_threshold_dynamic = max(speech_threshold_dynamic, silence_threshold_dynamic + 3)
                     
-                    # 🔧 对于低噪音环境，设置最小语音阈值
-                    if speech_threshold_dynamic < bg_avg + 10:
-                        speech_threshold_dynamic = bg_avg + 10
+                    # 🔧 设置阈值上限，避免过高
+                    silence_threshold_dynamic = min(silence_threshold_dynamic, bg_avg + 5)
+                    speech_threshold_dynamic = min(speech_threshold_dynamic, bg_avg + 8)
                     
                     logger.info(f"🎯 Background noise calibrated:")
-                    logger.info(f"   Avg: {bg_avg:.1f}, Std: {bg_std:.1f}, Max: {bg_max:.1f}")
+                    logger.info(f"   Avg: {bg_avg:.1f}, Std: {bg_std:.1f}, Max: {bg_max:.1f}, 90th: {bg_percentile_90:.1f}")
                     logger.info(f"   Speech threshold: {speech_threshold_dynamic:.1f}")
                     logger.info(f"   Silence threshold: {silence_threshold_dynamic:.1f}")
                     logger.info("🎙️ Waiting for speech to start...")
@@ -129,15 +132,21 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 pre_speech_buffer.pop(0)
 
             if not is_recording:
-                # 🔧 更严格的语音检测：需要连续几个块都超过阈值
+                # 🔧 改进的语音检测：需要连续几个块超过阈值
                 if volume > speech_threshold_dynamic:
-                    # 检查最近3个块是否都比较高
-                    recent_high = sum(1 for v in pre_speech_buffer[-3:] if np.abs(v).mean() * 1000 > speech_threshold_dynamic * 0.8)
-                    if recent_high >= 2 or volume > speech_threshold_dynamic * 1.2:  # 要么连续高，要么单次很高
+                    speech_detect_counter += 1
+                    logger.debug(f"🎯 Speech detection: {speech_detect_counter}/{SPEECH_DETECT_BLOCKS}")
+                    
+                    if speech_detect_counter >= SPEECH_DETECT_BLOCKS:
                         logger.info("🔴 Voice detected. Start recording...")
                         is_recording = True
                         audio_blocks.extend(pre_speech_buffer)
                         audio_blocks.append(block)
+                        speech_detect_counter = 0  # 重置计数器
+                else:
+                    # 音量不够高，重置计数器
+                    if speech_detect_counter > 0:
+                        speech_detect_counter = max(0, speech_detect_counter - 1)  # 缓慢衰减而不是立即重置
                 continue
 
             audio_blocks.append(block)
