@@ -619,62 +619,77 @@ def navigate_to_target(node: Node, executor: MultiThreadedExecutor, robot_name: 
 # ============================================================================
 def navigate_to_object(node: Node, robot_name: str, item: str, executor):
     """
-    after find the item
+    Navigate to a found object after detection.
+    This function handles both blackboard-stored positions and semantic locations.
     """
+    # Initialize position tracking system first
+    print(f"[NAVIGATE_TO_OBJECT] Initializing position tracking for {robot_name}")
+    tracker_robot = getRobotPositionCache(robot_name, executor)
+    if tracker_robot is None:
+        print(f"[ERROR] Position tracking failed for {robot_name}")
+        tts_manager.say_sync(f"Cannot initialize position tracking for {robot_name}. Please check the tracking system.")
+        return False
+    
+    # Get current robot position with validation
+    print(f"[NAVIGATE_TO_OBJECT] Getting current position for {robot_name}")
+    robot_x, robot_y, robot_heading = get_position_with_polling(robot_name)
+    if robot_x is None or robot_y is None or robot_heading is None:
+        print(f"[ERROR] Failed to get valid position for {robot_name}")
+        tts_manager.say_sync(f"Cannot get position data for {robot_name}. Please check the tracking system.")
+        return False
+    
+    robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
+    print(f"[NAVIGATE_TO_OBJECT] Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f} degrees)")
+    
     target_position = None
     used_key = None
     
-    # 获取机器人当前位置
-    robot_x, robot_y, robot_heading = get_position_with_polling(robot_name)
-    robot_pos = {"x": robot_x, "y": robot_y, "heading_y": robot_heading}
-    print(f"📍 Robot position: ({robot_x:.2f}, {robot_y:.2f}, {robot_heading:.1f}°)")
-    
-    # 尝试各个候选key
-    print(f"🔑 Trying blackboard key: '{item}'")
+    # Try to find object position in blackboard first
+    print(f"[NAVIGATE_TO_OBJECT] Searching for '{item}' in blackboard")
     map_position = resolve_object_position(robot_name, item, robot_pos)
     if map_position:
-        print(f"✅ Found in blackboard with key '{item}':")
-        print(f"   📍 Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
-        print(f"   📏 Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
-        print(f"   🎯 Confidence: {map_position.get('confidence', 0):.2f}")
+        print(f"[NAVIGATE_TO_OBJECT] Found in blackboard with key '{item}':")
+        print(f"   Map coordinates: ({map_position['x']:.2f}, {map_position['y']:.2f})")
+        print(f"   Estimated distance: {map_position.get('estimated_distance', 0):.2f}m")
+        print(f"   Confidence: {map_position.get('confidence', 0):.2f}")
         target_position = map_position
         used_key = item
     
-    # 如果黑板中没找到，尝试语义位置
+    # Fallback to semantic locations if not found in blackboard
     if not target_position:
-        print(f"🔍 Not found in blackboard, checking semantic locations...")
+        print(f"[NAVIGATE_TO_OBJECT] Not found in blackboard, checking semantic locations")
         semantic_candidates = [item, f"{item}_location", f"{item}_pos"]
         
         for semantic_key in semantic_candidates:
             if semantic_key in semantic_locations:
                 semantic_pos = semantic_locations[semantic_key]
-                print(f"✅ Found in semantic locations with key '{semantic_key}':")
-                print(f"   📍 Coordinates: ({semantic_pos['x']:.2f}, {semantic_pos['y']:.2f})")
+                print(f"[NAVIGATE_TO_OBJECT] Found in semantic locations with key '{semantic_key}':")
+                print(f"   Coordinates: ({semantic_pos['x']:.2f}, {semantic_pos['y']:.2f})")
                 if 'heading_deg' in semantic_pos:
-                    print(f"   🧭 Heading: {semantic_pos['heading_deg']}°")
+                    print(f"   Heading: {semantic_pos['heading_deg']} degrees")
                 target_position = semantic_pos
                 used_key = semantic_key
                 break
     
-    # 如果都没找到，报错
+    # Error if no valid position found
     if not target_position:
-        print(f"❌ Could not find location for item '{item}'!")
-        print(f"💡 Tried semantic keys: {[item, f'{item}_location', f'{item}_pos']}")
-        print(f"💡 Available semantic locations: {list(semantic_locations.keys())}")
+        print(f"[ERROR] Could not find location for item '{item}'")
+        print(f"[DEBUG] Tried semantic keys: {[item, f'{item}_location', f'{item}_pos']}")
+        print(f"[DEBUG] Available semantic locations: {list(semantic_locations.keys())}")
         tts_manager.say_sync(f"Sorry, I cannot find the location of {item}")
         return False
     
-    print(f"🎯 Using location from: {used_key}")
+    print(f"[NAVIGATE_TO_OBJECT] Using location from: {used_key}")
 
-    # === 阶段 1：导航到目标位置 ===
-    print(f"\n🧭 Phase 1: Navigation to target")
+    # Execute navigation based on position type
+    print(f"[NAVIGATE_TO_OBJECT] Starting navigation to target")
     
     if isinstance(target_position, dict) and "estimated_distance" in target_position:
-        # 🎯 使用coord_convert的结果，但仍需要调整朝向
-        print(f"📏 Using coord_convert results")
-        print(f"🎯 Target coordinates: ({target_position['x']:.2f}, {target_position['y']:.2f})")
+        # Handle coord_convert results with precise movement
+        print(f"[NAVIGATE_TO_OBJECT] Using coord_convert results for precise navigation")
+        print(f"[NAVIGATE_TO_OBJECT] Target coordinates: ({target_position['x']:.2f}, {target_position['y']:.2f})")
         
-        # 计算朝向（coord_convert给的是绝对坐标，需要相对当前位置计算角度）
+        # Calculate movement parameters
         target_x, target_y = target_position["x"], target_position["y"]
         dx = target_x - robot_x
         dy = target_y - robot_y
@@ -682,36 +697,40 @@ def navigate_to_object(node: Node, robot_name: str, item: str, executor):
         target_angle = math.degrees(math.atan2(dx, dy)) % 360
         angle_diff = (target_angle - robot_heading + 180) % 360 - 180
         
-        print(f"📏 Current distance to target: {current_distance:.2f}m")
-        print(f"🔄 Need to rotate: {angle_diff:.1f}°")
+        print(f"[NAVIGATE_TO_OBJECT] Current distance to target: {current_distance:.2f}m")
+        print(f"[NAVIGATE_TO_OBJECT] Need to rotate: {angle_diff:.1f} degrees")
         
-        # Step 1: 转向目标
-        if abs(angle_diff) > 3:  # 3度容差
-            print(f"🔄 Rotating {angle_diff:.1f}°...")
+        # Step 1: Rotate to face target
+        if abs(angle_diff) > 3:  # 3 degree tolerance
+            print(f"[NAVIGATE_TO_OBJECT] Rotating {angle_diff:.1f} degrees")
             rotate_success = rotate_deg(node, robot_name, angle_diff)
             if not rotate_success:
-                print(f"❌ Rotation failed!")
+                print(f"[ERROR] Rotation failed")
+                tts_manager.say_sync(f"Failed to rotate towards {item}")
                 return False
         else:
-            print(f"✅ Already facing target direction")
+            print(f"[NAVIGATE_TO_OBJECT] Already facing target direction")
         
-        # Step 2: 前进到目标
-        print(f"🚶 Moving forward {current_distance:.2f}m...")
+        # Step 2: Move forward to target
+        print(f"[NAVIGATE_TO_OBJECT] Moving forward {current_distance:.2f}m")
         is_successful = move(node, robot_name, "forward", current_distance, "meter")
+        
     else:
-        # 对于语义位置，使用完整导航
+        # Use full navigation system for semantic positions
+        print(f"[NAVIGATE_TO_OBJECT] Using full navigation system for semantic location")
         is_successful = navigate_to_target(node, executor, robot_name, target_position)
     
+    # Validate navigation result
     if not is_successful:
-        print(f"❌ Navigation failed!")
+        print(f"[ERROR] Navigation to {item} failed")
         tts_manager.say_sync(f"Sorry, I could not reach the {item}")
         return False
         
-    print(f"✅ Navigation completed! Reached target location")
-    print(f"🎯 Ready to collect {item}...")
+    print(f"[NAVIGATE_TO_OBJECT] Navigation completed successfully")
+    print(f"[NAVIGATE_TO_OBJECT] Ready to interact with {item}")
+    tts_manager.say_sync(f"I have reached the {item}")
 
     return True
-
 
 # ============================================================================
 # UTILITY AND DEBUG FUNCTIONS
