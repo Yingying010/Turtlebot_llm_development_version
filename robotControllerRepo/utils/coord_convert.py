@@ -132,7 +132,7 @@ def pixel_to_map_coordinates(pixel_xy: List[float],
         camera_params = {
             "image_width": 640,
             "image_height": 480,
-            "fov_horizontal_deg": 52.2,
+            "fov_horizontal_deg": 62.2,
             "camera_offset_x": 0.0,    # 摄像头相对机器人中心的x偏移
             "camera_offset_y": 0.0     # 摄像头相对机器人中心的y偏移
         }
