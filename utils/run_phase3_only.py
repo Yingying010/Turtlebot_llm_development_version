@@ -28,7 +28,7 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
 # ===== 参数配置 =====
-SPEED = 0.05  # 移动速度 m/s
+SPEED = 0.02  # 移动速度 m/s
 HANDSHAKE_TIMEOUT_SEC = 60.0    # 总超时时间
 SYN_RETRY_INTERVAL = 1.0        # SYN重试间隔
 TRANSPORT_DELAY_SEC = 3.0       # GO信号后延迟启动时间
@@ -368,8 +368,8 @@ class FixedHandshakeTransport:
 def main():
     parser = argparse.ArgumentParser(description="Fixed Phase3 Handshake Transport")
     parser.add_argument("--robot_id", required=True, choices=["robot1", "robot2"])
-    parser.add_argument("--distance", type=float, default=1000.0)
-    parser.add_argument("--speed", type=float, default=0.05)
+    parser.add_argument("--distance", type=float, default=700.0)
+    parser.add_argument("--speed", type=float, default=0.02)
     
     args = parser.parse_args()
 
