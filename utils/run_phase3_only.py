@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Collaborative Movement - Phase 3 Only
-让两个机器人协调前进的简化版本
+Phase3 Only: Distributed Synchronized Transport
+直接执行分布式同步运输，跳过队形规划和导航阶段
 
-使用方法:
-  robot1: python3 collaborative_move.py --robot_id robot1
-  robot2: python3 collaborative_move.py --robot_id robot2
+运行方式:
+  robot1:
+    python3 phase3_only_transport.py --robot_id robot1 --distance 1000
+  robot2:
+    python3 phase3_only_transport.py --robot_id robot2 --distance 1000
 """
 
 import math
@@ -17,50 +19,36 @@ import threading
 from loguru import logger
 
 import os, sys
-# 添加项目根目录到Python路径
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(PROJECT_ROOT)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
-
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
-# 修复导入路径
-try:
-    from ttsRepo.stream_tts import tts_manager
-except ImportError:
-    # 如果找不到tts模块，创建一个简单的替代品
-    class DummyTTS:
-        def say_sync(self, text):
-            print(f"[TTS] {text}")
-    tts_manager = DummyTTS()
+from ttsRepo.stream_tts import tts_manager
 
-# ===== 运动参数 =====
-SPEED = 0.02        # 运动速度 (m/s)
-DISTANCE = 1000     # 运动距离 (mm)
-
-# 超时配置（秒）
+# ===== 运输参数 =====
+SPEED = 0.05  # 移动速度 m/s
 WAIT_READY_TIMEOUT_SEC = 30.0   # 等对方 READY 的超时
 WAIT_GO_TIMEOUT_SEC = 30.0      # follower 等 GO 的超时
 
-# ===== 简单直线匀速控制 =====
+# ===== 直线运动控制 =====
 class Motion:
     def __init__(self, node: Node, robot_ns: str):
         self.node = node
         self.pub = node.create_publisher(Twist, f'/{robot_ns}/cmd_vel', 10)
 
     def stop(self):
-        """停止机器人"""
+        """停止运动"""
         self.pub.publish(Twist())
 
     def drive_constant(self, forward: bool, dist_mm: float, speed_mps: float):
         """
         匀速直线运动
-        :param forward: True=前进，False=后退
+        :param forward: True=前进, False=后退
         :param dist_mm: 移动距离，单位：毫米（mm）
         :param speed_mps: 移动速度，单位：米每秒（m/s）
         """
@@ -70,34 +58,35 @@ class Motion:
         twist = Twist()
         twist.linear.x = speed_mps if forward else -speed_mps
 
-        start_time = time.time()
-        logger.info(f"开始运动: 方向={'前进' if forward else '后退'}, 距离={dist_mm}mm, 速度={speed_mps}m/s, 预计用时={duration:.2f}s")
+        logger.info(f"🚗 {'Forward' if forward else 'Backward'} motion: {dist_mm}mm in {duration:.2f}s at {speed_mps}m/s")
         
+        start_time = time.time()
         while time.time() - start_time < duration:
             self.pub.publish(twist)
-            time.sleep(0.02)  # 50Hz 控制频率
+            time.sleep(0.02)  # 50Hz发布频率
         
         self.stop()
-        logger.info("运动完成")
+        logger.info("✅ Motion completed")
 
-# ===== 协调协议消息类型 =====
+# ===== 协调消息类型 =====
 MSG_READY = "ready"
-MSG_GO = "go"
+MSG_GO = "go" 
 MSG_ABORT = "abort"
 
-class CollaborativeMove:
+# ===== Phase3 运输管理器 =====
+class Phase3TransportManager:
     """
-    协作运动管理器 - 只包含Phase3的同步运动部分
+    仅执行Phase3的分布式同步运输
     """
-    def __init__(self, node: Node, executor: MultiThreadedExecutor, robot_id: str, 
-                 distance: float = DISTANCE, speed: float = SPEED):
+    def __init__(self, node: Node, robot_id: str, distance_mm: float):
         self.node = node
-        self.executor = executor
         self.robot_id = robot_id
         self.peer_id = "robot1" if robot_id == "robot2" else "robot2"
-        self.is_robot1 = (robot_id == "robot1")
-
-        # 完成状态
+        self.distance_mm = distance_mm
+        
+        # robot1是领导者(前进)，robot2是跟随者(后退)
+        self.is_leader = (robot_id == "robot1")
+        
         self.completed = False
         self.success = False
         self.aborted = False
@@ -105,51 +94,47 @@ class CollaborativeMove:
         # 通信设置
         qos = QoSProfile(depth=10)
         qos.reliability = ReliabilityPolicy.RELIABLE
-        self.pub = node.create_publisher(String, "/move_coordination", qos)
-        self.sub = node.create_subscription(String, "/move_coordination", self.on_message, qos)
+        self.pub = node.create_publisher(String, "/phase3_transport", qos)
+        self.sub = node.create_subscription(String, "/phase3_transport", self.on_message, qos)
 
         # 同步事件
         self.peer_ready_event = threading.Event()
         self.go_event = threading.Event()
         self.abort_event = threading.Event()
 
+        # 运输开始时间
+        self.start_time = None
+
         # 运动控制
         self.motion = Motion(node, robot_id)
-        
-        # 运动参数
-        self.start_at = None
-        self.distance = distance  # 使用传入的参数
-        self.speed = speed        # 使用传入的参数
 
-        logger.info(f"[{robot_id}] 协作运动管理器初始化完成")
-        tts_manager.say_sync(f"{robot_id} ready for collaborative movement")
+        logger.info(f"🤖 {robot_id} initialized as {'LEADER (forward)' if self.is_leader else 'FOLLOWER (backward)'}")
+        tts_manager.say_sync(f"{robot_id} ready for phase 3 transport")
 
         # 启动工作线程
-        self.worker = threading.Thread(target=self._run_collaborative_move, daemon=True)
+        self.worker = threading.Thread(target=self._execute_phase3, daemon=True)
         self.worker.start()
 
-    def _publish_message(self, msg_type: str, payload: dict = None):
+    def _publish_message(self, msg_type: str, **kwargs):
         """发布协调消息"""
-        if payload is None:
-            payload = {}
-        
-        msg = String()
-        msg.data = json.dumps({
+        msg_data = {
             "type": msg_type,
-            "robot": self.robot_id,
+            "from": self.robot_id,
             "timestamp": time.time(),
-            **payload
-        })
+            **kwargs
+        }
+        msg = String()
+        msg.data = json.dumps(msg_data)
         self.pub.publish(msg)
-        logger.debug(f"[{self.robot_id}] 发送消息: {msg_type}")
+        logger.debug(f"📤 Sent {msg_type}: {kwargs}")
 
     def _abort(self, reason: str):
-        """中止协作运动"""
+        """中止运输"""
         if not self.aborted:
             self.aborted = True
-            self._publish_message(MSG_ABORT, {"reason": reason})
-            logger.error(f"[{self.robot_id}] 中止运动: {reason}")
-            tts_manager.say_sync(f"Movement aborted: {reason}")
+            self._publish_message(MSG_ABORT, reason=reason)
+            logger.error(f"🚨 ABORT: {reason}")
+            tts_manager.say_sync(f"Transport aborted: {reason}")
         
         self.motion.stop()
         self.abort_event.set()
@@ -157,211 +142,171 @@ class CollaborativeMove:
         self.go_event.set()
 
     def on_message(self, msg: String):
-        """处理协调消息"""
+        """处理接收到的协调消息"""
         try:
             data = json.loads(msg.data)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"⚠️ Invalid message: {e}")
             return
 
         msg_type = data.get("type")
-        robot = data.get("robot")
+        from_robot = data.get("from")
 
         # 忽略自己发送的消息
-        if robot == self.robot_id:
+        if from_robot == self.robot_id:
             return
 
-        if msg_type == MSG_READY and robot == self.peer_id:
-            logger.info(f"[{self.robot_id}] 收到 {self.peer_id} 的 READY 信号")
+        logger.debug(f"📥 Received {msg_type} from {from_robot}")
+
+        if msg_type == MSG_READY and from_robot == self.peer_id:
+            logger.info(f"✅ {from_robot} is ready")
             self.peer_ready_event.set()
 
-        elif msg_type == MSG_GO:
-            self.start_at = float(data.get("start_at", time.time()))
-            if "distance" in data:
-                self.distance = float(data["distance"])
-            if "speed" in data:
-                self.speed = float(data["speed"])
-            
-            logger.info(f"[{self.robot_id}] 收到 GO 信号，开始时间: {self.start_at}")
+        elif msg_type == MSG_GO and from_robot == self.peer_id:
+            self.start_time = data.get("start_time")
+            logger.info(f"🚦 GO signal received, start_time: {self.start_time}")
             self.go_event.set()
 
         elif msg_type == MSG_ABORT:
-            reason = data.get("reason", "未知原因")
-            logger.warning(f"[{self.robot_id}] 收到中止信号: {reason}")
+            reason = data.get("reason", "Unknown")
+            logger.warning(f"🚨 Received ABORT from {from_robot}: {reason}")
             self.aborted = True
             self.abort_event.set()
             self.motion.stop()
-            self.peer_ready_event.set()
-            self.go_event.set()
 
-    def _run_collaborative_move(self):
-        """执行协作运动的主流程"""
+    def _execute_phase3(self):
+        """执行Phase3分布式同步运输"""
         try:
-            # 步骤1: 广播 READY 并等待对方 READY
-            logger.info(f"[{self.robot_id}] 广播 READY 信号")
-            tts_manager.say_sync("Broadcasting ready signal")
+            logger.info("🎯 Starting Phase3: Distributed Synchronized Transport")
+            tts_manager.say_sync("Starting phase 3 transport")
+
+            # Step 1: 声明准备就绪
+            logger.info("📢 Broadcasting READY signal")
             self._publish_message(MSG_READY)
 
-            logger.info(f"[{self.robot_id}] 等待 {self.peer_id} 的 READY 信号...")
+            # Step 2: 等待对方准备就绪
+            logger.info(f"⏳ Waiting for {self.peer_id} to be ready...")
             if not self.peer_ready_event.wait(timeout=WAIT_READY_TIMEOUT_SEC):
-                self._abort(f"等待 {self.peer_id} READY 信号超时 (>{WAIT_READY_TIMEOUT_SEC}s)")
+                self._abort(f"Timeout waiting for {self.peer_id} READY signal")
                 return
 
             if self.aborted:
                 return
 
-            # 步骤2: 协调开始时间 - 改进版本，预留更多准备时间
-            if self.is_robot1:
-                # robot1 作为协调者，发送 GO 信号
-                self.start_at = time.time() + 3.0  # 预留3秒准备时间，确保同步
-                logger.info(f"[{self.robot_id}] 发送 GO 信号")
-                logger.info(f"[{self.robot_id}] 当前时间: {time.time():.3f}")
-                logger.info(f"[{self.robot_id}] 计划开始时间: {self.start_at:.3f}")
-                logger.info(f"[{self.robot_id}] 倒计时: {self.start_at - time.time():.3f} 秒")
-                
-                self._publish_message(MSG_GO, {
-                    "start_at": self.start_at,
-                    "distance": self.distance,
-                    "speed": self.speed
-                })
-                tts_manager.say_sync("Sending go signal, movement will start in 3 seconds")
+            logger.info("✅ Both robots are ready")
+            tts_manager.say_sync("Both robots ready")
+
+            # Step 3: 同步启动
+            if self.is_leader:
+                # 领导者发送GO信号
+                self.start_time = time.time() + 2.0  # 2秒后开始
+                logger.info(f"🚦 Leader sending GO signal, start_time: {self.start_time}")
+                self._publish_message(MSG_GO, start_time=self.start_time, distance=self.distance_mm)
+                tts_manager.say_sync("Go signal sent, starting in 2 seconds")
             else:
-                # robot2 等待 GO 信号
-                logger.info(f"[{self.robot_id}] 等待 GO 信号...")
-                tts_manager.say_sync("Waiting for go signal")
+                # 跟随者等待GO信号
+                logger.info("⏳ Follower waiting for GO signal...")
                 if not self.go_event.wait(timeout=WAIT_GO_TIMEOUT_SEC):
-                    self._abort(f"等待 GO 信号超时 (>{WAIT_GO_TIMEOUT_SEC}s)")
+                    self._abort("Timeout waiting for GO signal")
                     return
-                
-                logger.info(f"[{self.robot_id}] 收到 GO 信号")
-                logger.info(f"[{self.robot_id}] 当前时间: {time.time():.3f}")
-                logger.info(f"[{self.robot_id}] 计划开始时间: {self.start_at:.3f}")
-                logger.info(f"[{self.robot_id}] 倒计时: {self.start_at - time.time():.3f} 秒")
 
             if self.aborted:
                 return
 
-            # 步骤3: 精确时间同步等待 - 改进版本
-            logger.info(f"[{self.robot_id}] 开始精确时间同步等待...")
-            countdown_shown = False
-            
-            while True:
-                current_time = time.time()
-                remain = self.start_at - current_time
-                
-                if remain <= 0:
-                    logger.info(f"[{self.robot_id}] ⏰ 时间到！开始运动！")
-                    break
-                
-                # 显示倒计时（每秒显示一次）
-                if remain <= 3.0 and not countdown_shown:
-                    logger.info(f"[{self.robot_id}] ⏱️ 倒计时: {remain:.1f} 秒")
-                    if remain <= 1.0:
-                        countdown_shown = True
-                
-                # 最后5ms用忙等，其余时间轻睡
-                if remain < 0.005:
-                    time.sleep(0.0001)  # 100微秒精度
-                elif remain < 0.1:
-                    time.sleep(0.001)   # 1毫秒精度
-                else:
-                    time.sleep(0.01)    # 10毫秒精度
+            # Step 4: 精确同步等待
+            if self.start_time:
+                while time.time() < self.start_time:
+                    remaining = self.start_time - time.time()
+                    if remaining <= 0:
+                        break
+                    # 最后2ms用忙等，其余时间轻睡眠
+                    sleep_time = 0.0005 if remaining < 0.002 else min(0.01, remaining / 2)
+                    time.sleep(sleep_time)
 
-            # 步骤4: 同步开始运动 - 添加更详细的日志
-            forward = self.is_robot1  # 两个机器人都前进
+            # Step 5: 开始同步运输
+            forward_motion = self.is_leader  # leader前进，follower后退
             
-            # 记录实际开始时间
-            actual_start_time = time.time()
-            planned_start_time = self.start_at
-            sync_error = actual_start_time - planned_start_time
+            logger.info(f"🚀 Starting synchronized transport!")
+            logger.info(f"   Direction: {'FORWARD' if forward_motion else 'BACKWARD'}")
+            logger.info(f"   Distance: {self.distance_mm}mm")
+            logger.info(f"   Speed: {SPEED}m/s")
             
-            logger.info(f"[{self.robot_id}] 🚀 开始协作运动！")
-            logger.info(f"[{self.robot_id}] 计划开始时间: {planned_start_time:.6f}")
-            logger.info(f"[{self.robot_id}] 实际开始时间: {actual_start_time:.6f}")
-            logger.info(f"[{self.robot_id}] 同步误差: {sync_error*1000:.2f} ms")
-            logger.info(f"[{self.robot_id}] 运动参数: 方向={'前进' if forward else '后退'}, 距离={self.distance}mm, 速度={self.speed}m/s")
-            
-            tts_manager.say_sync("Starting synchronized movement now")
-            
-            self.motion.drive_constant(forward, self.distance, self.speed)
-            
-            # 记录完成时间
-            finish_time = time.time()
-            duration = finish_time - actual_start_time
-            
-            logger.info(f"[{self.robot_id}] ✅ 协作运动完成！")
-            logger.info(f"[{self.robot_id}] 运动用时: {duration:.2f} 秒")
-            logger.info(f"[{self.robot_id}] 完成时间: {finish_time:.6f}")
-            tts_manager.say_sync("Collaborative movement completed successfully")
-            
+            tts_manager.say_sync(f"Starting {'forward' if forward_motion else 'backward'} motion")
+
+            # 执行运动
+            self.motion.drive_constant(forward_motion, self.distance_mm, SPEED)
+
+            logger.info("🎉 Phase3 transport completed successfully!")
+            tts_manager.say_sync("Transport completed successfully")
             self.success = True
 
         except Exception as e:
-            logger.error(f"[{self.robot_id}] 协作运动出错: {e}")
-            self._abort(f"运动出错: {e}")
+            logger.error(f"💥 Error during Phase3 execution: {e}")
+            self._abort(f"Execution error: {e}")
         finally:
             self.completed = True
-            self.motion.stop()
+            logger.info("🏁 Phase3 execution finished")
 
-    def wait_for_completion(self, timeout: float = None) -> bool:
-        """等待协作运动完成"""
-        if timeout:
-            self.worker.join(timeout)
-        else:
-            self.worker.join()
+    def wait_for_completion(self, timeout: float = 120.0) -> bool:
+        """等待运输完成"""
+        start_time = time.time()
+        while not self.completed and time.time() - start_time < timeout:
+            time.sleep(0.1)
         return self.success
 
-# ========== 主入口 ==========
+# ===== 主程序入口 =====
 def main():
-    parser = argparse.ArgumentParser(description="协作运动测试")
+    parser = argparse.ArgumentParser(description="Phase3 Only Transport")
     parser.add_argument("--robot_id", required=True, choices=["robot1", "robot2"], 
-                       help="机器人ID")
-    parser.add_argument("--distance", type=float, default=DISTANCE, 
-                       help="运动距离(mm)")
-    parser.add_argument("--speed", type=float, default=SPEED, 
-                       help="运动速度(m/s)")
+                       help="Robot identifier")
+    parser.add_argument("--distance", type=float, default=1000.0, 
+                       help="Transport distance in mm (default: 1000mm)")
+    parser.add_argument("--speed", type=float, default=0.05,
+                       help="Transport speed in m/s (default: 0.05)")
+    
     args = parser.parse_args()
 
-    # 使用局部变量而不是修改全局变量
-    distance = args.distance
-    speed = args.speed
+    # 更新全局速度参数
+    global SPEED
+    SPEED = args.speed
 
-    logger.info(f"启动协作运动: robot_id={args.robot_id}, distance={distance}mm, speed={speed}m/s")
+    logger.info(f"🎬 Starting Phase3-only transport for {args.robot_id}")
+    logger.info(f"   Distance: {args.distance}mm")
+    logger.info(f"   Speed: {SPEED}m/s")
+
+    # 初始化ROS
+    rclpy.init()
+    node = rclpy.create_node(f"phase3_transport_{args.robot_id}")
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+
+    # 创建运输管理器
+    transport_manager = Phase3TransportManager(node, args.robot_id, args.distance)
 
     try:
-        rclpy.init()
-        node = Node(f"collaborative_move_{args.robot_id}")
-        executor = MultiThreadedExecutor()
-        executor.add_node(node)
-
-        # 创建协作运动管理器，传入自定义参数
-        move_manager = CollaborativeMove(node, executor, args.robot_id, distance=distance, speed=speed)
-
-        # 启动executor
+        # 在后台运行executor
         executor_thread = threading.Thread(target=executor.spin, daemon=True)
         executor_thread.start()
 
-        # 等待协作运动完成
-        logger.info("等待协作运动完成...")
-        success = move_manager.wait_for_completion(timeout=120)  # 最多等待2分钟
+        # 等待运输完成
+        logger.info("⏳ Waiting for transport completion...")
+        success = transport_manager.wait_for_completion(timeout=180.0)
 
         if success:
-            logger.info("🎉 协作运动成功完成!")
+            logger.info("🎉 Phase3 transport completed successfully!")
+            print("✅ SUCCESS: Transport completed")
         else:
-            logger.error("❌ 协作运动失败或超时")
+            logger.error("❌ Phase3 transport failed or timed out")
+            print("❌ FAILED: Transport failed")
 
     except KeyboardInterrupt:
-        logger.info("用户中断")
-    except Exception as e:
-        logger.error(f"程序出错: {e}")
+        logger.info("🛑 Interrupted by user")
+        transport_manager._abort("User interrupt")
     finally:
-        try:
-            if 'move_manager' in locals():
-                move_manager.motion.stop()
-            if 'node' in locals():
-                node.destroy_node()
-            rclpy.shutdown()
-        except Exception as e:
-            logger.warning(f"清理资源时出错: {e}")
+        transport_manager.motion.stop()
+        executor.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
