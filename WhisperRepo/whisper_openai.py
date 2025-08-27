@@ -18,9 +18,11 @@ conversation_active: Final[threading.Event] = threading.Event()
 # === 优化后的参数 ===
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
-SILENCE_THRESHOLD = 15.0  # 🔧 降低阈值，对声音更敏感
+SILENCE_THRESHOLD = 30.0  # 🔧 根据你的环境调整：你的背景噪音在24左右
+SPEECH_THRESHOLD = 35.0   # 🔧 新增：语音检测阈值，需要明显高于背景噪音
 SILENCE_DURATION = 2.5    # 🔧 增加到2.5秒，避免正常停顿被误判
 CONFIRMATION_DURATION = 1.5  # 🔧 新增：确认阶段的等待时间
+CALIBRATION_BLOCKS = 20   # 🔧 校准阶段采集的块数
 MAX_DURATION = 30
 FIXED_WAV_PATH = "/tmp/voice_input.wav"
 
@@ -43,13 +45,14 @@ def save_wav_standard(wav_path, audio_int16, samplerate=48000):
         wf.setframerate(samplerate)
         wf.writeframes(audio_int16.tobytes())
 
-# === 🔧 优化后的录音函数 ===
+# === 🔧 优化后的录音函数，增加背景噪音校准 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
                          silence_duration=SILENCE_DURATION,
                          max_duration=MAX_DURATION) -> str:
     q_local = queue.Queue()
     silence_blocks = int(silence_duration * SAMPLERATE / BLOCKSIZE)
     confirmation_blocks = int(CONFIRMATION_DURATION * SAMPLERATE / BLOCKSIZE)
+    calibration_blocks = CALIBRATION_BLOCKS
     max_blocks = int(max_duration * SAMPLERATE / BLOCKSIZE)
 
     pre_speech_buffer = []  # 保存最近的几个块
@@ -59,16 +62,20 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     confirmation_counter = 0
     is_recording = False
     in_confirmation = False  # 🔧 新增：确认阶段标志
+    is_calibrating = True    # 🔧 新增：校准阶段标志
+    calibration_counter = 0
     
-    # 🔧 动态阈值计算
-    volume_history = []
+    # 🔧 背景噪音校准
+    background_volumes = []
+    speech_threshold_dynamic = SPEECH_THRESHOLD
+    silence_threshold_dynamic = SILENCE_THRESHOLD
     
     def cb(indata, frames, time_info, status):
         if status:
             logger.warning(f"⚠️ Audio status: {status}")
         q_local.put(indata.copy())
 
-    logger.info("🎙️ Waiting for speech to start...")
+    logger.info("🔧 Calibrating background noise... Please stay quiet for 2 seconds.")
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
                         blocksize=BLOCKSIZE, callback=cb,
@@ -81,26 +88,44 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
             volume = np.abs(block).mean() * 1000
             
-            # 🔧 维护音量历史，用于动态阈值计算
-            volume_history.append(volume)
-            if len(volume_history) > 50:  # 保持最近50个块的历史
-                volume_history.pop(0)
-            
-            # 🔧 计算动态阈值（基于最近音量的统计）
-            if len(volume_history) >= 10:
-                recent_avg = np.mean(volume_history[-10:])
-                dynamic_threshold = max(recent_avg * 0.4, threshold * 0.7)
-            else:
-                dynamic_threshold = threshold
-            
-            logger.debug(f"📊 Vol: {volume:.1f}, Dynamic Threshold: {dynamic_threshold:.1f}")
+            # 🔧 校准阶段：收集背景噪音数据
+            if is_calibrating:
+                background_volumes.append(volume)
+                calibration_counter += 1
+                logger.debug(f"🔧 Calibrating... Vol: {volume:.1f} ({calibration_counter}/{calibration_blocks})")
+                
+                if calibration_counter >= calibration_blocks:
+                    # 计算背景噪音统计
+                    bg_avg = np.mean(background_volumes)
+                    bg_std = np.std(background_volumes)
+                    bg_max = np.max(background_volumes)
+                    
+                    # 动态设置阈值
+                    silence_threshold_dynamic = bg_avg + 2 * bg_std  # 背景噪音 + 2个标准差
+                    speech_threshold_dynamic = bg_avg + 4 * bg_std   # 背景噪音 + 4个标准差
+                    
+                    # 确保最小阈值差异
+                    if speech_threshold_dynamic - silence_threshold_dynamic < 5:
+                        speech_threshold_dynamic = silence_threshold_dynamic + 5
+                    
+                    logger.info(f"🎯 Background noise calibrated:")
+                    logger.info(f"   Avg: {bg_avg:.1f}, Std: {bg_std:.1f}, Max: {bg_max:.1f}")
+                    logger.info(f"   Speech threshold: {speech_threshold_dynamic:.1f}")
+                    logger.info(f"   Silence threshold: {silence_threshold_dynamic:.1f}")
+                    logger.info("🎙️ Waiting for speech to start...")
+                    
+                    is_calibrating = False
+                continue
+
+            logger.debug(f"📊 Vol: {volume:.1f}, Speech: {speech_threshold_dynamic:.1f}, Silence: {silence_threshold_dynamic:.1f}")
 
             pre_speech_buffer.append(block)
             if len(pre_speech_buffer) > pre_speech_maxlen:
                 pre_speech_buffer.pop(0)
 
             if not is_recording:
-                if volume > threshold:
+                # 🔧 使用动态语音阈值检测开始
+                if volume > speech_threshold_dynamic:
                     logger.info("🔴 Voice detected. Start recording...")
                     is_recording = True
                     audio_blocks.extend(pre_speech_buffer)
@@ -109,8 +134,8 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
             audio_blocks.append(block)
 
-            # 🔧 改进的静音检测逻辑
-            current_threshold = dynamic_threshold if in_confirmation else threshold
+            # 🔧 使用动态静音阈值检测结束
+            current_threshold = silence_threshold_dynamic * 0.8 if in_confirmation else silence_threshold_dynamic
             
             if volume < current_threshold:
                 silence_counter += 1
