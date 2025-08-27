@@ -15,14 +15,13 @@ from openai import OpenAI
 
 conversation_active: Final[threading.Event] = threading.Event()
 
-# === 优化后的参数 ===
+# === 参数 ===
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
-SILENCE_THRESHOLD = 15.0  # 🔧 降低阈值，对声音更敏感
-SILENCE_DURATION = 2.5    # 🔧 增加到2.5秒，避免正常停顿被误判
-CONFIRMATION_DURATION = 1.5  # 🔧 新增：确认阶段的等待时间
-MAX_DURATION = 30
-FIXED_WAV_PATH = "/tmp/voice_input.wav"
+SILENCE_THRESHOLD = 20.0
+SILENCE_DURATION  = 3
+MAX_DURATION      = 30
+FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
 # 选择 OpenAI 的 STT 模型（可改成 "gpt-4o-transcribe" 追求更高精度）
 OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "gpt-4o-transcribe")
@@ -43,26 +42,20 @@ def save_wav_standard(wav_path, audio_int16, samplerate=48000):
         wf.setframerate(samplerate)
         wf.writeframes(audio_int16.tobytes())
 
-# === 🔧 优化后的录音函数 ===
+# === 录音直到静音结束 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
                          silence_duration=SILENCE_DURATION,
                          max_duration=MAX_DURATION) -> str:
-    q_local = queue.Queue()
-    silence_blocks = int(silence_duration * SAMPLERATE / BLOCKSIZE)
-    confirmation_blocks = int(CONFIRMATION_DURATION * SAMPLERATE / BLOCKSIZE)
-    max_blocks = int(max_duration * SAMPLERATE / BLOCKSIZE)
+    q_local         = queue.Queue()
+    silence_blocks  = int(silence_duration * SAMPLERATE / BLOCKSIZE)
+    max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
 
     pre_speech_buffer = []  # 保存最近的几个块
     pre_speech_maxlen = 24
-    audio_blocks = []
-    silence_counter = 0
-    confirmation_counter = 0
-    is_recording = False
-    in_confirmation = False  # 🔧 新增：确认阶段标志
-    
-    # 🔧 动态阈值计算
-    volume_history = []
-    
+    audio_blocks      = []
+    silence_counter   = 0
+    is_recording      = False
+
     def cb(indata, frames, time_info, status):
         if status:
             logger.warning(f"⚠️ Audio status: {status}")
@@ -70,6 +63,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
     logger.info("🎙️ Waiting for speech to start...")
 
+    # 如果你在远程 PulseAudio，用 device=("pulse", None)；本地默认可去掉 device 参数
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
                         blocksize=BLOCKSIZE, callback=cb,
                         device=("pulse", None)):
@@ -80,20 +74,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 continue
 
             volume = np.abs(block).mean() * 1000
-            
-            # 🔧 维护音量历史，用于动态阈值计算
-            volume_history.append(volume)
-            if len(volume_history) > 50:  # 保持最近50个块的历史
-                volume_history.pop(0)
-            
-            # 🔧 计算动态阈值（基于最近音量的统计）
-            if len(volume_history) >= 10:
-                recent_avg = np.mean(volume_history[-10:])
-                dynamic_threshold = max(recent_avg * 0.4, threshold * 0.7)
-            else:
-                dynamic_threshold = threshold
-            
-            logger.debug(f"📊 Vol: {volume:.1f}, Dynamic Threshold: {dynamic_threshold:.1f}")
+            logger.debug(f"📊 Vol: {volume:.1f}")
 
             pre_speech_buffer.append(block)
             if len(pre_speech_buffer) > pre_speech_maxlen:
@@ -109,32 +90,13 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
             audio_blocks.append(block)
 
-            # 🔧 改进的静音检测逻辑
-            current_threshold = dynamic_threshold if in_confirmation else threshold
-            
-            if volume < current_threshold:
+            if volume < threshold:
                 silence_counter += 1
-                
-                # 🔧 第一阶段：初始静音检测
-                if not in_confirmation and silence_counter >= silence_blocks:
-                    logger.info("🤔 Potential end detected. Entering confirmation phase...")
-                    in_confirmation = True
-                    confirmation_counter = 0
-                    silence_counter = 0  # 重置计数器
-                
-                # 🔧 第二阶段：确认阶段
-                elif in_confirmation:
-                    confirmation_counter += 1
-                    if confirmation_counter >= confirmation_blocks:
-                        logger.info("🔇 Confirmed silence. Stopping recording.")
-                        break
+                if silence_counter >= silence_blocks:
+                    logger.info("🔇 Silence detected. Stopping recording.")
+                    break
             else:
-                # 🔧 检测到声音，重置所有计数器
                 silence_counter = 0
-                if in_confirmation:
-                    logger.info("🔊 Voice detected during confirmation. Continuing recording...")
-                    in_confirmation = False
-                    confirmation_counter = 0
 
             if len(audio_blocks) >= max_blocks:
                 logger.info("⏰ Max recording length reached. Forcing stop.")
@@ -144,13 +106,10 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     pcm_f32 = np.concatenate(audio_blocks).flatten()
     pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
     save_wav_standard(FIXED_WAV_PATH, pcm_i16, SAMPLERATE)
-    
-    # 🔧 增加录音统计信息
-    duration = len(audio_blocks) * BLOCKSIZE / SAMPLERATE
-    logger.success(f"💾 Saved recording to {FIXED_WAV_PATH} (Duration: {duration:.1f}s)")
+    logger.success(f"💾 Saved recording to {FIXED_WAV_PATH}")
     return FIXED_WAV_PATH
 
-# === 🔧 增强的转录函数 ===
+# === 使用 OpenAI Audio API 转录 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -161,39 +120,32 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
 
     try:
         with open(wav_path, "rb") as f:
-            # 🔧 优化转录参数
+            # 直接文件转写：返回对象含 text 字段
+            # 支持的模型：gpt-4o-transcribe / gpt-4o-mini-transcribe
+            # 也可传 response_format="text" 来直接拿纯文本
             resp = client.audio.transcriptions.create(
                 model=OPENAI_STT_MODEL,
                 file=f,
                 language="en",
-                temperature=0.2,  # 🔧 稍微降低随机性，提高一致性
-                prompt="This is a robot command or conversation. Please transcribe accurately including technical terms and robot names."  # 🔧 添加上下文提示
+                # 可选参数：
+                # language="zh",        # 明确语言可能提升准确率
+                # temperature=0,        # 更稳定输出
+                # response_format="text"  # 纯文本；默认会有 resp.text
             )
-        
+        # SDK 通常提供 resp.text；为兼容性再兜底一下：
         raw_text = getattr(resp, "text", None) or str(resp)
-        logger.info(f"📄 Raw transcript: '{raw_text}'")
+        logger.info(f"📄 Raw transcript: {raw_text}")
 
-        # 🔧 改进文本处理：保留更多信息
-        # 移除过度的清理，保留标点符号以便更好地理解语句结构
-        processed_text = raw_text.strip() if raw_text else ""
-        
-        if not processed_text:
-            logger.warning("⚠️ 转录结果为空")
-            return ""
-        
-        # 🔧 基本的英文检查（放宽条件）
-        if not re.search(r'[a-zA-Z]', processed_text):
-            logger.warning("❌ 转录结果不包含英文字符，可能是噪音")
-            return ""
+        clean_text = _clean(raw_text or "")
+        if not is_english(clean_text):
+            logger.warning("❌ 非英文内容被识别，丢弃结果")
+            return ""  # 返回空表示“跳过此段”
 
-        clean_text = _clean(processed_text)  # 仍然提供清理版本用于后续处理
-        
-        logger.success(f"📝 Transcribed Text: '{processed_text}' -> Clean: '{clean_text}'")
+        logger.success(f"📝 Transcribed Text: {clean_text}")
 
         if delay:
             time.sleep(delay)
         return clean_text
-        
     except Exception as e:
         logger.exception(f"❌ OpenAI 转写失败: {e}")
         return ""
