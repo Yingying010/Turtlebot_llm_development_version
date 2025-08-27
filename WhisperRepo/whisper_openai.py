@@ -100,13 +100,18 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                     bg_std = np.std(background_volumes)
                     bg_max = np.max(background_volumes)
                     
-                    # 动态设置阈值
-                    silence_threshold_dynamic = bg_avg + 2 * bg_std  # 背景噪音 + 2个标准差
-                    speech_threshold_dynamic = bg_avg + 4 * bg_std   # 背景噪音 + 4个标准差
+                    # 🔧 更保守的动态阈值设置
+                    silence_threshold_dynamic = bg_avg + 3 * bg_std  # 背景噪音 + 3个标准差
+                    speech_threshold_dynamic = bg_avg + 6 * bg_std   # 背景噪音 + 6个标准差
                     
-                    # 确保最小阈值差异
-                    if speech_threshold_dynamic - silence_threshold_dynamic < 5:
-                        speech_threshold_dynamic = silence_threshold_dynamic + 5
+                    # 确保最小阈值差异和绝对最小值
+                    min_speech_gap = max(8, bg_std * 3)  # 至少8的差距，或3倍标准差
+                    if speech_threshold_dynamic - silence_threshold_dynamic < min_speech_gap:
+                        speech_threshold_dynamic = silence_threshold_dynamic + min_speech_gap
+                    
+                    # 🔧 对于低噪音环境，设置最小语音阈值
+                    if speech_threshold_dynamic < bg_avg + 10:
+                        speech_threshold_dynamic = bg_avg + 10
                     
                     logger.info(f"🎯 Background noise calibrated:")
                     logger.info(f"   Avg: {bg_avg:.1f}, Std: {bg_std:.1f}, Max: {bg_max:.1f}")
@@ -124,12 +129,15 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 pre_speech_buffer.pop(0)
 
             if not is_recording:
-                # 🔧 使用动态语音阈值检测开始
+                # 🔧 更严格的语音检测：需要连续几个块都超过阈值
                 if volume > speech_threshold_dynamic:
-                    logger.info("🔴 Voice detected. Start recording...")
-                    is_recording = True
-                    audio_blocks.extend(pre_speech_buffer)
-                    audio_blocks.append(block)
+                    # 检查最近3个块是否都比较高
+                    recent_high = sum(1 for v in pre_speech_buffer[-3:] if np.abs(v).mean() * 1000 > speech_threshold_dynamic * 0.8)
+                    if recent_high >= 2 or volume > speech_threshold_dynamic * 1.2:  # 要么连续高，要么单次很高
+                        logger.info("🔴 Voice detected. Start recording...")
+                        is_recording = True
+                        audio_blocks.extend(pre_speech_buffer)
+                        audio_blocks.append(block)
                 continue
 
             audio_blocks.append(block)
