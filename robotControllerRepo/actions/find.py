@@ -726,6 +726,7 @@ def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], D
                 raw = raw[s:e]
 
             parsed = json.loads(raw)
+            print(parsed)
             tasks = []
             if parsed.get("action_needed") and isinstance(parsed.get("tasks"), list):
                 for t in parsed["tasks"]:
