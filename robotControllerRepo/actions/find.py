@@ -825,7 +825,7 @@ def execute_find_with_llm_replanning(
                         target = params.get("item")
                         if target:
                             # 这里需要导入navigate_to_object函数，如果没有就用navigate_to_target
-                            navigate_to_object(node, robot_name, target, None)
+                            navigate_to_object(node, robot_name, item, executor)
                         else:
                             logger.warning("[find] navigate missing target")
                             all_tasks_success = False
