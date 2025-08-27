@@ -23,6 +23,61 @@ SILENCE_DURATION  = 3
 MAX_DURATION      = 30
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
+# === 音频设备重置函数 ===
+def reset_audio_device():
+    """重置音频设备状态"""
+    try:
+        # 强制重新初始化sounddevice
+        sd._initialize()
+        logger.info("🔄 Audio device reset")
+    except:
+        logger.warning("⚠️ Could not reset audio device")
+
+def get_calibrated_threshold(device_id=None, calibration_duration=2.0):
+    """动态校准静音阈值"""
+    logger.info("🔧 Calibrating silence threshold...")
+    
+    q_cal = queue.Queue()
+    volumes = []
+    
+    def cal_callback(indata, frames, time_info, status):
+        if status:
+            logger.warning(f"⚠️ Calibration audio status: {status}")
+        q_cal.put(indata.copy())
+    
+    calibration_blocks = int(calibration_duration * SAMPLERATE / BLOCKSIZE)
+    
+    with sd.InputStream(samplerate=SAMPLERATE, channels=1,
+                       blocksize=BLOCKSIZE, callback=cal_callback,
+                       device=device_id):
+        
+        logger.info("🤫 Please stay quiet for calibration...")
+        block_count = 0
+        
+        while block_count < calibration_blocks:
+            try:
+                block = q_cal.get(timeout=1)
+                volume = np.abs(block).mean() * 1000
+                volumes.append(volume)
+                block_count += 1
+                
+                if block_count % 10 == 0:  # 每10个块报告一次
+                    logger.debug(f"📊 Calibration Vol: {volume:.1f}")
+                    
+            except queue.Empty:
+                continue
+    
+    if volumes:
+        avg_noise = np.mean(volumes)
+        std_noise = np.std(volumes)
+        # 设置阈值为 平均噪音 + 3倍标准差
+        calibrated_threshold = avg_noise + (3 * std_noise)
+        logger.success(f"🎯 Calibrated threshold: {calibrated_threshold:.1f} (avg noise: {avg_noise:.1f})")
+        return max(calibrated_threshold, 10.0)  # 确保最小阈值为10
+    else:
+        logger.warning("⚠️ Calibration failed, using default threshold")
+        return SILENCE_THRESHOLD
+
 # === 音频设备检测和配置 ===
 def list_audio_devices():
     """列出可用的音频设备"""
@@ -56,11 +111,22 @@ def save_wav_standard(wav_path, audio_int16, samplerate=48000):
         wf.setframerate(samplerate)
         wf.writeframes(audio_int16.tobytes())
 
-# === 录音直到静音结束 ===
-def record_until_silence(threshold=SILENCE_THRESHOLD,
+# === 改进的录音函数 ===
+def record_until_silence(threshold=None,  # 改为可选参数
                          silence_duration=SILENCE_DURATION,
                          max_duration=MAX_DURATION,
-                         device_id=None) -> str:
+                         device_id=None,
+                         auto_calibrate=True) -> str:
+    
+    # 重置音频设备
+    reset_audio_device()
+    
+    # 自动校准阈值
+    if threshold is None and auto_calibrate:
+        threshold = get_calibrated_threshold(device_id)
+    elif threshold is None:
+        threshold = SILENCE_THRESHOLD
+    
     q_local         = queue.Queue()
     silence_blocks  = int(silence_duration * SAMPLERATE / BLOCKSIZE)
     max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
@@ -76,7 +142,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
             logger.warning(f"⚠️ Audio status: {status}")
         q_local.put(indata.copy())
 
-    logger.info("🎙️ Waiting for speech to start...")
+    logger.info(f"🎙️ Waiting for speech to start... (threshold: {threshold:.1f})")
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
                 blocksize=BLOCKSIZE, callback=cb,
@@ -88,7 +154,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 continue
 
             volume = np.abs(block).mean() * 1000
-            logger.debug(f"📊 Vol: {volume:.1f}")
+            logger.debug(f"📊 Vol: {volume:.1f} (threshold: {threshold:.1f})")
 
             # 始终维护前2个block的缓存
             pre_speech_buffer.append(block)
@@ -97,7 +163,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
             if not is_recording:
                 if volume > threshold:
-                    logger.info("🔴 Voice detected. Start recording...")
+                    logger.info(f"🔴 Voice detected! Vol: {volume:.1f} > {threshold:.1f}")
                     is_recording = True
                     audio_blocks.extend(pre_speech_buffer)  # 加上前面的缓存
                     audio_blocks.append(block)
@@ -176,9 +242,9 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
             logger.error(f"❌ Transcription failed: {e}")
         return ""
 
-def recognize(delay: float = 0.0, device_id=None) -> str:
+def recognize(delay: float = 0.0, device_id=None, auto_calibrate=True) -> str:
     """完整的语音识别流程：录音 -> 转录"""
-    wav_path = record_until_silence(device_id=device_id)
+    wav_path = record_until_silence(device_id=device_id, auto_calibrate=auto_calibrate)
     return transcribe_audio(wav_path, delay)
 
 # === 测试函数 ===
@@ -199,8 +265,8 @@ def test_recognition():
     
     try:
         while True:
-            logger.info("🎤 Say something... (Ctrl+C to quit)")
-            text = recognize(device_id=device_id)
+            logger.info("🎤 Starting new recognition session...")
+            text = recognize(device_id=device_id, auto_calibrate=True)
             
             if text:
                 logger.success(f"✅ Recognized: '{text}'")
