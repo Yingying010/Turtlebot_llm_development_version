@@ -65,7 +65,7 @@ class Motion:
         twist = Twist()
         twist.linear.x = speed_mps if forward else -speed_mps
 
-        logger.info(f"🚗 {'Forward' if forward else 'Backward'}: {dist_mm}mm in {duration:.2f}s at {speed_mps}m/s")
+        logger.info(f"{'Forward' if forward else 'Backward'}: {dist_mm}mm in {duration:.2f}s at {speed_mps}m/s")
         
         start_time = time.time()
         while time.time() - start_time < duration:
@@ -73,7 +73,7 @@ class Motion:
             time.sleep(0.02)
         
         self.stop()
-        logger.info("✅ Motion completed")
+        logger.info("Motion completed")
 
 # ===== 三次握手运输管理器 =====
 class FixedHandshakeTransport:
@@ -114,7 +114,7 @@ class FixedHandshakeTransport:
         # 运动控制
         self.motion = Motion(node, robot_id)
         
-        logger.info(f"🤖 {robot_id} - {'INITIATOR' if self.is_initiator else 'RESPONDER'}")
+        logger.info(f"{robot_id} - {'INITIATOR' if self.is_initiator else 'RESPONDER'}")
         
         # 启动工作线程
         self.worker = threading.Thread(target=self._main_worker, daemon=True)
@@ -124,7 +124,7 @@ class FixedHandshakeTransport:
         with self.state_lock:
             old_state = self.state
             self.state = new_state
-            logger.info(f"🔄 {self.robot_id}: {old_state.value} → {new_state.value}")
+            logger.info(f"{self.robot_id}: {old_state.value} → {new_state.value}")
 
     def _publish(self, msg_type: MsgType, **data):
         msg_data = {
@@ -140,13 +140,13 @@ class FixedHandshakeTransport:
         msg.data = json.dumps(msg_data)
         self.pub.publish(msg)
         
-        logger.info(f"📤 {self.robot_id}: Sent {msg_type.value} (seq={self.seq_num})")
+        logger.info(f"{self.robot_id}: Sent {msg_type.value} (seq={self.seq_num})")
 
     def _abort(self, reason: str):
         if not self.aborted:
             self.aborted = True
             self._publish(MsgType.ABORT, reason=reason)
-            logger.error(f"🚨 {self.robot_id}: ABORT - {reason}")
+            logger.error(f"{self.robot_id}: ABORT - {reason}")
             self._set_state(State.CLOSED)
         
         self.motion.stop()
@@ -178,7 +178,7 @@ class FixedHandshakeTransport:
         except ValueError:
             return
         
-        logger.info(f"📥 {self.robot_id}: Received {msg_type.value} from {from_robot} (seq={seq})")
+        logger.info(f"{self.robot_id}: Received {msg_type.value} from {from_robot} (seq={seq})")
         
         # 处理消息
         if msg_type == MsgType.SYN:
@@ -196,7 +196,7 @@ class FixedHandshakeTransport:
         """处理SYN消息"""
         if self.state in [State.INIT, State.SYN_ACK_SENT]:
             self.peer_seq_num = seq
-            logger.info(f"✅ {self.robot_id}: SYN received, sending SYN_ACK")
+            logger.info(f"{self.robot_id}: SYN received, sending SYN_ACK")
             
             # 发送SYN_ACK
             self._publish(MsgType.SYN_ACK, ack_seq=seq, distance=self.distance_mm)
@@ -207,14 +207,14 @@ class FixedHandshakeTransport:
         ack_seq = data.get("ack_seq")
         if self.state == State.SYN_SENT and ack_seq == self.seq_num:
             self.peer_seq_num = seq
-            logger.info(f"✅ {self.robot_id}: SYN_ACK received (ack_seq={ack_seq})")
+            logger.info(f"{self.robot_id}: SYN_ACK received (ack_seq={ack_seq})")
             self.syn_ack_received.set()
 
     def _handle_ack(self, seq: int, data: dict):
         """处理ACK消息"""
         ack_seq = data.get("ack_seq")
         if self.state == State.SYN_ACK_SENT and ack_seq == self.seq_num:
-            logger.info(f"✅ {self.robot_id}: ACK received (ack_seq={ack_seq})")
+            logger.info(f"{self.robot_id}: ACK received (ack_seq={ack_seq})")
             self._set_state(State.ESTABLISHED)
             self.ack_received.set()
 
@@ -227,7 +227,7 @@ class FixedHandshakeTransport:
     def _handle_abort(self, data: dict):
         """处理ABORT消息"""
         reason = data.get("reason", "Unknown")
-        logger.warning(f"🚨 {self.robot_id}: Received ABORT - {reason}")
+        logger.warning(f"{self.robot_id}: Received ABORT - {reason}")
         self.aborted = True
         self.motion.stop()
         self._set_state(State.CLOSED)
@@ -236,7 +236,7 @@ class FixedHandshakeTransport:
     def _main_worker(self):
         """主工作流程"""
         try:
-            logger.info(f"🎯 {self.robot_id}: Starting handshake transport")
+            logger.info(f"{self.robot_id}: Starting handshake transport")
             
             # 执行三次握手
             if not self._do_handshake():
@@ -249,24 +249,24 @@ class FixedHandshakeTransport:
             self._do_transport()
             
         except Exception as e:
-            logger.error(f"💥 {self.robot_id}: Worker error - {e}")
+            logger.error(f"{self.robot_id}: Worker error - {e}")
             self._abort(f"Worker error: {e}")
         finally:
             self.completed = True
-            logger.info(f"🏁 {self.robot_id}: Worker finished")
+            logger.info(f"{self.robot_id}: Worker finished")
 
     def _do_handshake(self) -> bool:
         """执行三次握手"""
         start_time = time.time()
         
         if self.is_initiator:
-            logger.info(f"🤝 {self.robot_id}: INITIATOR - Starting handshake")
+            logger.info(f"{self.robot_id}: INITIATOR - Starting handshake")
             
             # 第1步：重复发送SYN
             self._set_state(State.SYN_SENT)
             last_syn_time = 0
             
-            logger.info(f"📤 {self.robot_id}: Sending SYN with retries...")
+            logger.info(f"{self.robot_id}: Sending SYN with retries...")
             
             while not self.syn_ack_received.is_set() and not self.aborted:
                 current_time = time.time()
@@ -280,7 +280,7 @@ class FixedHandshakeTransport:
                 if current_time - last_syn_time >= SYN_RETRY_INTERVAL:
                     self._publish(MsgType.SYN, distance=self.distance_mm)
                     elapsed = current_time - start_time
-                    logger.info(f"🔄 {self.robot_id}: SYN retry (elapsed: {elapsed:.1f}s)")
+                    logger.info(f"{self.robot_id}: SYN retry (elapsed: {elapsed:.1f}s)")
                     last_syn_time = current_time
                 
                 # 等待SYN_ACK
@@ -290,18 +290,18 @@ class FixedHandshakeTransport:
             if self.aborted:
                 return False
             
-            logger.info(f"✅ {self.robot_id}: SYN_ACK received!")
+            logger.info(f"{self.robot_id}: SYN_ACK received!")
             
             # 第3步：发送ACK
-            logger.info(f"📤 {self.robot_id}: Sending ACK")
+            logger.info(f"{self.robot_id}: Sending ACK")
             self._publish(MsgType.ACK, ack_seq=self.peer_seq_num)
             self._set_state(State.ESTABLISHED)
             
         else:
-            logger.info(f"🤝 {self.robot_id}: RESPONDER - Waiting for handshake")
+            logger.info(f"{self.robot_id}: RESPONDER - Waiting for handshake")
             
             # 等待ACK (SYN和SYN_ACK在消息处理中自动完成)
-            logger.info(f"⏳ {self.robot_id}: Waiting for ACK...")
+            logger.info(f"{self.robot_id}: Waiting for ACK...")
             
             timeout_remaining = HANDSHAKE_TIMEOUT_SEC - (time.time() - start_time)
             if not self.ack_received.wait(timeout=max(1.0, timeout_remaining)):
@@ -311,7 +311,7 @@ class FixedHandshakeTransport:
             if self.aborted:
                 return False
         
-        logger.info(f"🎉 {self.robot_id}: Handshake completed!")
+        logger.info(f"{self.robot_id}: Handshake completed!")
         return True
 
     def _do_transport(self):
@@ -319,15 +319,15 @@ class FixedHandshakeTransport:
         if self.is_initiator:
             # 发送GO信号
             self.start_time = time.time() + TRANSPORT_DELAY_SEC
-            logger.info(f"🚦 {self.robot_id}: Sending GO signal")
-            logger.info(f"   Start time: {self.start_time}")
+            logger.info(f"{self.robot_id}: Sending GO signal")
+            logger.info(f"Start time: {self.start_time}")
             
             self._publish(MsgType.GO, start_time=self.start_time, distance=self.distance_mm)
-            logger.info(f"   GO signal sent, starting in {TRANSPORT_DELAY_SEC} seconds")
+            logger.info(f"GO signal sent, starting in {TRANSPORT_DELAY_SEC} seconds")
             
         else:
             # 等待GO信号
-            logger.info(f"⏳ {self.robot_id}: Waiting for GO signal...")
+            logger.info(f"{self.robot_id}: Waiting for GO signal...")
             if not self.go_received.wait(timeout=15.0):
                 self._abort("GO signal timeout")
                 return
@@ -336,7 +336,7 @@ class FixedHandshakeTransport:
             return
         
         # 等待启动时间
-        logger.info(f"🕐 {self.robot_id}: Waiting for start time...")
+        logger.info(f"{self.robot_id}: Waiting for start time...")
         while time.time() < self.start_time:
             remaining = self.start_time - time.time()
             if remaining <= 0:
@@ -347,15 +347,15 @@ class FixedHandshakeTransport:
         # 开始运输
         forward = self.is_initiator  # initiator前进，responder后退
         
-        logger.info(f"🚀 {self.robot_id}: Starting transport!")
-        logger.info(f"   Direction: {'FORWARD' if forward else 'BACKWARD'}")
-        logger.info(f"   Distance: {self.distance_mm}mm")
-        logger.info(f"   Speed: {SPEED}m/s")
+        logger.info(f"{self.robot_id}: Starting transport!")
+        logger.info(f"Direction: {'FORWARD' if forward else 'BACKWARD'}")
+        logger.info(f"Distance: {self.distance_mm}mm")
+        logger.info(f"Speed: {SPEED}m/s")
         
         # 执行运动
         self.motion.drive_constant(forward, self.distance_mm, SPEED)
         
-        logger.info(f"🎉 {self.robot_id}: Transport completed!")
+        logger.info(f"{self.robot_id}: Transport completed!")
         self.success = True
 
     def wait_for_completion(self, timeout: float = 120.0) -> bool:
@@ -376,10 +376,10 @@ def main():
     global SPEED
     SPEED = args.speed
 
-    logger.info(f"🎬 Starting FIXED Handshake Transport")
-    logger.info(f"   Robot: {args.robot_id} ({'INITIATOR' if args.robot_id == 'robot1' else 'RESPONDER'})")
-    logger.info(f"   Distance: {args.distance}mm")
-    logger.info(f"   Speed: {SPEED}m/s")
+    logger.info(f"Starting FIXED Handshake Transport")
+    logger.info(f"Robot: {args.robot_id} ({'INITIATOR' if args.robot_id == 'robot1' else 'RESPONDER'})")
+    logger.info(f"Distance: {args.distance}mm")
+    logger.info(f"Speed: {SPEED}m/s")
 
     # 初始化ROS
     rclpy.init()
@@ -396,18 +396,18 @@ def main():
         executor_thread.start()
 
         # 等待完成
-        logger.info("⏳ Waiting for completion...")
+        logger.info("Waiting for completion...")
         success = transport.wait_for_completion(timeout=180.0)
 
         if success:
-            logger.info("🎉 FIXED handshake transport SUCCESS!")
-            print("✅ SUCCESS")
+            logger.info("FIXED handshake transport SUCCESS!")
+            print("SUCCESS")
         else:
-            logger.error("❌ FIXED handshake transport FAILED!")
-            print("❌ FAILED")
+            logger.error("FIXED handshake transport FAILED!")
+            print("FAILED")
 
     except KeyboardInterrupt:
-        logger.info("🛑 Interrupted")
+        logger.info("Interrupted")
         transport._abort("User interrupt")
     finally:
         transport.motion.stop()
