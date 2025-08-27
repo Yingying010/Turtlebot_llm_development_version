@@ -28,7 +28,6 @@ from rclpy.executors import MultiThreadedExecutor
 from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 
-from ttsRepo.stream_tts import tts_manager
 
 # ===== 运输参数 =====
 SPEED = 0.02  # 移动速度 m/s
@@ -109,7 +108,6 @@ class Phase3TransportManager:
         self.motion = Motion(node, robot_id)
 
         logger.info(f"🤖 {robot_id} initialized as {'LEADER (forward)' if self.is_leader else 'FOLLOWER (backward)'}")
-        tts_manager.say_sync(f"{robot_id} ready for phase 3 transport")
 
         # 启动工作线程
         self.worker = threading.Thread(target=self._execute_phase3, daemon=True)
@@ -134,7 +132,6 @@ class Phase3TransportManager:
             self.aborted = True
             self._publish_message(MSG_ABORT, reason=reason)
             logger.error(f"🚨 ABORT: {reason}")
-            tts_manager.say_sync(f"Transport aborted: {reason}")
         
         self.motion.stop()
         self.abort_event.set()
@@ -178,7 +175,6 @@ class Phase3TransportManager:
         """执行Phase3分布式同步运输"""
         try:
             logger.info("🎯 Starting Phase3: Distributed Synchronized Transport")
-            tts_manager.say_sync("Starting phase 3 transport")
 
             # Step 1: 声明准备就绪
             logger.info("📢 Broadcasting READY signal")
@@ -194,7 +190,6 @@ class Phase3TransportManager:
                 return
 
             logger.info("✅ Both robots are ready")
-            tts_manager.say_sync("Both robots ready")
 
             # Step 3: 同步启动
             if self.is_leader:
@@ -202,7 +197,6 @@ class Phase3TransportManager:
                 self.start_time = time.time() + 2.0  # 2秒后开始
                 logger.info(f"🚦 Leader sending GO signal, start_time: {self.start_time}")
                 self._publish_message(MSG_GO, start_time=self.start_time, distance=self.distance_mm)
-                tts_manager.say_sync("Go signal sent, starting in 2 seconds")
             else:
                 # 跟随者等待GO信号
                 logger.info("⏳ Follower waiting for GO signal...")
@@ -230,14 +224,11 @@ class Phase3TransportManager:
             logger.info(f"   Direction: {'FORWARD' if forward_motion else 'BACKWARD'}")
             logger.info(f"   Distance: {self.distance_mm}mm")
             logger.info(f"   Speed: {SPEED}m/s")
-            
-            tts_manager.say_sync(f"Starting {'forward' if forward_motion else 'backward'} motion")
 
             # 执行运动
             self.motion.drive_constant(forward_motion, self.distance_mm, SPEED)
 
             logger.info("🎉 Phase3 transport completed successfully!")
-            tts_manager.say_sync("Transport completed successfully")
             self.success = True
 
         except Exception as e:
