@@ -31,7 +31,7 @@ from std_msgs.msg import String
 from ttsRepo.stream_tts import tts_manager
 
 # ===== 运输参数 =====
-SPEED = 0.05  # 移动速度 m/s
+SPEED = 0.02  # 移动速度 m/s
 WAIT_READY_TIMEOUT_SEC = 30.0   # 等对方 READY 的超时
 WAIT_GO_TIMEOUT_SEC = 30.0      # follower 等 GO 的超时
 
