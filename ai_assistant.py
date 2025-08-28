@@ -43,7 +43,7 @@ def run_conversation():
 def startchat():
     os.system("afplay beep.wav")
     logger.info("📢 Starting chat system")
-    tts_manager.say_sync("Welcome! You can start speaking after the beep")
+    tts_manager.say_sync("Welcome! You can start speaking")
 
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
