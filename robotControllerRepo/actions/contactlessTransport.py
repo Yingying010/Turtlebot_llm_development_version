@@ -416,7 +416,7 @@ class TransportManager:
 
             forward = self.is_r1  # r1 前进(+v)，r2 后退(-v)
 
-            time.sleep(300)
+            time.sleep(180)
 
             self.node.get_logger().info(
                 f"START transport | forward={forward} | dist={self.path_len:.2f} m | v={SPEED:.3f} m/s"
