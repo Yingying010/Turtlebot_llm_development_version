@@ -63,7 +63,7 @@ class Motion:
         duration = dist_m / max(speed_mps, 1e-6)
 
         twist = Twist()
-        twist.linear.x = -speed_mps if forward else speed_mps
+        twist.linear.x = speed_mps if forward else -speed_mps
 
         logger.info(f"{'Forward' if forward else 'Backward'}: {dist_mm}mm in {duration:.2f}s at {speed_mps}m/s")
         
