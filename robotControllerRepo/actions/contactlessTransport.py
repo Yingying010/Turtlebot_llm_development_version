@@ -99,7 +99,7 @@ def get_position_with_polling(robot_name: str, timeout_sec=120, poll_interval=0.
 def plan_formation(particle_xy, target_xy):
     # error
     r1_x_error=0
-    r2_x_error=-20
+    r2_x_error=0
 
     r1_y_error=0
     r2_y_error=0
