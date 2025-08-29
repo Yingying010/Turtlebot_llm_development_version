@@ -158,7 +158,8 @@ Note:
 - Semantics take precedence over literals: If the semantics of a command clearly correspond to an action (e.g., "look at" corresponds to `face`), the action with the closest semantic match must be selected, not a literal that partially matches (e.g., "turn").
 - Specialized actions take precedence over general actions: For example, `face` (a specialized orientation action) takes precedence over `turn` (a general rotation action).
 - The pickup and dropoff actions do not include any movement or navigation. If the robot is not already at the correct location (e.g., table, another robot, or the user), a separate navigate task must be added explicitly before the collect or deliver step.
-- If the user command mentions the need for contactless transport of small items, the operation must only needs to execute contactless_transport. Once contactless_transport is executed, it must be a synchronous task.
+- Use contactless_transport ONLY when explicitly mentioned by keywords like "contactless", "acoustic transport", "remote transport", or "without touching". 
+- For regular "bring", "deliver", "transport" commands, use the standard pickup → navigate → dropoff sequence.
 - **CRITICAL FOR FIND-BASED COMMANDS**: When user requests finding an object followed by other actions (collect, deliver, etc.), generate ONLY the find task. The system will dynamically generate follow-up actions after the object is found.
 - Strictly adhere to the principle of semantic precedence
 - Do not add parameters not explicitly specified in the command
