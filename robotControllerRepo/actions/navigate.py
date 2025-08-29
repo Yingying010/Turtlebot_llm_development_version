@@ -192,13 +192,15 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         # 🔥 关键改进：连续平滑运动
         twist = Twist()
         
-        # 距离自适应速度：接近目标时减速
-        if distance > 150:
-            twist.linear.x = 0.1
+        # 距离自适应速度：接近目标时减速（更慢更稳定）
+        if distance > 200:
+            twist.linear.x = 0.05  # 远距离：最快速度 5cm/s
+        elif distance > 100:
+            twist.linear.x = 0.04  # 中距离：4cm/s
         elif distance > 50:
-            twist.linear.x = 0.06
+            twist.linear.x = 0.03  # 近距离：3cm/s
         else:
-            twist.linear.x = 0.03
+            twist.linear.x = 0.02  # 极近距离：最慢 2cm/s
         
         # 🔥 边走边微调方向（小角度误差时）
         if abs(angle_error) > 5:
@@ -220,6 +222,7 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
     # 最终停止
     safe_publish_twist(node, robot_name, Twist())
     time.sleep(0.05)
+
 # ============================================================================
 # PRECISION MOVEMENT FUNCTIONS
 # ============================================================================
