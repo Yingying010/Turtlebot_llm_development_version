@@ -114,11 +114,11 @@ def plan_formation(particle_xy, target_xy):
 
     r1_x = GAP + LENGTH/2 - px
     r1_y = py  - (GAP + WIDTH/2)
-    r1_heading = 270
+    r1_heading = 3 * math.pi / 2
 
     r2_x = -(GAP + LENGTH/2 - px)
     r2_y = py + (GAP + WIDTH/2)
-    r2_heading = 90 
+    r2_heading = math.pi / 2 
 
     # r1 是右边的机器人，在当前坐标系中应为 -x 方向（即 ux 为负），所以是：
     r1 = (r1_x + r1_x_error, r1_y + r1_y_error, r1_heading + r1_heading_error)
