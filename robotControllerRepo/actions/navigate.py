@@ -160,38 +160,66 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
 def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, float],
                                tolerance: float = 10.0, max_acceptable_angle_error: float = 25.0, 
                                semantic_threshold: float = 0.0):
-    """Move forward to target with continuous heading correction"""
+    """Move forward to target with smooth continuous movement"""
     x_target, y_target = target["x"], target["y"]
-    print(f"[MOVE] Approaching target ({x_target:.1f}, {y_target:.1f})")
+    print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
     while True:
-        x_now, y_now, heading_y_now = get_position_with_polling(robot_name)
+        x_now, y_now, heading_y_now = get_current_position(robot_name)
         dx = x_target - x_now
         dz = y_target - y_now
         distance = math.hypot(dx, dz)
 
-        if distance < tolerance or (semantic_threshold > 0 and distance < semantic_threshold):
-            print("[MOVE] Target reached")
+        # 检查是否到达目标
+        if distance < tolerance:
+            print("🎉 Reached target.")
+            break
+        
+        if distance < semantic_threshold:
+            print("🎉 Reached target.")
             break
 
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
+        # 角度误差太大时才停下来旋转
         if abs(angle_error) > max_acceptable_angle_error:
-            print(f"[MOVE] Angle correction required: {angle_error:.1f} degrees")
+            print(f"🔄 Too much angle error: {angle_error:.1f}°, rotating first...")
+            safe_publish_twist(node, robot_name, Twist())  # 停止
             rotate_to_face_target(node, robot_name, target)
             continue
 
+        # 🔥 关键改进：连续平滑运动
         twist = Twist()
-        twist.linear.x = 0.1
+        
+        # 距离自适应速度：接近目标时减速
+        if distance > 150:
+            twist.linear.x = 0.1
+        elif distance > 50:
+            twist.linear.x = 0.06
+        else:
+            twist.linear.x = 0.03
+        
+        # 🔥 边走边微调方向（小角度误差时）
+        if abs(angle_error) > 5:
+            angular_correction = math.radians(angle_error) * 0.4
+            twist.angular.z = max(-0.3, min(0.3, angular_correction))
+        
         safe_publish_twist(node, robot_name, twist)
-        print(f"[MOVE] Distance: {distance:.2f}mm, Heading: {heading_y_now:.1f}deg, "
-              f"Target angle: {target_angle:.1f}deg, Error: {angle_error:.1f}deg")
+        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
+              f"target={target_angle:.1f}°, error={angle_error:.1f}°, "
+              f"speed={twist.linear.x:.2f}")
 
-        time.sleep(0.2)
-        safe_publish_twist(node, robot_name, Twist())
-        time.sleep(0.1)
-
+        # 🔥 关键改进：减少睡眠时间，移除中间停止
+        time.sleep(0.15)  # 从原来的 0.3 秒减少到 0.15 秒
+        
+        # 🔥 移除这两行来避免频繁启停：
+        # safe_publish_twist(node, robot_name, Twist())
+        # time.sleep(0.1)
+ 
+    # 最终停止
+    safe_publish_twist(node, robot_name, Twist())
+    time.sleep(0.05)
 # ============================================================================
 # PRECISION MOVEMENT FUNCTIONS
 # ============================================================================
