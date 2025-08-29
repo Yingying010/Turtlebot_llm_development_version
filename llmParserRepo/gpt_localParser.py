@@ -198,13 +198,15 @@ Executor Robot Identification Rules
 ========================
 Rules for Cross-Robot Dependencies  
 ========================
-1. **Parallel execution**: 
-   If no dependencies are specified, do not add sequence and sync_group fields.
+1. **Independent/Parallel execution (DEFAULT)**: 
+   When robots work separately or independently, do NOT add sequence or sync_group fields.
+   Each robot executes its own task list in natural order.
 
 2. **Sequential execution (sequence)**:
-   For tasks that must happen in order within the same robot or across robots.
+   ONLY when tasks must happen in a specific order ACROSS robots.
+   - Use only for cross-robot dependencies
+   - Within a single robot, tasks naturally execute in list order
    - sequence is a globally incrementing number starting from 0
-   - Tasks with sequence: 0 execute first, then sequence: 1, etc.
 
 3. **Synchronous execution (sync_group)**:
    For tasks that must start simultaneously across multiple robots.
