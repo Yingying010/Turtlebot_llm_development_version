@@ -98,8 +98,8 @@ def execute_contactless_transport(node, executor, robot_name: str, params: Dict)
     global _transport_managers
     try:
         item = params.get("item", "unknown")
-        start = params.get("start_position", "table")
-        goal = params.get("goal_position", "lucy")
+        start = params.get("start_position")
+        goal = params.get("goal_position")
 
         logger.info(f"🚛 {robot_name} transporting {item} from {start} to {goal}")
         tts_manager.say_sync(f"{robot_name} transporting {item}")
