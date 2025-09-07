@@ -30,7 +30,7 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
     action = task["action"]
     params = task["parameters"]
 
-    logger.info(f"🚗 {robot} is executing {action} → {params}")
+    logger.info(f"{robot} is executing {action} → {params}")
     tts_manager.say_sync(f"{robot} is executing {action}")
 
     try:
@@ -84,16 +84,15 @@ def execute_action(node: Node, executor, task: Dict, handle_follow_up: bool = Tr
             return True
 
         else:
-            logger.error(f"❌ Unknown action: {action}")
+            logger.error(f"Unknown action: {action}")
             return False
 
     except Exception as e:
-        logger.error(f"❌ Error executing {action}: {e}")
+        logger.error(f"Error executing {action}: {e}")
         import traceback
         traceback.print_exc()
         return False
 
-# === 协作运输 ===
 def execute_contactless_transport(node, executor, robot_name: str, params: Dict) -> bool:
     global _transport_managers
     try:
@@ -101,7 +100,7 @@ def execute_contactless_transport(node, executor, robot_name: str, params: Dict)
         start = params.get("start_position")
         goal = params.get("goal_position")
 
-        logger.info(f"🚛 {robot_name} transporting {item} from {start} to {goal}")
+        logger.info(f"{robot_name} transporting {item} from {start} to {goal}")
         tts_manager.say_sync(f"{robot_name} transporting {item}")
 
         key = f"{robot_name}_transport"
@@ -116,16 +115,15 @@ def execute_contactless_transport(node, executor, robot_name: str, params: Dict)
         else:
             logger.warning("Transport already in progress")
 
-        logger.info("✅ Transport complete")
+        logger.info("Transport complete")
         return True
 
     except Exception as e:
         logger.error(f"Transport error: {e}")
         return False
 
-# === 批量任务执行 ===
 def execute_robot_commands(node: Node, robot_id: str, commands: List[Dict], executor):
-    logger.info(f"[🤖 Start executing for {robot_id}]")
+    logger.info(f"[Start executing for {robot_id}]")
     for cmd in commands:
         execute_action(node, executor, cmd)
-    logger.info(f"[🤖 Finished executing for {robot_id}]")
+    logger.info(f"[Finished executing for {robot_id}]")

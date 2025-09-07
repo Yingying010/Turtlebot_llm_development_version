@@ -8,7 +8,7 @@ from loguru import logger
 
 def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, target: str = "self"):
     is_successful = False
-    print(f"🔁 {robot_id} turning {direction} {value} {unit} around {target}")
+    print(f"{robot_id} turning {direction} {value} {unit} around {target}")
 
     pub = node.create_publisher(Twist, f"/{robot_id}/cmd_vel", 10)
     angular_speed = math.radians(30)  # 30°/s = 0.523 rad/s
@@ -19,7 +19,7 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
     elif direction == "right":
         twist.angular.z = -angular_speed
     else:
-        print(f"⚠️ Unknown direction: {direction}")
+        print(f"Unknown direction: {direction}")
         return is_successful
 
     if unit == "degree":
@@ -31,7 +31,7 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
         duration = value
         print(f"{robot_id} turning {direction} for {duration:.2f}s around {target}")
     else:
-        print(f"⚠️ Unsupported unit: {unit}")
+        print(f"Unsupported unit: {unit}")
         return is_successful
 
     time.sleep(0.2)
@@ -42,8 +42,8 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
             pub.publish(twist)
             time.sleep(0.01)
 
-        pub.publish(Twist())  # 停止
-        print(f"✅ {robot_id} finished rotating.")
+        pub.publish(Twist())
+        print(f"{robot_id} finished rotating.")
         is_successful = True
         return is_successful
     except Exception:
@@ -51,8 +51,8 @@ def rotate(node: Node, robot_id: str, direction: str, value: float, unit: str, t
     
 
 def rotate_deg(node: Node, robot_id: str, deg: float):
-    logger.info(f"🔄 rotate_deg called: robot={robot_id}, deg={deg}")
+    logger.info(f"rotate_deg called: robot={robot_id}, deg={deg}")
     direction = "left" if deg >= 0 else "right"
     result = rotate(node, robot_id, direction, abs(deg), "degree", target="self")
-    logger.info(f"🔄 rotate_deg result: {result}")
+    logger.info(f"rotate_deg result: {result}")
     return result

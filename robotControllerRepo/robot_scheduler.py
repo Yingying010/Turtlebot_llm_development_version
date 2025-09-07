@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Enhanced Robot Scheduler with Professional Logging
-Academic Multi-Robot Coordination System
-"""
-
 import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
@@ -20,17 +13,10 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from loguru import logger
 from textwrap import dedent
 
-# Import project dependencies
 from robotControllerRepo.robot_controller import execute_action
 import config
 
 import datetime
-
-# 增加全局缓存
-_cached_node = None
-_executor_thread = None
-_executor = None
-_node_lock = threading.Lock()
 
 def now():
     """Get current timestamp in millisecond precision"""
@@ -781,56 +767,3 @@ def run(task_data: Dict[str, Any]):
     logger.info(f"[SYSTEM] Final execution status: {'SUCCESS' if execution_result else 'FAILURE'}")
 
     return execution_result
-
-
-
-
-# =========================
-# Test Entry Point
-# =========================
-if __name__ == "__main__":
-    """Test harness for enhanced multi-robot coordination system"""
-    
-    logger.info("[TEST] Initializing test scenario for enhanced coordination system")
-    
-    test_scenario = {
-        "robots": {
-            "robot1": [
-                {
-                    "action": "move", 
-                    "parameters": {"direction": "forward", "value": 3, "unit": "seconds"}, 
-                    "sequence": 0
-                },
-                {
-                    "action": "turn", 
-                    "parameters": {"direction": "left", "value": 90, "unit": "degrees"}, 
-                    "sequence": 2
-                }
-            ],
-            "robot2": [
-                {
-                    "action": "navigate", 
-                    "parameters": {"target": "table"}, 
-                    "sequence": 1
-                },
-                {
-                    "action": "collect", 
-                    "parameters": {"item": "box", "target": "table"}, 
-                    "sequence": 3
-                }
-            ]
-        }
-    }
-    
-    logger.info("[TEST] Test scenario configuration:")
-    logger.info(f"[TEST] - Participating robots: {list(test_scenario['robots'].keys())}")
-    logger.info(f"[TEST] - Total tasks: {sum(len(tasks) for tasks in test_scenario['robots'].values())}")
-    
-    test_result = run(test_scenario)
-    
-    if test_result:
-        logger.info("[TEST] Test scenario completed successfully")
-    else:
-        logger.error("[TEST] Test scenario failed")
-        
-    exit(0 if test_result else 1)

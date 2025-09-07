@@ -1,4 +1,3 @@
-# stream_tts.py（只使用 gTTS）
 import os
 import threading
 import tempfile
@@ -114,7 +113,6 @@ class TTSManager:
 
                 mp3_path = None
                 try:
-                    # 合成 mp3
                     fd, mp3_path = tempfile.mkstemp(suffix=".mp3")
                     os.close(fd)
                     gTTS(part, lang=self.lang, tld=self.tld).save(mp3_path)
@@ -122,7 +120,6 @@ class TTSManager:
                     if handle._is_canceled():
                         break
 
-                    # 播放 mp3
                     play_cmd = [self._player,"-q", mp3_path] if "mpg123" in self._player else [self._player, "-nodisp", "-autoexit", mp3_path]
                     logger.info(f"🔊 {part}")
                     with self._lock:
@@ -146,5 +143,4 @@ class TTSManager:
                 self._current_handle = None
             handle._mark_done()
 
-# ✅ 创建全局单例：使用美式英语
 tts_manager = TTSManager(lang="en", tld="com")

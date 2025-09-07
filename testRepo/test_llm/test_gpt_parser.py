@@ -1,23 +1,18 @@
 import os, sys, re, json, time, traceback, threading
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
 from pathlib import Path
 from collections import Counter
- 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-sys.path.append(PROJECT_ROOT)
- 
 import openai
 from loguru import logger
- 
-# from WhisperRepo.whisper_recognizer import recognize
-from WhisperRepo.whisper_openai import recognize
-from ttsRepo.stream_tts import tts_manager
 import config
-
-import robotControllerRepo.robot_scheduler as robot_scheduler
 from llmParserRepo.yolo_perception import detect_once as yolo_detect_once
 
+
+
+# ================== 配置 ==================
 DEFAULT_MODEL = "gpt-4o"
 
 SESSION_ID = os.getenv("SESSION_ID", "chattinglog")
@@ -27,6 +22,7 @@ MEMORY_PATH = MEMORY_DIR / f"{SESSION_ID}.jsonl"
 MAX_TURNS = int(os.getenv("MAX_TURNS", "8"))
 PERCEPTION_HISTORY_DEPTH = int(os.getenv("PERCEPTION_HISTORY_DEPTH", "5"))
 
+# ——统一输出提示词（在此基础上增加"可选历史输入"说明）——
 SYSTEM_PROMPT = dedent("""
 You are a specialized robot command interpreter that receives natural language input and converts it into a structured JSON object. 
 Your primary responsibility is to identify only the executor robots and to determine their number, and parse the complete task list for each robot. 
@@ -236,27 +232,40 @@ def get_master_name():
     return config.get("master_id")
 
 def detect_once() -> List[Dict[str, Any]]:
+    """
+    执行一次YOLO感知，返回 detections 列表（每个元素是一个 dict，包含 class / conf / center_xy / bbox_xyxy）
+    用于被 find 动作调用
+    """
     try:
+        # 使用独立的YOLO模块
         result = yolo_detect_once()
         
         if result and "result" in result:
+            # 假设result["result"]包含检测结果
+            # 需要根据yolo_perception.py的实际返回格式进行调整
             yolo_data = result["result"]
             detections = []
             
+            # 🔥 修复：处理YOLO命令行返回的JSON格式
             if isinstance(yolo_data, list):
+                # 如果直接是检测结果列表
                 detections = yolo_data
             elif isinstance(yolo_data, dict):
+                # 如果是包含检测结果的字典
                 if "detections" in yolo_data:
                     detections = yolo_data["detections"]
                 elif "predictions" in yolo_data:
                     detections = yolo_data["predictions"]
                 else:
+                    # 尝试从其他可能的字段获取
                     logger.warning(f"Unknown YOLO result format: {list(yolo_data.keys())}")
                     detections = []
             
+            # 🔥 确保检测结果格式正确
             formatted_detections = []
             for det in detections:
                 if isinstance(det, dict):
+                    # 标准化检测结果格式
                     formatted_det = {
                         "class": det.get("class", det.get("name", "unknown")).lower(),
                         "conf": float(det.get("conf", det.get("confidence", 0.0))),
@@ -264,6 +273,7 @@ def detect_once() -> List[Dict[str, Any]]:
                         "bbox_xyxy": det.get("bbox_xyxy", det.get("bbox", [0, 0, 0, 0]))
                     }
                     
+                    # 如果没有center_xy，从bbox计算
                     if not formatted_det["center_xy"] or formatted_det["center_xy"] == [0, 0]:
                         bbox = formatted_det["bbox_xyxy"]
                         if len(bbox) == 4:
@@ -273,38 +283,44 @@ def detect_once() -> List[Dict[str, Any]]:
                     
                     formatted_detections.append(formatted_det)
             
-            logger.info(f"Processed {len(formatted_detections)} detections")
+            logger.info(f"🔍 Processed {len(formatted_detections)} detections")
             return formatted_detections
         else:
-            logger.warning("No detection result from YOLO perceiver")
+            logger.warning("⚠️ No detection result from YOLO perceiver")
             return []
             
     except Exception as e:
-        logger.warning(f"detect_once failed: {e}")
+        logger.warning(f"⚠️ detect_once failed: {e}")
         import traceback
         traceback.print_exc()
         return []
 
 
 def safe_json_parse(raw_str: str) -> dict:
+    """增强版JSON解析器，处理各种格式问题"""
     try:
         return json.loads(raw_str)
     except Exception:
         pass
 
+    # 尝试去除 markdown ```json ``` 包裹
     raw_str = re.sub(r"^```(?:json)?\n?", "", raw_str.strip())
     raw_str = re.sub(r"\n?```$", "", raw_str.strip())
 
+    # 尝试找出第一个和最后一个 { } 的位置，截取中间部分
     start = raw_str.find("{")
     end = raw_str.rfind("}")
     if start != -1 and end != -1 and start < end:
         trimmed = raw_str[start:end+1]
         try:
             parsed = json.loads(trimmed)
+            # 验证基本结构
             if _validate_json_structure(parsed):
                 return parsed
         except Exception:
             pass
+
+    # 尝试修复常见的JSON错误
     try:
         fixed_json = _fix_json_errors(raw_str)
         parsed = json.loads(fixed_json)
@@ -313,6 +329,7 @@ def safe_json_parse(raw_str: str) -> dict:
     except Exception:
         pass
 
+    # 尝试修复截断的JSON
     try:
         repaired = _repair_truncated_json(raw_str)
         parsed = json.loads(repaired)
@@ -321,6 +338,7 @@ def safe_json_parse(raw_str: str) -> dict:
     except Exception:
         pass
 
+    # 最后失败就返回包装，但确保有基本结构
     return {
         "perception_report": {
             "timestamp": _now_iso(),
@@ -335,25 +353,32 @@ def safe_json_parse(raw_str: str) -> dict:
     }
 
 def _validate_json_structure(parsed: dict) -> bool:
+    """验证解析结果的基本结构"""
     if not isinstance(parsed, dict):
         return False
     
+    # 检查是否有主要字段
     main_fields = ["perception_report", "robots", "response"]
     has_main_structure = any(field in parsed for field in main_fields)
     
     return has_main_structure
 
 def _fix_json_errors(json_str: str) -> str:
+    """修复常见的JSON格式错误"""
+    # 移除多余的逗号
     json_str = re.sub(r',\s*}', '}', json_str)
     json_str = re.sub(r',\s*]', ']', json_str)
     
+    # 修复未闭合的字符串
     lines = json_str.split('\n')
     fixed_lines = []
     
     for line in lines:
         stripped = line.strip()
         if stripped and ':' in stripped:
+            # 检查是否有未闭合的引号
             if stripped.count('"') % 2 == 1 and not stripped.endswith(('"', ',', '}', ']')):
+                # 尝试在合适的位置添加引号
                 if not stripped.endswith('"'):
                     stripped += '"'
         fixed_lines.append(stripped)
@@ -361,6 +386,8 @@ def _fix_json_errors(json_str: str) -> str:
     return '\n'.join(fixed_lines)
 
 def _repair_truncated_json(json_str: str) -> str:
+    """修复被截断的JSON"""
+    # 查找未闭合的括号并添加
     brace_count = json_str.count('{') - json_str.count('}')
     bracket_count = json_str.count('[') - json_str.count(']')
     
@@ -369,20 +396,27 @@ def _repair_truncated_json(json_str: str) -> str:
     if bracket_count > 0:
         json_str += ']' * bracket_count
     
+    # 特殊处理：如果response字段被截断
     if '"response"' in json_str and not json_str.strip().endswith(('}', '"')):
+        # 查找response字段的位置并修复
         response_match = re.search(r'"response":\s*"([^"]*?)(?:"|\s*$)', json_str)
         if response_match and not response_match.group(0).endswith('"'):
+            # 修复未闭合的response字段
             before_response = json_str[:response_match.start()]
             response_content = response_match.group(1)
             after_response = json_str[response_match.end():]
-
+            
+            # 重构JSON
             json_str = before_response + f'"response": "{response_content}"' + after_response
             
+            # 确保JSON正确闭合
             if not json_str.strip().endswith('}'):
                 json_str += '}'
     
     return json_str
 
+
+# ================== 历史存储 ==================
 class HistoryStore:
     def __init__(self, path: Path):
         self.path = path
@@ -424,6 +458,7 @@ class HistoryStore:
             self.path.unlink()
 
 
+# ================== 感知上下文构造 ==================
 def _assign_ids(dets: List[Dict], topk: int = 3):
     dets = dets[:topk]
     totals = Counter(d["class"] for d in dets)
@@ -437,6 +472,7 @@ def _assign_ids(dets: List[Dict], topk: int = 3):
     return objs
 
 def build_perception_context(det_json: Dict, topk: int = 3) -> str:
+    """构造感知上下文文本"""
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,
@@ -449,6 +485,7 @@ def build_perception_context(det_json: Dict, topk: int = 3) -> str:
     return "CURRENT_PERCEPTION:\n" + json.dumps(ctx, ensure_ascii=False)
 
 def build_perception_summary(det_json: Dict, topk: int = 3) -> Dict:
+    """构造感知摘要（用于历史存储）"""
     assigned = _assign_ids(det_json.get("detections", []), topk)
     objs = [{
         "id": oid,
@@ -463,6 +500,7 @@ def build_perception_summary(det_json: Dict, topk: int = 3) -> Dict:
     return {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "summary": summary, "objects": objs}
 
 def build_perception_history_text(summaries: List[Dict]) -> Optional[str]:
+    """构造感知历史文本"""
     if not summaries:
         return None
     return "PERCEPTION_HISTORY:\n" + json.dumps(summaries, ensure_ascii=False)
@@ -500,6 +538,8 @@ class PerceptionAwareLLM:
 
         Next, here's what the user said to you:
         """).strip()
+
+        print(post_identity)
         
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -512,11 +552,13 @@ class PerceptionAwareLLM:
         messages.extend(chat_history_messages[-MAX_TURNS*2:])
         messages.append({"role": "user", "content": user_text})
 
+        # 增加重试机制和更大的token限制
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
+                # 根据尝试次数调整参数
                 if attempt == 0:
-                    max_tokens = 1000
+                    max_tokens = 1000  # 增加token限制
                     temperature = 0.1
                 elif attempt == 1:
                     max_tokens = 1200
@@ -533,18 +575,20 @@ class PerceptionAwareLLM:
                 )
                 
                 raw_output = resp.choices[0].message.content.strip()
-                logger.info(f"Attempt {attempt + 1} - Raw output length: {len(raw_output)}")
+                logger.info(f"📄 Attempt {attempt + 1} - Raw output length: {len(raw_output)}")
                 
+                # 验证输出不为空且不是错误
                 if not raw_output or "error" in raw_output.lower()[:100]:
                     if attempt < max_attempts - 1:
-                        logger.warning(f"Attempt {attempt + 1} produced invalid output, retrying...")
+                        logger.warning(f"⚠️ Attempt {attempt + 1} produced invalid output, retrying...")
                         continue
                 
                 return raw_output
                 
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {e}")
+                logger.error(f"❌ Attempt {attempt + 1} failed: {e}")
                 if attempt == max_attempts - 1:
+                    # 所有尝试都失败，返回基本的JSON结构
                     fallback_response = {
                         "perception_report": {
                             "timestamp": _now_iso(),
@@ -558,9 +602,10 @@ class PerceptionAwareLLM:
                     }
                     return json.dumps(fallback_response, ensure_ascii=False)
         
-
+        # 理论上不应该到达这里
         return "{}"
 
+# ================== 一次性：感知 + 解析 + 历史写入 ==================
 def perceive_and_parse(user_instruction: str,
                        show_window: bool = False,
                        save_annotated: Optional[str] = None) -> Dict:
@@ -576,30 +621,34 @@ def perceive_and_parse(user_instruction: str,
     )
 
     try:
+        # 使用独立的YOLO感知模块
         perception_result = yolo_detect_once()
         
         if perception_result and "result" in perception_result:
+            # 根据yolo_perception.py的返回格式来处理
             yolo_data = perception_result["result"]
             
+            # 构造兼容的det_json格式
             if isinstance(yolo_data, dict):
                 det_json = yolo_data
             elif isinstance(yolo_data, list):
-
+                # 如果是检测列表，包装成期望的格式
                 det_json = {"detections": yolo_data, "image": {"width": 640, "height": 480}}
             
-            logger.info(f"Perception successful: {len(det_json.get('detections', []))} objects detected")
+            logger.info(f"🔍 Perception successful: {len(det_json.get('detections', []))} objects detected")
             perception_ctx = build_perception_context(det_json)
             
+            # 如果需要显示或保存图像，这里需要从perception_result中获取
             if "frame_path" in perception_result and (show_window or save_annotated):
                 frame_path = perception_result["frame_path"]
-
-                logger.info(f"Frame available at: {frame_path}")
+                # 这里可能需要额外的处理来显示或保存图像
+                logger.info(f"📸 Frame available at: {frame_path}")
                 
         else:
-            logger.warning("YOLO perception failed or returned no data")
+            logger.warning("⚠️ YOLO perception failed or returned no data")
             
     except Exception as e:
-        logger.warning(f"Perception error: {e}")
+        logger.warning(f"⚠️ Perception error: {e}")
         det_json = {"detections": [], "image": {}}
         perception_ctx = "CURRENT_PERCEPTION:\n" + json.dumps(
             {"timestamp": _now_iso(), "objects": []}, ensure_ascii=False
@@ -615,18 +664,21 @@ def perceive_and_parse(user_instruction: str,
         perception_history_text=perception_hist_text
     )
 
+    # 使用增强的JSON解析器
     try:
         extracted = llm.extract_json(raw)
         parsed = safe_json_parse(extracted)
         
+        # 验证解析结果的完整性
         if not _validate_parsed_result(parsed):
-            logger.warning("Parsed result validation failed, using fallback structure")
+            logger.warning("⚠️ Parsed result validation failed, using fallback structure")
             parsed = _create_fallback_structure(raw, user_instruction)
             
     except Exception as e:
-        logger.error(f"JSON parsing failed completely: {e}")
+        logger.error(f"❌ JSON parsing failed completely: {e}")
         parsed = _create_fallback_structure(raw, user_instruction)
 
+    # 记录历史
     store.append("perception", build_perception_summary(det_json))
     store.append("user", user_instruction)
     store.append("assistant", json.dumps(parsed, ensure_ascii=False))
@@ -634,23 +686,28 @@ def perceive_and_parse(user_instruction: str,
     return {"command": parsed}
 
 def _validate_parsed_result(parsed: dict) -> bool:
+    """验证解析结果是否包含所需的基本结构"""
     if not isinstance(parsed, dict):
         return False
     
+    # 检查是否有错误标记
     if "error" in parsed and "failed after" in str(parsed.get("error", "")):
         return False
     
+    # 检查基本结构
     required_fields = ["perception_report", "robots", "response"]
     missing_fields = [field for field in required_fields if field not in parsed]
     
-    if len(missing_fields) > 1: 
+    if len(missing_fields) > 1:  # 允许缺少一个字段
         return False
     
+    # 检查robots字段格式
     if "robots" in parsed:
         robots = parsed["robots"]
         if not isinstance(robots, dict):
             return False
         
+        # 检查每个机器人的任务格式
         for robot_id, tasks in robots.items():
             if not isinstance(tasks, list):
                 return False
@@ -661,6 +718,7 @@ def _validate_parsed_result(parsed: dict) -> bool:
     return True
 
 def _create_fallback_structure(raw_output: str, user_instruction: str) -> dict:
+    """创建备用的JSON结构"""
     return {
         "perception_report": {
             "timestamp": _now_iso(),
@@ -676,6 +734,7 @@ def _create_fallback_structure(raw_output: str, user_instruction: str) -> dict:
     }
 
 def normalize_for_scheduler(cmd: dict) -> dict:
+    """标准化调度器的输入格式"""
     if not isinstance(cmd, dict):
         return {"robots": {}}
     if "robots" in cmd and isinstance(cmd["robots"], dict):
@@ -688,91 +747,15 @@ def normalize_for_scheduler(cmd: dict) -> dict:
             return inner
     return {"robots": {}}
 
-def run_conversation_loop() -> Optional[Dict[str, Any]]:
-    logger.info("Starting enhanced conversation loop")
+
+# ================== 示例 ==================
+if __name__ == "__main__":
+    # 测试用例
+    test_instructions = [
+        "Robot1 and robot2, I'd like you both to help me get the pills off the table without contact."
+    ]
+
+    out = perceive_and_parse(test_instructions, show_window=False, save_annotated=None)
+
+    print("✅ Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
     
-    consecutive_failures = 0
-    max_consecutive_failures = 3
-    
-    while True:
-        while True:
-            try:
-                raw_text = recognize(delay=3).strip()
-                consecutive_failures = 0 
-                break
-            except Exception as e:
-                consecutive_failures += 1
-                logger.warning(f"Recognition failed (attempt {consecutive_failures}): {e}")
-                
-                if consecutive_failures >= max_consecutive_failures:
-                    tts_manager.say_sync("I'm having trouble hearing you. Please check the microphone.")
-                    time.sleep(2)
-                    consecutive_failures = 0
-                else:
-                    tts_manager.say_sync("Sorry, could not hear you.")
-                continue
-
-        user_input = _clean(raw_text)
-        if not user_input or user_input == "blank_audio":
-            continue
-
-        exit_keywords = ["exit", "stop talking", "quit", "okay bye", "goodbye", "shut up",
-                         "i want to change the chat mode", "ending of this mode", "ok finish", "ending this mode"]
-
-        if any(kw in user_input.lower() for kw in exit_keywords):
-            tts_manager.say_sync("Exiting voice control.")
-            sys.exit(0)
-            break
-
-        logger.info(f"You said: {user_input}")
-
-        out = {}
-        try:
-            out = perceive_and_parse(user_input, show_window=False, save_annotated=None)
-
-            print("Parsed result:", json.dumps(out, indent=2, ensure_ascii=False))
-
-            if out and "command" in out:
-                cmd = out["command"]
-                resp = cmd.get("response", "")
-
-                if "robots" in cmd:
-                    for robot_id, tasks in cmd["robots"].items():
-                        for task in tasks:
-                            task["original_user_input"] = user_input
-                
-                if resp and resp != "i can't give you any response":
-                    print(f"Response: {resp}")
-                    tts_manager.say_sync(resp)
-                else:
-                    print("Response: Processing your command...")
-                    tts_manager.say_sync("Processing your command.")
-                
-                execution_payload = normalize_for_scheduler(cmd)
-                if execution_payload.get("robots"):
-                    try:
-                        isSchedule = robot_scheduler.run(execution_payload)
-                        if isSchedule is True:
-                            logger.info("Command(s) executed successfully.")
-                            tts_manager.say_sync("Command executed successfully.")
-                        else:
-                            logger.warning("Command execution failed")
-                            tts_manager.say_sync("Command execution failed. Please try again.")
-                    except Exception as exec_error:
-                        logger.error(f"Scheduler error: {exec_error}")
-                        tts_manager.say_sync("Sorry, there was an error executing the command.")
-                else:
-                    if resp:
-                        logger.info("Chat mode - no robot commands detected")
-                    else:
-                        tts_manager.say_sync("I didn't detect any robot commands in your request.")
-            else:
-                tts_manager.say_sync("Could not understand the command.")
-
-        except Exception as e:
-            logger.error(f"Error during processing: \n{traceback.format_exc()}")
-            tts_manager.say_sync("Something went wrong while processing your request.")
-            out = {}
-
-        time.sleep(0.5)
-

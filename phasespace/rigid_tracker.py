@@ -10,7 +10,7 @@ import time
  
 class RigidTracker(Node):
     def __init__(self, position_cache, name, position_lock=None):
-        print(f"✅ RigidTracker initialized for {name}")
+        print(f"RigidTracker initialized for {name}")
         super().__init__(f'rigid_tracker_{name}')
         self.subscription = self.create_subscription(
             Rigid,
@@ -52,7 +52,7 @@ class RigidTracker(Node):
                 # )
 
         except Exception as e:
-            self.get_logger().error(f"💥 Error reading Rigid message: {e}")
+            self.get_logger().error(f"Error reading Rigid message: {e}")
  
  
 def yaw_from_quat(qw, qx, qy, qz):
@@ -77,7 +77,7 @@ def main():
         thread = threading.Thread(target=executor.spin, daemon=True)
         thread.start()
  
-        print("📡 Listening for robot1's position updates... (Ctrl+C to stop)")
+        print("Listening for robot1's position updates... (Ctrl+C to stop)")
  
         # 循环打印 robot1 位置信息
         while rclpy.ok():

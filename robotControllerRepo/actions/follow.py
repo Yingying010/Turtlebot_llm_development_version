@@ -13,41 +13,32 @@ from rclpy._rclpy_pybind11 import InvalidHandle
 from std_msgs.msg import String
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from WhisperRepo.whisper_background import run_continuous_listen
- 
-# 工程根路径
+
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from ttsRepo.stream_tts import tts_manager
-from phasespace.rigid_tracker import RigidTracker    # 原版，保持不动
- 
-# ------------------------------------------------------------------
+from phasespace.rigid_tracker import RigidTracker
 
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
-
-# ------------------------------------------------------------------
 SPEECH_TOPIC = "/speech_text"
 CTRL_TOPIC   = "/follow_service"
 
-
-# ───────────────── Whisper 后台监听 · 引用计数管理 ─────────────────
-# 放在文件顶部的全局区域
 _WHISPER_REF = 0
 _WHISPER_LOCK = threading.Lock()
 _WHISPER_THREAD: threading.Thread | None = None
 _WHISPER_STOP: threading.Event | None = None
 
 def _whisper_ref_inc():
-    """第一个 follow 启动时，开启唯一的 Whisper 后台监听线程。"""
     global _WHISPER_REF, _WHISPER_THREAD, _WHISPER_STOP
     with _WHISPER_LOCK:
         _WHISPER_REF += 1
         if _WHISPER_REF == 1:
             _WHISPER_STOP = threading.Event()
             _WHISPER_THREAD = threading.Thread(
-                target=run_continuous_listen,      # 来自 whisper_background.py
+                target=run_continuous_listen,
                 kwargs={"stop_event": _WHISPER_STOP, "sleep_after_publish": 0.05},
                 daemon=True,
                 name="whisper-bg",
@@ -55,7 +46,6 @@ def _whisper_ref_inc():
             _WHISPER_THREAD.start()
 
 def _whisper_ref_dec():
-    """最后一个 follow 结束时，关闭并回收 Whisper 监听线程。"""
     global _WHISPER_REF, _WHISPER_THREAD, _WHISPER_STOP
     with _WHISPER_LOCK:
         _WHISPER_REF = max(0, _WHISPER_REF - 1)
@@ -68,26 +58,24 @@ def _whisper_ref_dec():
                 _WHISPER_THREAD = None
                 _WHISPER_STOP = None
  
-# ---------- 工具 ----------
-
 def getRobotPositionCache(robot_name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     rigid_node = RigidTracker(
         position_cache=robot_position_cache,
         robot_name=robot_name,
-        position_lock=cache_lock,  # 传入同一把锁，避免读写冲突
+        position_lock=cache_lock, 
     )
     executor.add_node(rigid_node)
-    print(f"⏳ Waiting for position data of {robot_name}...")
+    print(f"Waiting for position data of {robot_name}...")
     tts_manager.say_sync(f"Initializing tracker for {robot_name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
             ok = robot_name in robot_position_cache
         if ok:
-            print(f"✅ Got position data for {robot_name}.")
+            print(f"Got position data for {robot_name}.")
             tts_manager.say_sync(f"Position data acquired for {robot_name}.")
             return rigid_node
         time.sleep(0.2)
-    print(f"❌ Timeout: No position data for {robot_name}")
+    print(f"Timeout: No position data for {robot_name}")
     tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return None
 
@@ -99,7 +87,7 @@ def get_current_position(robot_name: str) -> tuple:
             y = rigid["z"]
             heading_y = rigid["heading_y"]
             return x, y, heading_y
-    print(f"⚠️ No position data for {robot_name}")
+    print(f"No position data for {robot_name}")
     tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
 
@@ -123,11 +111,9 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         publisher_dict[key] = pub
         pub.publish(twist)
 
-# --------- rotate and move
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           stop_event: threading.Event | None = None,
                           angle_tolerance_deg: float = 5.0):
-    # 早退
     if stop_event and stop_event.is_set():
         safe_publish_twist(node, robot_id, Twist())
         return
@@ -137,7 +123,7 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
     dx = x_target - x_now
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
-    print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
+    print(f"\nROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
 
     while rclpy.ok():
         if stop_event and stop_event.is_set():
@@ -147,7 +133,7 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
-            print("✅ ROTATE done.")
+            print("ROTATE done.")
             break
 
         new_direction = 1 if angle_error > 0 else -1
@@ -160,11 +146,10 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
             twist.angular.z = 0.15 * new_direction
 
         safe_publish_twist(node, robot_id, twist)
-        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
+        print(f"↪turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
               f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
         time.sleep(0.1)
 
-    # 刹停
     safe_publish_twist(node, robot_id, Twist())
     time.sleep(0.1)
 
@@ -172,13 +157,12 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
                                stop_event: threading.Event | None = None,
                                tolerance: float = 20.0,
                                max_acceptable_angle_error: float = 25.0):
-    # 早退
     if stop_event and stop_event.is_set():
         safe_publish_twist(node, robot_name, Twist())
         return
 
     x_target, y_target = target["x"], target["y"]
-    print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
+    print(f"\nNEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
     while rclpy.ok():
         if stop_event and stop_event.is_set():
@@ -190,37 +174,33 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         distance = math.hypot(dx, dz)
 
         if distance < tolerance:
-            print("🎉 Reached target.")
+            print("Reached target.")
             break
 
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) > max_acceptable_angle_error:
-            print(f"🔁 Too much angle error: {angle_error:.1f}°, rotating first...")
+            print(f"Too much angle error: {angle_error:.1f}°, rotating first...")
             rotate_to_face_target(node, robot_name, target, stop_event=stop_event)
             continue
 
         twist = Twist()
         twist.linear.x = 0.1
         safe_publish_twist(node, robot_name, twist)
-        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
+        print(f"Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
               f"target={target_angle:.1f}°, error={angle_error:.1f}°")
         time.sleep(0.2)
 
-        # 脉冲式前进：松一下油门，避免积累
         safe_publish_twist(node, robot_name, Twist())
         time.sleep(0.1)
 
-    # 刹停
     safe_publish_twist(node, robot_name, Twist())
     time.sleep(0.05)
   
-# ---------- 跟随线程 ----------
 FOLLOW_DIST_MM = 200.0
 HYSTERESIS_MM = 50.0
 
-# === 跟随线程函数（外部） ===
 def follow_loop(ctrl_node: Node, follower: str, target: str, stop_event: threading.Event):
     tts_manager.say_sync(f"{follower} is now following {target}")
     try:
@@ -245,9 +225,6 @@ def follow_loop(ctrl_node: Node, follower: str, target: str, stop_event: threadi
         safe_publish_twist(ctrl_node, follower, Twist())
         tts_manager.say_sync(f"{follower} stopped following {target}")
  
- 
-# ------------------------------------------------------------------
-# === 只订阅 /speech_text 的监听节点 ===
 class SpeechStopListener(Node):
     def __init__(self, stop_event: threading.Event, name_suffix: str):
         super().__init__(f"follow_speech_listener_{name_suffix}")
@@ -255,8 +232,7 @@ class SpeechStopListener(Node):
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.sub = self.create_subscription(String, SPEECH_TOPIC, self.on_text, qos)
         self.keywords: List[str] = [
-            "stop follow", "stop following", "stop following me",
-            "结束follow", "结束跟随", "停止跟随", "停止跟踪", "结束跟踪", "停止", "stop"
+            "stop follow", "stop following", "stop following me"
         ]
 
     def on_text(self, msg: String):
@@ -270,28 +246,18 @@ class SpeechStopListener(Node):
 
 # === 主入口 ===
 def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedExecutor):
-    """启动跟随任务：开启/复用 Whisper 监听、订阅语音停指令、循环控制到目标距离内。"""
     stop_event = threading.Event()
     is_successful = False
 
-
-    # 2) PhaseSpace 订阅节点（写入全局缓存）
-    # tracker_follower = RigidTracker(position_cache=robot_position_cache, robot_name=follower)
-    # tracker_target   = RigidTracker(position_cache=robot_position_cache, robot_name=target)
-    # executor.add_node(tracker_follower)
-    # executor.add_node(tracker_target)
-
-    # 2) 通过 getRobotPositionCache 等待位姿进入缓存（各等 ~10s）
     tracker_follower = getRobotPositionCache(follower, executor)
     if tracker_follower is None:
-        print(f"❌ Abort follow: no pose for {follower}.")
+        print(f"Abort follow: no pose for {follower}.")
         _whisper_ref_dec()
         return is_successful
  
     tracker_target = getRobotPositionCache(target, executor)
     if tracker_target is None:
-        print(f"❌ Abort follow: no pose for {target}.")
-        # 清理已添加的 follower 节点
+        print(f"Abort follow: no pose for {target}.")
         try:
             executor.remove_node(tracker_follower)
         except Exception:
@@ -306,12 +272,9 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
 
     _whisper_ref_inc()
  
-
-    # 4) 订阅 /speech_text，关键字触发 stop_event
     listener = SpeechStopListener(stop_event, name_suffix=follower)
     executor.add_node(listener)
 
-    # 5) 跟随控制线程
     th = threading.Thread(
         target=follow_loop,
         args=(node, follower, target, stop_event),
@@ -320,20 +283,16 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
     )
     th.start()
 
-    # 6) 阻塞等待直到结束（或被 stop_event 打断）
     try:
         while rclpy.ok() and th.is_alive() and not stop_event.is_set():
             time.sleep(0.2)
     finally:
-        # 6.1 结束跟随线程
         stop_event.set()
         th.join(timeout=2.0)
 
-        # 6.2 刹停机器人
         safe_publish_twist(node, follower, Twist())
         time.sleep(0.05)
 
-        # 6.3 清理 ROS 节点
         for n in (listener, tracker_follower, tracker_target):
             try:
                 executor.remove_node(n)
@@ -344,7 +303,6 @@ def follow_run(node: Node, follower: str, target: str, executor: MultiThreadedEx
             except Exception:
                 pass
 
-        # 6.4 Whisper 引用-1：若为最后一个 follow，则关闭监听线程
         _whisper_ref_dec()
 
         is_successful = True

@@ -10,13 +10,12 @@ DEFAULT_CONFIG = {
     "isConversation": True,
     "chat_or_instruct": False,
 
-    # 👇👇 新增：find 搜索相关配置
-    "find_use_rotate_scan": True,       # 找不到时是否做旋转扫描
-    "find_rotate_step_deg": 30,         # 每步转多少度
-    "find_rotate_max_deg": 360,         # 最大总转角
-    "find_rotate_pause_s": 0.5,         # 每步后暂停秒数
-    "find_rotate_speed_deg_s": 25.0,    # 旋转角速度（度/秒）
-    "find_waypoints": ["table", "shelf", "corner"],  # 多点搜索顺序（名称对应 semantic_locations）
+    "find_use_rotate_scan": True,
+    "find_rotate_step_deg": 30,
+    "find_rotate_max_deg": 360,
+    "find_rotate_pause_s": 0.5,
+    "find_rotate_speed_deg_s": 25.0,
+    "find_waypoints": ["table", "shelf", "corner"],
 
     "semantic_locations": {
         "lucy":  {"x": 500, "y": -1000, "heading": None},

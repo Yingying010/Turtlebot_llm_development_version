@@ -1,8 +1,7 @@
 import os, sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(PROJECT_ROOT)
-
-import queue, threading, time, re, subprocess
+import queue, threading, time, re
 import numpy as np
 import sounddevice as sd
 from loguru import logger
@@ -10,12 +9,10 @@ from typing import Final
 import wave
 from openai import OpenAI
 
-# 初始化OpenAI客户端
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 conversation_active: Final[threading.Event] = threading.Event()
 
-# === 参数 ===
 SAMPLERATE = 48000
 BLOCKSIZE = 1024
 SILENCE_THRESHOLD = 20.0
@@ -23,32 +20,27 @@ SILENCE_DURATION  = 1.5
 MAX_DURATION      = 30
 FIXED_WAV_PATH    = "/tmp/voice_input.wav"
 
-# === 音频设备检测和配置 ===
 def list_audio_devices():
-    """列出可用的音频设备"""
-    logger.info("🔍 Available audio devices:")
+    logger.info("Available audio devices:")
     devices = sd.query_devices()
     for i, device in enumerate(devices):
         device_type = "🎤" if device['max_input_channels'] > 0 else "🔊"
-        if device['max_input_channels'] > 0:  # 只显示输入设备
+        if device['max_input_channels'] > 0:
             logger.info(f"  {device_type} {i}: {device['name']} (channels: {device['max_input_channels']})")
     return devices
 
 def get_default_input_device():
-    """获取默认输入设备"""
     try:
         default_device = sd.query_devices(kind='input')
         logger.info(f"🎤 Using default input device: {default_device['name']}")
-        return None  # None表示使用默认设备
+        return None
     except Exception as e:
         logger.warning(f"⚠️ Could not get default input device: {e}")
         return None
 
-# === 清理文本 ===
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
-# === 标准写入 wav 文件 ===
 def save_wav_standard(wav_path, audio_int16, samplerate=48000):
     with wave.open(wav_path, "wb") as wf:
         wf.setnchannels(1)
@@ -56,7 +48,6 @@ def save_wav_standard(wav_path, audio_int16, samplerate=48000):
         wf.setframerate(samplerate)
         wf.writeframes(audio_int16.tobytes())
 
-# === 录音直到静音结束 ===
 def record_until_silence(threshold=SILENCE_THRESHOLD,
                          silence_duration=SILENCE_DURATION,
                          max_duration=MAX_DURATION,
@@ -65,8 +56,8 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     silence_blocks  = int(silence_duration * SAMPLERATE / BLOCKSIZE)
     max_blocks      = int(max_duration * SAMPLERATE / BLOCKSIZE)
 
-    pre_speech_buffer = []  # 保存最近的几个块
-    pre_speech_maxlen = 24  # ← 前两个block（可以调整成更多）
+    pre_speech_buffer = []
+    pre_speech_maxlen = 24
     audio_blocks      = []
     silence_counter   = 0
     is_recording      = False
@@ -80,7 +71,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
 
     with sd.InputStream(samplerate=SAMPLERATE, channels=1,
                 blocksize=BLOCKSIZE, callback=cb,
-                device=device_id):  # 使用指定的设备ID或默认设备
+                device=device_id):
         while True:
             try:
                 block = q_local.get(timeout=1)
@@ -99,7 +90,7 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 if volume > threshold:
                     logger.info("🔴 Voice detected. Start recording...")
                     is_recording = True
-                    audio_blocks.extend(pre_speech_buffer)  # 加上前面的缓存
+                    audio_blocks.extend(pre_speech_buffer)
                     audio_blocks.append(block)
                 continue
 
@@ -117,7 +108,6 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
                 logger.info("⏰ Max recording length reached. Forcing stop.")
                 break
 
-    # === 保存为固定路径 wav 文件 ===
     pcm_f32 = np.concatenate(audio_blocks).flatten()
     pcm_i16 = (pcm_f32 * 32767).clip(-32768, 32767).astype(np.int16)
 
@@ -125,7 +115,6 @@ def record_until_silence(threshold=SILENCE_THRESHOLD,
     logger.success(f"💾 Saved recording to {FIXED_WAV_PATH}")
     return FIXED_WAV_PATH
 
-# === 使用OpenAI API转录音频 ===
 def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
     """使用OpenAI Whisper API转录音频文件"""
     
@@ -137,20 +126,17 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
         logger.info("🔄 Transcribing with OpenAI API...")
         
         with open(wav_path, "rb") as audio_file:
-            # 使用新版OpenAI库的API
             transcript = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
-                language="en",  # 根据需要修改语言，可以设为None让API自动检测
+                language="en",
                 response_format="text",
-                temperature=0.2,  # 较低的temperature获得更稳定的结果
-                prompt=""  # 可以添加上下文提示来提高准确性
+                temperature=0.2,
+                prompt=""
             )
-        
-        # 新版API直接返回文本字符串
+
         raw_text = transcript.strip()
-        
-        # === 删除标点符号（小写、去空格）===
+
         clean_text = _clean(raw_text)
         
         logger.success(f"📝 Raw Text: {raw_text}")
@@ -162,7 +148,6 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
         return clean_text
         
     except Exception as e:
-        # 处理各种可能的错误
         error_msg = str(e)
         if "rate_limit" in error_msg.lower():
             logger.error("❌ OpenAI rate limit exceeded. Please wait and try again.")
@@ -177,24 +162,19 @@ def transcribe_audio(wav_path: str, delay: float = 0.0) -> str:
         return ""
 
 def recognize(delay: float = 0.0, device_id=None) -> str:
-    """完整的语音识别流程：录音 -> 转录"""
     wav_path = record_until_silence(device_id=device_id)
     return transcribe_audio(wav_path, delay)
 
-# === 测试函数 ===
 def test_recognition():
-    """测试语音识别功能"""
     logger.info("🚀 Starting voice recognition test...")
     
     if not client.api_key:
         logger.error("Please set your OpenAI API key:")
         logger.info("export OPENAI_API_KEY='your-api-key-here'")
         return
-    
-    # 列出可用的音频设备
+
     list_audio_devices()
-    
-    # 获取默认输入设备
+
     device_id = get_default_input_device()
     
     try:
@@ -213,6 +193,3 @@ def test_recognition():
         logger.error(f"❌ Error during recognition: {e}")
         logger.info("💡 Try running with sudo if you get permission errors")
         logger.info("💡 Make sure your microphone permissions are enabled in System Preferences")
-
-if __name__ == "__main__":
-    test_recognition()

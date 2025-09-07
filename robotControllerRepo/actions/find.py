@@ -16,13 +16,10 @@ from ttsRepo.stream_tts import tts_manager
 from robotControllerRepo.actions.navigate import navigate_to_object, navigate_to_target
 from robotControllerRepo.actions.pickup import pickup_item
 from robotControllerRepo.actions.dropoff import dropoff_item
-# from llmParserRepo.yolo_perception import detect_once as yolo_detect_once  # ← 已改为本文件内YOLO链路
 import config
 from geometry_msgs.msg import Twist
 
-# ========= 工具 =========
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
-
 
 def get_robot_id() -> str:
     return config.get("robot_id")
@@ -77,7 +74,6 @@ def bb_set(robot_name: str, key: str, value: Dict[str, Any]) -> None:
     db.setdefault("objects", {})[key] = value
     _bb_write(robot_name, db)
 
-# === 历史记录（从 memory.chattinglog.json 读取，NDJSON 每行一个 JSON） ===
 _HISTORY_PATH = "memory/chattinglog.jsonl"
 
 def get_last_user_message_from_jsonlog(json_path="memory/chattinglog.jsonl") -> str:
@@ -93,10 +89,6 @@ def get_last_user_message_from_jsonlog(json_path="memory/chattinglog.jsonl") -> 
     return ""
 
 def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
-    """
-    读取最后 max_turns 条 user/assistant 类型的对话，返回
-    [{"role":"user|assistant","content":"..."}]
-    """
     if not os.path.exists(path):
         return []
 
@@ -104,7 +96,6 @@ def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
     try:
         from collections import deque
         with open(path, "r", encoding="utf-8") as f:
-            # 只保留最后 100 行，避免大文件内存占用；然后再挑 user/assistant
             tail = deque(f, maxlen=100)
         for line in tail:
             line = line.strip()
@@ -118,43 +109,29 @@ def _recent_chat_messages_from_file(path: str, max_turns: int = 5):
             typ = obj.get("type")
             content = obj.get("content")
             if typ in ("user", "assistant"):
-                # assistant 可能是 JSON 字符串，把它当纯文本传给 LLM
                 if isinstance(content, dict):
                     content = json.dumps(content, ensure_ascii=False)
                 msgs.append({"role": "user" if typ == "user" else "assistant",
                              "content": str(content) if content is not None else ""})
-        # 只取末尾 max_turns 条
         return msgs[-max_turns:]
     except Exception as e:
         logger.warning(f"[find] read history failed: {e}")
         return []
 
 class _FileHistoryStore:
-    """只实现 recent_chat_messages，用于 execute_find_with_llm_replanning"""
     def __init__(self, path: str):
         self.path = path
     def recent_chat_messages(self, max_turns: int = 5):
         return _recent_chat_messages_from_file(self.path, max_turns=max_turns)
 
 
-# -------- 简单滤波器 --------
 class SimpleDetectionFilter:
-    """简单的单帧检测滤波器，不保存历史记录"""
-    
     def __init__(self, confidence_boost: float = 0.1, position_penalty_threshold: float = 100.0):
-        """
-        Args:
-            confidence_boost: 对高置信度检测的额外加分
-            position_penalty_threshold: 位置偏差惩罚阈值(像素)
-        """
         self.confidence_boost = confidence_boost
         self.position_penalty_threshold = position_penalty_threshold
-        logger.info(f"🔍 Simple filter initialized: boost={confidence_boost}, threshold={position_penalty_threshold}")
+        logger.info(f"Simple filter initialized: boost={confidence_boost}, threshold={position_penalty_threshold}")
     
     def filter_detections(self, detections: List[Dict], target_class: str, conf_thres: float) -> Optional[Dict]:
-        """
-        对单帧检测结果进行滤波
-        """
         valid_detections = [
             d for d in detections 
             if d.get("class") == target_class and d.get("conf", 0) >= conf_thres
@@ -162,7 +139,7 @@ class SimpleDetectionFilter:
         if not valid_detections:
             return None
         
-        logger.debug(f"🔍 Filter: Processing {len(valid_detections)} valid detections")
+        logger.debug(f"Filter: Processing {len(valid_detections)} valid detections")
         
         if len(valid_detections) == 1:
             result = valid_detections[0].copy()
@@ -172,29 +149,25 @@ class SimpleDetectionFilter:
         
         best_detection = self._score_detections(valid_detections)
         if best_detection:
-            logger.info(f"🎯 Filter selected: conf={best_detection.get('conf', 0):.3f}, "
+            logger.info(f"Filter selected: conf={best_detection.get('conf', 0):.3f}, "
                        f"filter_score={best_detection.get('filter_score', 0):.3f}")
         return best_detection
     
     def _score_detections(self, detections: List[Dict]) -> Optional[Dict]:
-        """对检测结果进行评分"""
-        image_center = [320, 240]  # 假设图像中心
+        image_center = [320, 240]
         
         for det in detections:
             conf = det.get("conf", 0)
             center_xy = det.get("center_xy", [0, 0])
             bbox_xyxy = det.get("bbox_xyxy", [0, 0, 0, 0])
-            
-            # 基础分数：置信度
+  
             score = conf
             
-            # 1) 高置信度加分
             if conf > 0.8:
                 score += self.confidence_boost * 2
             elif conf > 0.6:
                 score += self.confidence_boost
             
-            # 2) 中心加分
             center_distance = math.sqrt(
                 (center_xy[0] - image_center[0])**2 + 
                 (center_xy[1] - image_center[1])**2
@@ -202,7 +175,6 @@ class SimpleDetectionFilter:
             center_bonus = max(0, (1 - center_distance / 200.0) * 0.1)
             score += center_bonus
             
-            # 3) 面积合理性
             bbox_width = bbox_xyxy[2] - bbox_xyxy[0]
             bbox_height = bbox_xyxy[3] - bbox_xyxy[1]
             bbox_area = bbox_width * bbox_height
@@ -211,7 +183,6 @@ class SimpleDetectionFilter:
             elif bbox_area < 100 or bbox_area > 100000:
                 score -= 0.1
             
-            # 4) 长宽比合理性
             if bbox_height > 0:
                 aspect_ratio = bbox_width / bbox_height
                 if 0.3 < aspect_ratio < 3.0:
@@ -220,20 +191,18 @@ class SimpleDetectionFilter:
                     score -= 0.05
             
             det["filter_score"] = score
-            logger.debug(f"🔍 Detection score: conf={conf:.3f}, center_bonus={center_bonus:.3f}, "
+            logger.debug(f"Detection score: conf={conf:.3f}, center_bonus={center_bonus:.3f}, "
                         f"area={bbox_area:.0f}, final_score={score:.3f}")
         
         best_det = max(detections, key=lambda x: x.get("filter_score", 0))
         if best_det.get("filter_score", 0) < 0.4:
-            logger.debug(f"🔍 Best detection score {best_det.get('filter_score', 0):.3f} below threshold 0.4")
+            logger.debug(f"Best detection score {best_det.get('filter_score', 0):.3f} below threshold 0.4")
             return None
         
         best_det["filter_method"] = "scored_selection"
         return best_det
 
-# -------- 独立的YOLO检测器 --------
 class StandaloneYOLODetector:
-    """独立的YOLO检测器，不依赖外部模块"""
     def __init__(self, weights_path: str = "yolov8n.pt"):
         try:
             from ultralytics import YOLO
@@ -246,7 +215,6 @@ class StandaloneYOLODetector:
             self.available = False
     
     def detect_objects(self, image_path_or_array, conf_threshold: float = 0.5) -> List[Dict]:
-        """检测图像中的物体"""
         if not self.available:
             return []
         
@@ -282,7 +250,6 @@ class StandaloneYOLODetector:
             return []
 
 def _create_video_capture(video_source: int = 0):
-    """尝试打开摄像头（多后端），返回可用的 cap 或 None"""
     backends = [cv2.CAP_V4L2, cv2.CAP_GSTREAMER, cv2.CAP_FFMPEG, cv2.CAP_ANY]
     for be in backends:
         cap = cv2.VideoCapture(video_source, be)
@@ -298,31 +265,27 @@ def _create_video_capture(video_source: int = 0):
     return None
 
 def _capture_and_detect(detector: StandaloneYOLODetector, conf_thres: float) -> List[Dict]:
-    """拍照并检测，返回所有检测结果"""
-    # 优先使用rpicam-still拍照（针对树莓派）
     try:
         ts = time.strftime("%Y%m%d-%H%M%S")
         img_path = f"/tmp/find_frame_{ts}.jpg"
         
         subprocess.run([
-            "rpicam-still", "-t", "300",  # 快速拍照
+            "rpicam-still", "-t", "300",
             "--width", "640", "--height", "480",
             "-o", img_path
         ], capture_output=True, check=True, timeout=2)
         
         if os.path.exists(img_path):
             all_detections = detector.detect_objects(img_path, conf_thres)
-            os.remove(img_path)  # 清理临时文件
+            os.remove(img_path)
             return all_detections
         
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         logger.debug(f"[find] rpicam-still failed, trying OpenCV...")
-        
-        # 回退到OpenCV
+
         cap = _create_video_capture(0)
         if cap:
             try:
-                # 少读几帧加快速度
                 for _ in range(2):
                     cap.read()
                     
@@ -339,31 +302,27 @@ def _detect_with_simple_filter(detector: StandaloneYOLODetector,
                               filter_obj: SimpleDetectionFilter,
                               target_class: str, 
                               conf_thres: float) -> Optional[Dict]:
-    """使用简单滤波器的单帧检测"""
     if not detector.available:
         return None
     
-    logger.debug(f"[find] 📷 Single-frame detection with simple filter for {target_class}")
+    logger.debug(f"[find] Single-frame detection with simple filter for {target_class}")
     
-    # 获取单帧检测结果（稍微放宽阈值，让滤波器打分挑选）
     all_detections = _capture_and_detect(detector, conf_thres * 0.8)
     if not all_detections:
         logger.debug(f"[find] 📷 No raw detections in current frame")
         return None
     
-    # 通过简单滤波器处理
     filtered_result = filter_obj.filter_detections(all_detections, target_class, conf_thres)
     if filtered_result:
-        logger.info(f"[find] ✅ Filtered detection: conf={filtered_result.get('conf', 0):.3f}, "
+        logger.info(f"[find] Filtered detection: conf={filtered_result.get('conf', 0):.3f}, "
                    f"filter_score={filtered_result.get('filter_score', 0):.3f}")
         filtered_result["detection_method"] = "single_frame_filtered"
         filtered_result["filter_used"] = True
         return filtered_result
     
-    logger.debug(f"[find] 🔍 Filter rejected all detections")
+    logger.debug(f"[find] Filter rejected all detections")
     return None
 
-# ========= 参数优化 =========
 def get_optimized_params(item: str) -> float:
     if item in ["cup", "bottle", "phone", "remote", "keys"]:
         return 0.4
@@ -373,16 +332,11 @@ def get_optimized_params(item: str) -> float:
         return 0.5
     return 0.5
 
-# ========= 轻量旋转 =========
 def rotate_by_deg(node: Node,
                   robot_name: str,
                   delta_deg: float,
                   angular_speed_deg_s: float = None) -> bool:
-    """
-    以固定角速度转动指定角度（时间法）
-    - 正角度：左转（+z）
-    - 负角度：右转（-z）
-    """
+
     if Twist is None:
         logger.error("[find] Twist unavailable, cannot rotate")
         return False
@@ -391,11 +345,9 @@ def rotate_by_deg(node: Node,
         logger.info("[find] Rotation angle too small, skip")
         return True
 
-    # 从 config 中读取默认角速度
     if angular_speed_deg_s is None:
         angular_speed_deg_s = float(config.get("find_rotate_speed_deg_s", 25.0))
 
-    # 计算旋转时间（秒）和角速度（rad/s）
     duration = abs(delta_deg) / max(angular_speed_deg_s, 1e-6)
     wz = math.radians(angular_speed_deg_s) * (1.0 if delta_deg >= 0 else -1.0)
 
@@ -404,7 +356,6 @@ def rotate_by_deg(node: Node,
 
     logger.info(f"[find] 🔄 rotate_by_deg: {delta_deg:.1f}°, ω={angular_speed_deg_s:.1f}°/s, t={duration:.2f}s")
 
-    # 发布转动指令
     safe_publish_twist(node, robot_name, twist)
 
     try:
@@ -414,7 +365,7 @@ def rotate_by_deg(node: Node,
             time.sleep(0.02)  # 50Hz
     finally:
         try:
-            safe_publish_twist(node, robot_name, Twist())  # 停止转动
+            safe_publish_twist(node, robot_name, Twist())
         except InvalidHandle:
             logger.warning("[find] Node destroyed before sending stop command, abort")
             return False
@@ -432,17 +383,12 @@ def _rotate_scan_stepwise(node: Any,
                           step_deg: int = 30,
                           pause: float = 0.5,
                           conf_thres: float = 0.5) -> bool:
-    """
-    分步旋转 + 每步检测（轻量）
-    返回 bool：找到返回 True，没找到返回 False
-    """
-    logger.info(f"[find] 🔄 stepwise scan: max={max_rot_deg}°, step={step_deg}°, pause={pause}s")
 
-    # 先看当前视角
+    logger.info(f"[find] stepwise scan: max={max_rot_deg}°, step={step_deg}°, pause={pause}s")
+
     hit = detect_fn(item, conf_thres)
     if hit:
-        logger.info(f"[find] 🎯 Found {item} in current view")
-        # 保存到黑板
+        logger.info(f"[find] Found {item} in current view")
         _on_found_internal(robot_name, item, hit)
         return True
 
@@ -455,15 +401,13 @@ def _rotate_scan_stepwise(node: Any,
         hit = detect_fn(item, conf_thres)
         if hit:
             logger.info(f"[find] 🎯 Found {item} after ~{turned+step_deg}° rotation")
-            # 保存到黑板
             _on_found_internal(robot_name, item, hit)
             return True
         turned += step_deg
 
-    logger.info("[find] 🛑 scan finished, no hit")
+    logger.info("[find] scan finished, no hit")
     return False
 
-# ========= 单帧检测 =========
 _DETECTOR_SINGLETON: Optional[StandaloneYOLODetector] = None
 _FILTER_SINGLETON: Optional[SimpleDetectionFilter] = None
 
@@ -480,16 +424,11 @@ def _get_filter() -> SimpleDetectionFilter:
     return _FILTER_SINGLETON
 
 def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
-    """
-    使用 StandaloneYOLODetector 拍一帧并通过 SimpleDetectionFilter 选出最佳目标。
-    （取代 yolo_perception.detect_once 方案）
-    """
     detector = _get_detector()
     if not detector.available:
-        logger.error("❌ YOLO detector unavailable")
+        logger.error("YOLO detector unavailable")
         return None
 
-    # 直接走"单帧 + 简单滤波"的检测路径
     hit = _detect_with_simple_filter(
         detector=detector,
         filter_obj=_get_filter(),
@@ -497,7 +436,6 @@ def _single_frame_detect(item: str, conf_thres: float) -> Optional[Dict]:
         conf_thres=conf_thres
     )
 
-    # 调试日志：若没命中，打印这一帧 top5（原始类名，便于排查）
     if hit is None:
         dets = _capture_and_detect(detector, conf_thres * 0.8) or []
         if dets:
@@ -528,16 +466,9 @@ def _on_found_internal(robot_name: str, item: str, hit: Dict[str, Any]) -> None:
     }
     bb_set(robot_name, item, record)
     tts_manager.say_sync(f"I found the {item}.")
-    logger.info(f"[find] ✅ found {item} (key={item}, conf={record['conf']:.3f})")
+    logger.info(f"[find] found {item} (key={item}, conf={record['conf']:.3f})")
 
-# ========= find（返回bool） =========
 def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
-    """
-    执行查找操作，统一返回 bool
-    True: 找到物体
-    False: 未找到物体
-    """
-    # 为桥接节点提供 executor（若后续需要懒加载）
     global _EXECUTOR_HINT
     _EXECUTOR_HINT = executor
 
@@ -548,23 +479,19 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
     conf_thres = get_optimized_params(item)
     logger.info(f"[find] robot={robot_name} target={item} conf>={conf_thres}")
 
-    # ---- 配置开关（可在 config 里覆盖）----
     use_rotate_scan: bool = bool(config.get("find_use_rotate_scan", True))
     rotate_step_deg: int  = int(config.get("find_rotate_step_deg", 30))
     rotate_max_deg: int   = int(config.get("find_rotate_max_deg", 360))
     rotate_pause_s: float = float(config.get("find_rotate_pause_s", 0.5))
-    # 多点搜索目标（命名地点或语义地点）
-    waypoints: List[str] = list(config.get("find_waypoints", []))  # 例如 ["table", "desk", "sofa"]
+    waypoints: List[str] = list(config.get("find_waypoints", []))
 
-    # ========== 1) 当前视角 ==========
     hit = _single_frame_detect(item, conf_thres)
     if hit:
         _on_found_internal(robot_name, item, hit)
         return True
 
-    # ========== 2) 旋转扫描 ==========
     if use_rotate_scan and Twist is not None:
-        logger.info("[find] 🔄 No hit → start rotate scan")
+        logger.info("[find] No hit → start rotate scan")
         found = _rotate_scan_stepwise(
             node=node,
             robot_name=robot_name,
@@ -579,13 +506,12 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
             return True
     else:
         if Twist is None:
-            logger.warning("[find] ⚠️ Twist unavailable → skip rotate scan")
+            logger.warning("[find] Twist unavailable → skip rotate scan")
         else:
-            logger.info("[find] ℹ️ Rotate scan disabled by config")
+            logger.info("[find] Rotate scan disabled by config")
 
-    # ========== 3) 多点搜索 ==========
     if waypoints:
-        logger.info(f"[find] 🗺️ Start waypoint search: {waypoints}")
+        logger.info(f"[find] Start waypoint search: {waypoints}")
         for idx, target in enumerate(waypoints, 1):
             try:
                 tts_manager.say_sync(f"Moving to {target}")
@@ -594,14 +520,12 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
                 logger.warning(f"[find] navigate_to_target({target}) error: {e}")
                 continue
 
-            time.sleep(1.0)  # 稳定一下
-            # 3.1 该点单帧检测
+            time.sleep(1.0)
             hit = _single_frame_detect(item, conf_thres)
             if hit:
                 _on_found_internal(robot_name, item, hit)
                 return True
 
-            # 3.2 该点半圈扫描（提高召回）
             if use_rotate_scan and Twist is not None:
                 logger.info(f"[find] 🔄 Half-scan at waypoint {target}")
                 found = _rotate_scan_stepwise(
@@ -617,12 +541,10 @@ def execute_find(node: Any, executor, robot_name: str, item: str) -> bool:
                 if found:
                     return True
 
-    # ========== 未找到 ==========
     tts_manager.say_sync("I couldn't find it.")
     logger.info(f"[find] not found: {item}")
     return False
 
-# ========= LLM 重规划（已改支持 original_user_command ）=========
 def create_llm_replanning_function() -> Callable[[Dict, List[Dict], str, str], Dict]:
     def llm_replanning_function(
         discovery_context: Dict,
@@ -751,23 +673,14 @@ def execute_find_with_llm_replanning(
     llm_replanning_fn: Optional[Callable[[Dict[str, Any], List[Dict[str, str]], str, str], Dict[str, Any]]] = None,
     history_store: Any = None
 ) -> bool:
-    """
-    执行查找操作并可选地进行LLM重规划，统一返回 bool
-    True: 找到物体并完成了所有后续任务
-    False: 未找到物体或执行后续任务失败
-    """
-    # 首先执行基础查找
     found = execute_find(node, executor, robot_name, item)
     if not found:
         logger.info(f"[find] {robot_name} didn't find {item}, no follow-up actions.")
         return False
 
-    # 如果没有LLM规划函数，直接返回找到的结果
     if llm_replanning_fn is None:
         llm_replanning_fn = create_llm_replanning_function()
 
-    # 构建发现上下文
-    # 从黑板读取刚才保存的物体信息
     db = _bb_read(robot_name)
     record = db.get("objects", {}).get(item, {})
     
@@ -810,8 +723,7 @@ def execute_find_with_llm_replanning(
         if plan.get("success") and plan.get("action_needed") and plan.get("tasks"):
             follow_up_tasks = plan["tasks"]
             logger.info(f"[find] LLM generated {len(follow_up_tasks)} follow-up tasks")
-            
-            # 执行后续任务
+
             logger.info(f"[find] Executing {len(follow_up_tasks)} follow-up tasks for {robot_name}")
             tts_manager.say_sync("Now executing follow-up tasks")
 
@@ -819,13 +731,12 @@ def execute_find_with_llm_replanning(
             for i, task in enumerate(follow_up_tasks, 1):
                 action = task.get("action")
                 params = task.get("parameters", {}) or {}
-                logger.info(f"[find] 📋 Follow-up {i}/{len(follow_up_tasks)} → action={action} params={params}")
+                logger.info(f"[find] Follow-up {i}/{len(follow_up_tasks)} → action={action} params={params}")
 
                 try:
                     if action == "navigate_to_object":
                         target = params.get("item")
                         if target:
-                            # 这里需要导入navigate_to_object函数，如果没有就用navigate_to_target
                             navigate_to_object(node, robot_name, item, executor)
                         else:
                             logger.warning("[find] navigate missing target")
@@ -881,22 +792,13 @@ def execute_find_with_llm_replanning(
             
         else:
             logger.warning(f"[find] LLM replanning not used or failed: {plan.get('error','no tasks')}")
-            # 没有后续任务但找到了物体，仍然算成功
             return True
             
     except Exception as e:
         logger.error(f"[find] LLM replanning error: {e}")
-        # LLM规划失败但找到了物体，仍然算成功
         return True
 
-# ========= 对外入口（统一返回bool） =========
 def run_find(node: Any, robot_name: str, item: str, executor) -> bool:
-    """
-    对外统一入口，返回 bool
-    True: 找到物体（可能还执行了后续任务）
-    False: 未找到物体或执行失败
-    """
-    # 自动注入历史：只读 memory.chattinglog.json；不存在就不用历史（不兜底）
     history_store = _FileHistoryStore(_HISTORY_PATH) if os.path.exists(_HISTORY_PATH) else None
 
     result = execute_find_with_llm_replanning(

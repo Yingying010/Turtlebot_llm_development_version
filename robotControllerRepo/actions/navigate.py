@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os, sys, math, time, threading
 from typing import Dict, Optional, Tuple, List
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -21,25 +19,18 @@ from robotControllerRepo.actions.rotate import rotate_deg
 from robotControllerRepo.actions.move import move
 
 
-# Configuration
 semantic_locations = config.get("semantic_locations")
 
-# Global state management
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
 
-# Navigation coordination state
 navigation_intentions: Dict[str, Dict] = {}
 intentions_lock = threading.Lock()
 navigation_coordinator_pub: Optional[Publisher] = None
 navigation_responses: Dict[str, List[Dict]] = {}
 responses_lock = threading.Lock()
 current_robot_name: str = ""
-
-# ============================================================================
-# CORE POSITION AND CONTROL FUNCTIONS
-# ============================================================================
 
 def get_current_robot_name() -> str:
     """Get current robot name for coordination"""
@@ -84,7 +75,6 @@ def get_current_position(robot_name: str) -> Tuple[float, float, float]:
     return 0.0, 0.0, 0.0
 
 def get_position_with_polling(robot_name: str, timeout_sec=120.0, poll_interval=0.1):
-    """尝试在 timeout_sec 秒内反复获取非 None 的位置"""
     start_time = time.time()
     while time.time() - start_time < timeout_sec:
         x, y, heading = get_current_position(robot_name)
@@ -113,10 +103,6 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         pub = node.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
         publisher_dict[key] = pub
         pub.publish(twist)
-
-# ============================================================================
-# BASIC MOVEMENT PRIMITIVES
-# ============================================================================
 
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
@@ -162,7 +148,7 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
                                semantic_threshold: float = 0.0):
     """Move forward to target with smooth continuous movement"""
     x_target, y_target = target["x"], target["y"]
-    print(f"\n🚗 NEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
+    print(f"\nNEED TO MOVE → ({x_target:.1f}, {y_target:.1f})")
 
     while True:
         x_now, y_now, heading_y_now = get_current_position(robot_name)
@@ -170,62 +156,47 @@ def move_forward_until_reached(node: Node, robot_name: str, target: Dict[str, fl
         dz = y_target - y_now
         distance = math.hypot(dx, dz)
 
-        # 检查是否到达目标
         if distance < tolerance:
-            print("🎉 Reached target.")
+            print("Reached target.")
             break
         
         if distance < semantic_threshold:
-            print("🎉 Reached target.")
+            print("Reached target.")
             break
 
         target_angle = math.degrees(math.atan2(dx, dz)) % 360
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
-        # 角度误差太大时才停下来旋转
         if abs(angle_error) > max_acceptable_angle_error:
-            print(f"🔄 Too much angle error: {angle_error:.1f}°, rotating first...")
+            print(f"Too much angle error: {angle_error:.1f}°, rotating first...")
             safe_publish_twist(node, robot_name, Twist())  # 停止
             rotate_to_face_target(node, robot_name, target)
             continue
 
-        # 🔥 关键改进：连续平滑运动
         twist = Twist()
-        
-        # 距离自适应速度：接近目标时减速（更慢更稳定）
+
         if distance > 200:
-            twist.linear.x = 0.05  # 远距离：最快速度 5cm/s
+            twist.linear.x = 0.05
         elif distance > 100:
-            twist.linear.x = 0.04  # 中距离：4cm/s
+            twist.linear.x = 0.04
         elif distance > 50:
-            twist.linear.x = 0.03  # 近距离：3cm/s
+            twist.linear.x = 0.03
         else:
-            twist.linear.x = 0.02  # 极近距离：最慢 2cm/s
-        
-        # 🔥 边走边微调方向（小角度误差时）
+            twist.linear.x = 0.02
+
         if abs(angle_error) > 5:
             angular_correction = math.radians(angle_error) * 0.4
             twist.angular.z = max(-0.3, min(0.3, angular_correction))
         
         safe_publish_twist(node, robot_name, twist)
-        print(f"🚗 Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
+        print(f"Moving | dist={distance:.2f} | heading={heading_y_now:.1f}°, "
               f"target={target_angle:.1f}°, error={angle_error:.1f}°, "
               f"speed={twist.linear.x:.2f}")
 
-        # 🔥 关键改进：减少睡眠时间，移除中间停止
-        time.sleep(0.15)  # 从原来的 0.3 秒减少到 0.15 秒
-        
-        # 🔥 移除这两行来避免频繁启停：
-        # safe_publish_twist(node, robot_name, Twist())
-        # time.sleep(0.1)
- 
-    # 最终停止
+        time.sleep(0.15)
+
     safe_publish_twist(node, robot_name, Twist())
     time.sleep(0.05)
-
-# ============================================================================
-# PRECISION MOVEMENT FUNCTIONS
-# ============================================================================
 
 def calculate_target_angle(current_pos: Tuple[float, float, float], 
                           target_pos: Dict[str, float]) -> float:
@@ -264,7 +235,6 @@ def precision_rotate(node: Node, robot_name: str, target_angle_deg: float,
     time.sleep(duration_sec)
     safe_publish_twist(node, robot_name, Twist())
 
-    # Verify result
     _, _, final_heading = get_position_with_polling(robot_name)
     final_diff = (target_angle_deg - final_heading + 180) % 360 - 180
     print(f"[PRECISION_ROTATE] Final heading: {final_heading:.1f}deg, "
@@ -294,12 +264,10 @@ def precision_approach(node: Node, robot_name: str, target: Dict[str, float],
 
 def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_deg: float):
     """Multi-stage heading alignment with increasing precision"""
-    # 🔥 修复：检查 target_heading_deg 是否为 None
     if target_heading_deg is None:
         print("[HEADING_ALIGN] Target heading is None, skipping alignment")
         return
-    
-    # 🔥 修复：确保是数值类型
+
     try:
         target_heading_deg = float(target_heading_deg)
     except (TypeError, ValueError):
@@ -334,7 +302,6 @@ def multi_stage_heading_alignment(node: Node, robot_name: str, target_heading_de
 # ============================================================================
 # MAIN NAVIGATION FUNCTION
 # ============================================================================
-
 def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     """Execute complete navigation to target position with multi-stage precision"""
     x_target, y_target = target["x"], target["y"]
@@ -357,7 +324,6 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
     precision_approach(node, robot_name, target, speed_m_per_s=0.03)
 
     # Stage 3: Final heading alignment
-        # 🔥 修复：检查 heading_deg 键是否存在且不为 None
     target_heading = target.get("heading_deg")
     if target_heading is not None:
         print("[NAVIGATE] Stage 3: Final heading alignment")
@@ -370,7 +336,6 @@ def navigate_to_position(node: Node, robot_name: str, target: Dict[str, float]):
 # ============================================================================
 # NAVIGATION COORDINATION (DISTRIBUTED CONFLICT RESOLUTION)
 # ============================================================================
-
 def setup_navigation_coordinator(node: Node):
     """Initialize navigation coordination communication"""
     global navigation_coordinator_pub

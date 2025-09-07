@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# face.py —— 复用 follow 逻辑，实时坐标优先
 import os, sys, math, threading, time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import rclpy
@@ -16,34 +13,29 @@ from rclpy.publisher import Publisher
 from rclpy._rclpy_pybind11 import InvalidHandle
 
 semantic_locations = config.get("semantic_locations")
- 
-# === 全局缓存 + 锁 ===
+
 robot_position_cache: Dict[str, Dict[str, float]] = {}
 cache_lock = threading.Lock()
 publisher_dict: Dict[Tuple[int, str], Publisher] = {}
  
- 
-# === 将 RigidTracker 加入共享 executor，并等待数据就绪 ===
-
 def getRobotPositionCache(name: str, executor: MultiThreadedExecutor) -> Optional[Node]:
     rigid_node = RigidTracker(
         position_cache=robot_position_cache,
         name=name,
-        position_lock=cache_lock,  # 传入同一把锁，避免读写冲突
+        position_lock=cache_lock,
     )
     executor.add_node(rigid_node)
-    print(f"⏳ Waiting for position data of {name}...")
+    print(f"Waiting for position data of {name}...")
     tts_manager.say_sync(f"Initializing tracker for {name}, waiting for position data.")
     for _ in range(50):  # ~10s
         with cache_lock:
             ok = name in robot_position_cache
         if ok:
-            print(f"✅ Got position data for {name}.")
+            print(f"Got position data for {name}.")
             tts_manager.say_sync(f"Position data acquired for {name}.")
             return rigid_node
         time.sleep(0.2)
-    print(f"❌ Timeout: No position data for {name}")
-    # tts_manager.say(f"Can't get position data for {robot_name}. Please check the tracking system.")
+    print(f"Timeout: No position data for {name}")
     return None
 
 def get_current_position(robot_name: str) -> tuple:
@@ -54,7 +46,7 @@ def get_current_position(robot_name: str) -> tuple:
             y = rigid["z"]
             heading_y = rigid["heading_y"]
             return x, y, heading_y
-    print(f"⚠️ No position data for {robot_name}")
+    print(f"No position data for {robot_name}")
     tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
     return 0.0, 0.0, 0.0
  
@@ -78,10 +70,6 @@ def safe_publish_twist(node: Node, robot_name: str, twist: Twist):
         publisher_dict[key] = pub
         pub.publish(twist)
 
-
- 
-# ───── 旋转函数（与你原来一致，删 sleep-0-帧即可） ─────
-
 def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
                           angle_tolerance_deg: float = 5.0):
     x_target, y_target = target["x"], target["y"]
@@ -90,14 +78,14 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
     dz = y_target - y_now
     target_angle = math.degrees(math.atan2(dx, dz)) % 360
  
-    print(f"\n🔄 ROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
+    print(f"\nROTATE | target: ({x_target:.1f}, {y_target:.1f}) → {target_angle:.1f}°")
  
     while True:
         _, _, heading_y_now = get_current_position(robot_id)
         angle_error = (target_angle - heading_y_now + 180) % 360 - 180
 
         if abs(angle_error) < angle_tolerance_deg:
-            print("✅ ROTATE done.")
+            print("ROTATE done.")
             break
  
         new_direction = 1 if angle_error > 0 else -1
@@ -111,7 +99,7 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
             twist.angular.z = 0.15 * new_direction
  
         safe_publish_twist(node, robot_id, twist)
-        print(f"↪️ turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
+        print(f"↪turning {'left' if new_direction==1 else 'right'} | heading_y: {heading_y_now:.1f} | "
               f"target_angle: {target_angle:.1f} | error: {angle_error:.1f}° | speed: {twist.angular.z:.2f}")
 
         time.sleep(0.1)
@@ -120,31 +108,27 @@ def rotate_to_face_target(node: Node, robot_id: str, target: Dict[str, float],
     time.sleep(0.2)
  
 
-# ───── 主流程 ─────
 def face_run(node: Node, robot_name: str, target: str, executor: MultiThreadedExecutor):
     is_successful = False
 
-    # 1) 确保位置跟踪节点已接入 executor 并数据就绪
     tracker_robot = getRobotPositionCache(robot_name, executor)
     if tracker_robot is None:
-        print("❌ Abort navigation due to missing pose.")
+        print("Abort navigation due to missing pose.")
         tts_manager.say_sync(f"Can't get position data for {robot_name}. Please check the tracking system.")
         return is_successful
  
-    # 2) 解析语义位置或直接使用坐标
     if isinstance(target, str):
-        # firstly, try to find real position
         tracker_target = getRobotPositionCache(target, executor)
         if tracker_target:
             x, y, heading = get_current_position(target)
             resolved_target = {"x": x, "y": y, "heading": heading}
-            print(f"🔍 Resolved semantic target in tracking system '{target}' → {resolved_target}")
+            print(f"Resolved semantic target in tracking system '{target}' → {resolved_target}")
         else:
             if target in semantic_locations:
                 resolved_target = semantic_locations[target]
-                print(f"🔍 Resolved semantic target '{target}' → {resolved_target}")
+                print(f"Resolved semantic target '{target}' → {resolved_target}")
             else:
-                print(f"❌ Error: target '{target}' not found in semantic_locations")
+                print(f"Error: target '{target}' not found in semantic_locations")
                 tts_manager.say_sync(f"Can't get position data for {target}. Please check the tracking system or config file")
 
     else:
@@ -153,10 +137,10 @@ def face_run(node: Node, robot_name: str, target: str, executor: MultiThreadedEx
 
     if isinstance(resolved_target, dict) and "x" in resolved_target and "y" in resolved_target:
         if "heading_deg" in resolved_target:
-            print(f"📐 Target includes heading: {resolved_target['heading_deg']}°")
+            print(f"Target includes heading: {resolved_target['heading_deg']}°")
         rotate_to_face_target(node, robot_name, resolved_target)
     else:
-        print(f"⚠️ Invalid resolved target: {resolved_target}")
+        print(f"Invalid resolved target: {resolved_target}")
         return is_successful
 
     is_successful = True

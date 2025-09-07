@@ -34,12 +34,10 @@ def run_conversation():
         tts_manager.say_sync("Something went wrong")
         conversation_active.clear()
         return
-    
-    # -------- 对话结束 ----------------------------------------------------
+
     logger.info("Conversation finished.")
     conversation_active.clear()
 
-# ✅ 启动欢迎语
 def startchat():
     os.system("afplay beep.wav")
     logger.info("📢 Starting chat system")
@@ -48,8 +46,6 @@ def startchat():
 def _clean(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text).lower().strip()
 
-
-# 启动入口
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python3 main.py <robot_id> <master_id>")
@@ -82,7 +78,7 @@ if __name__ == "__main__":
 
         if "open robot system" in wakeup_word:
             config.set(chat_or_instruct=False)
-            logger.info("🎮 Switched to CONTROL mode.")
+            logger.info("CONTROL mode.")
             tts_manager.say_sync("Hi, I am your intelligent assistant. If you do not wish to continue, please say goodbye my assistant")
         elif wakeup_word in {"goodbye, my assistant", "goodbye", "bye"}:
             tts_manager.say_sync("Goodbye!")
@@ -91,6 +87,5 @@ if __name__ == "__main__":
         else:
             continue
 
-        # ✅ 把同一个 history 传进去（与你之前的函数签名一致）
         run_conversation_loop()
 
